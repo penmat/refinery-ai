@@ -2,7 +2,7 @@
 
 Refinery AI is an early-stage, safe-by-default modernization factory for Java applications. It discovers a repository, builds a local knowledge graph, creates a typed migration plan, routes deterministic work toward OpenRewrite, and verifies every approved step.
 
-Version **0.1.0** is a runnable architectural foundation. Discovery, Graphify AST indexing, deterministic planning, safety gates, OpenRewrite dry runs, build verification, repair budgets, typed Pydantic AI agent boundaries, and run reports are implemented. Source-changing OpenRewrite and AI execution remain explicitly review-gated.
+Version **0.1.0** is a runnable architectural foundation. Discovery, Graphify AST indexing, deterministic planning, safety gates, OpenRewrite dry runs, build verification, repair budgets, typed Pydantic AI agent boundaries, and run reports are implemented. Repository investigation now uses a read-only Pydantic AI Harness FileSystem/RepoContext pilot and safe assessment Shell profile behind the `RepositoryEnvironment` seam. Source-changing OpenRewrite and AI execution remain explicitly review-gated.
 
 ## Architecture
 
@@ -45,6 +45,10 @@ The factory—not an unconstrained model—owns control flow, repository mutatio
 - Runs allowlisted OpenRewrite recipes in dry-run mode.
 - Selects Maven or Gradle verification commands without invoking a shell.
 - Refuses apply-mode operation on a dirty worktree by default.
+- Provides a read-only Harness FileSystem/RepoContext assessment factory.
+- Runs explicitly approved argument vectors through a time/output-bounded Harness Shell pilot.
+- Spills oversized tool output to durable external artifacts before context compaction.
+- Delegates build/runtime investigation to one bounded read-only Harness specialist.
 - Stops repeated failures and enforces repair-attempt budgets.
 - Persists JSON and Markdown run records in `.refinery/runs/`.
 - Stops at a review gate before applying OpenRewrite or AI-generated source changes.
@@ -147,14 +151,18 @@ src/refinery_ai/
 ├── agents.py        # typed Pydantic AI agents
 ├── cli.py           # CLI boundary
 ├── config.py        # environment configuration
+├── context.py       # typed durable context receipts and artifacts
 ├── discovery.py     # deterministic Maven/Gradle inspection
 ├── factory.py       # workflow and safety gates
+├── harness.py       # read-only Harness pilot and safe Shell policy
 ├── knowledge.py     # Graphify build/query adapter
 ├── models.py        # shared Pydantic contracts
 ├── openrewrite.py   # allowlisted dry-run adapter
 ├── planning.py      # deterministic planner and validation
 ├── repair.py        # repair-loop budgets
 ├── reporting.py     # JSON/Markdown audit output
+├── repository.py    # Refinery-owned repository environment seam
+├── specialists.py   # typed specialist output and deterministic merge
 └── verification.py  # bounded build execution
 ```
 
@@ -181,6 +189,8 @@ Subprocesses receive argument lists directly and are never invoked through a she
 - OpenRewrite dry runs require the plugin/recipe dependencies to be resolvable by the target build.
 - OpenRewrite source application is review-gated.
 - AI agents are available as typed boundaries but are not invoked by the default CLI workflow.
+- Harness is used for the default repository investigator, context controls, and one build/runtime specialist; Graphify, the architect/planner, persistence, OpenRewrite, and other specialists remain on their existing implementations. A user-selectable environment flag and operational parity reporting belong to later phases.
+- Harness Shell command checks are policy guardrails, not OS-level network isolation. Assessment configuration denies network authority, and no network-capable command is exposed, but hard egress isolation requires a future sandbox/container execution environment.
 - Proposed AI patches are not automatically applied.
 - No web service, UI, pull-request automation, or remote-repository cloning.
 

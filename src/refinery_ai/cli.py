@@ -9,6 +9,7 @@ from typing import Annotated
 import typer
 
 from refinery_ai.factory import ModernizationFactory
+from refinery_ai.harness import HarnessRepositoryEnvironment
 from refinery_ai.models import ModernizationGoal, RunReport
 from refinery_ai.repository import LegacyRepositoryEnvironment
 
@@ -34,7 +35,7 @@ def discover_command(
 ) -> None:
     """Discover a Java repository without changing it."""
 
-    environment = LegacyRepositoryEnvironment()
+    environment = HarnessRepositoryEnvironment(repository)
     typer.echo(json.dumps(environment.discover(repository).model_dump(mode="json"), indent=2))
 
 

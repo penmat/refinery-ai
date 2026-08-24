@@ -27,10 +27,12 @@ def _xml_text(element: ET.Element, prefix: str, name: str) -> str | None:
     return node.text.strip() if node is not None and node.text else None
 
 
-def _maven_details(path: Path) -> tuple[list[Dependency], str | None]:
+def maven_details(content: str) -> tuple[list[Dependency], str | None]:
+    """Parse the Maven fields used by discovery from repository evidence text."""
+
     try:
-        root = ET.parse(path).getroot()
-    except (ET.ParseError, OSError):
+        root = ET.fromstring(content)
+    except ET.ParseError:
         return [], None
     namespace = root.tag[1:].split("}", 1)[0] if root.tag.startswith("{") else ""
     prefix = f"{{{namespace}}}" if namespace else ""
@@ -58,6 +60,13 @@ def _maven_details(path: Path) -> tuple[list[Dependency], str | None]:
                 )
             )
     return dependencies, java_version
+
+
+def _maven_details(path: Path) -> tuple[list[Dependency], str | None]:
+    try:
+        return maven_details(path.read_text())
+    except OSError:
+        return [], None
 
 
 def discover(repository: Path) -> DiscoverySnapshot:

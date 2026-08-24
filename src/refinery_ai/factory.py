@@ -7,6 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from refinery_ai.config import Settings
+from refinery_ai.harness import AssessmentHarnessPolicy, HarnessRepositoryEnvironment
 from refinery_ai.knowledge import KnowledgeGraphProvider
 from refinery_ai.models import (
     ModernizationGoal,
@@ -19,7 +20,7 @@ from refinery_ai.models import (
 from refinery_ai.openrewrite import OpenRewriteAdapter
 from refinery_ai.planning import rule_based_plan, validate_plan
 from refinery_ai.reporting import to_markdown
-from refinery_ai.repository import LegacyRepositoryEnvironment, RepositoryEnvironment
+from refinery_ai.repository import RepositoryEnvironment
 
 
 class ModernizationFactory:
@@ -33,18 +34,31 @@ class ModernizationFactory:
         environment: RepositoryEnvironment | None = None,
     ) -> None:
         self.settings = settings or Settings()
-        self.environment = environment or LegacyRepositoryEnvironment(
-            knowledge=knowledge,
-            rewrite=rewrite,
+        self.environment = environment
+        self.knowledge = knowledge
+        self.rewrite = rewrite
+
+    def _environment(self, repository: Path) -> RepositoryEnvironment:
+        if self.environment is not None:
+            return self.environment
+        return HarnessRepositoryEnvironment(
+            repository,
+            policy=AssessmentHarnessPolicy(
+                command_timeout_seconds=self.settings.command_timeout_seconds,
+                tool_output_limit_characters=self.settings.max_output_characters,
+            ),
+            knowledge=self.knowledge,
+            rewrite=self.rewrite,
             graphify_timeout=self.settings.graphify_timeout_seconds,
             output_limit=self.settings.max_output_characters,
         )
 
     def prepare(self, repository: Path, goal: ModernizationGoal) -> RunReport:
-        snapshot = self.environment.discover(repository)
+        environment = self._environment(repository)
+        snapshot = environment.discover(repository)
         state_dir = snapshot.repository / self.settings.state_directory
         state_dir.mkdir(parents=True, exist_ok=True)
-        graph = self.environment.build_knowledge(snapshot.repository)
+        graph = environment.build_knowledge(snapshot.repository)
         plan = rule_based_plan(snapshot, goal)
         validate_plan(plan)
         report = RunReport(
@@ -60,7 +74,10 @@ class ModernizationFactory:
     def run(self, repository: Path, goal: ModernizationGoal, *, apply: bool = False) -> RunReport:
         """Run approved non-source-changing steps and stop at explicit review gates."""
 
-        report = self.prepare(repository, goal)
+        environment = self._environment(repository)
+        report = ModernizationFactory(settings=self.settings, environment=environment).prepare(
+            repository, goal
+        )
         if report.snapshot.dirty and not self.settings.allow_dirty_worktree:
             report.status = RunStatus.NEEDS_REVIEW
             report.steps.append(
@@ -76,13 +93,13 @@ class ModernizationFactory:
             return report
 
         report.status = RunStatus.RUNNING
-        build_command = self.environment.verification_command(report.snapshot)
+        build_command = environment.verification_command(report.snapshot)
         for step in report.plan.steps:
             if step.strategy is StepStrategy.COMMAND:
                 if build_command is None:
                     self._fail(report, step.id, "Unknown build system")
                     break
-                evidence = self.environment.verify(
+                evidence = environment.verify(
                     report.snapshot.repository,
                     build_command,
                     timeout=self.settings.command_timeout_seconds,
@@ -103,7 +120,7 @@ class ModernizationFactory:
                 if not step.recipe:
                     self._review(report, step.id, "No approved recipe matches this target")
                     break
-                evidence = self.environment.dry_run_rewrite(
+                evidence = environment.dry_run_rewrite(
                     report.snapshot,
                     step.recipe,
                     timeout=self.settings.command_timeout_seconds,

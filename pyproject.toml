@@ -12,7 +12,8 @@ license = { text = "Apache-2.0" }
 dependencies = [
   "graphifyy>=0.9.48,<1",
   "pydantic>=2.10,<3",
-  "pydantic-ai-slim[openai]>=1.0,<2",
+  "pydantic-ai-harness==0.21.0",
+  "pydantic-ai-slim[openai]==2.33.0",
   "pydantic-settings>=2.7,<3",
   "typer>=0.15,<1",
 ]
