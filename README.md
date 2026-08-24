@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.png" alt="Refinery AI logo" width="240">
+</p>
+
 # Refinery AI
 
 Refinery AI is an early-stage, safe-by-default modernization factory for Java applications. It discovers a repository, builds a local knowledge graph, creates a typed migration plan, routes deterministic work toward OpenRewrite, and verifies every approved step.
