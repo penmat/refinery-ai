@@ -1,5 +1,0 @@
-uv run refinery run --apply \
-  "Upgrade this application to Java 17" \
-  --repository /Users/matt/repos/spring-petclinic-rest \
-  --target-java 17 
-

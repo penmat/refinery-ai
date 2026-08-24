@@ -7,8 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from refinery_ai.config import Settings
-from refinery_ai.discovery import discover
-from refinery_ai.knowledge import GraphifyKnowledgeGraph, KnowledgeGraphProvider
+from refinery_ai.knowledge import KnowledgeGraphProvider
 from refinery_ai.models import (
     ModernizationGoal,
     RunReport,
@@ -20,7 +19,7 @@ from refinery_ai.models import (
 from refinery_ai.openrewrite import OpenRewriteAdapter
 from refinery_ai.planning import rule_based_plan, validate_plan
 from refinery_ai.reporting import to_markdown
-from refinery_ai.verification import verification_command, verify
+from refinery_ai.repository import LegacyRepositoryEnvironment, RepositoryEnvironment
 
 
 class ModernizationFactory:
@@ -31,19 +30,21 @@ class ModernizationFactory:
         settings: Settings | None = None,
         rewrite: OpenRewriteAdapter | None = None,
         knowledge: KnowledgeGraphProvider | None = None,
+        environment: RepositoryEnvironment | None = None,
     ) -> None:
         self.settings = settings or Settings()
-        self.rewrite = rewrite or OpenRewriteAdapter()
-        self.knowledge = knowledge or GraphifyKnowledgeGraph(
-            timeout=self.settings.graphify_timeout_seconds,
+        self.environment = environment or LegacyRepositoryEnvironment(
+            knowledge=knowledge,
+            rewrite=rewrite,
+            graphify_timeout=self.settings.graphify_timeout_seconds,
             output_limit=self.settings.max_output_characters,
         )
 
     def prepare(self, repository: Path, goal: ModernizationGoal) -> RunReport:
-        snapshot = discover(repository)
+        snapshot = self.environment.discover(repository)
         state_dir = snapshot.repository / self.settings.state_directory
         state_dir.mkdir(parents=True, exist_ok=True)
-        graph = self.knowledge.build(snapshot.repository)
+        graph = self.environment.build_knowledge(snapshot.repository)
         plan = rule_based_plan(snapshot, goal)
         validate_plan(plan)
         report = RunReport(
@@ -75,13 +76,13 @@ class ModernizationFactory:
             return report
 
         report.status = RunStatus.RUNNING
-        build_command = verification_command(report.snapshot)
+        build_command = self.environment.verification_command(report.snapshot)
         for step in report.plan.steps:
             if step.strategy is StepStrategy.COMMAND:
                 if build_command is None:
                     self._fail(report, step.id, "Unknown build system")
                     break
-                evidence = verify(
+                evidence = self.environment.verify(
                     report.snapshot.repository,
                     build_command,
                     timeout=self.settings.command_timeout_seconds,
@@ -102,7 +103,7 @@ class ModernizationFactory:
                 if not step.recipe:
                     self._review(report, step.id, "No approved recipe matches this target")
                     break
-                evidence = self.rewrite.dry_run(
+                evidence = self.environment.dry_run_rewrite(
                     report.snapshot,
                     step.recipe,
                     timeout=self.settings.command_timeout_seconds,

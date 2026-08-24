@@ -1,0 +1,14 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>example</groupId>
+  <artifactId>legacy-app</artifactId>
+  <version>1.0</version>
+  <properties><java.version>11</java.version></properties>
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-core</artifactId>
+      <version>5.3.39</version>
+    </dependency>
+  </dependencies>
+</project>

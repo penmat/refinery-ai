@@ -1,0 +1,12 @@
+{
+  "build_system": "maven",
+  "build_files": ["pom.xml"],
+  "modules": [
+    {"name": "legacy-java", "path": ".", "java_files": 1, "test_files": 0}
+  ],
+  "dependencies": [
+    {"group": "org.springframework", "artifact": "spring-core", "version": "5.3.39", "scope": null}
+  ],
+  "java_version": "11",
+  "frameworks": ["Spring"]
+}

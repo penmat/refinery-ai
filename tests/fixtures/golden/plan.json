@@ -1,0 +1,39 @@
+{
+  "goal": {"description": "Upgrade Java", "target_java": 17},
+  "summary": "Establish a baseline, apply deterministic recipes, then review remaining gaps.",
+  "steps": [
+    {
+      "id": "baseline",
+      "title": "Establish a green baseline",
+      "strategy": "command",
+      "rationale": "Migration results must be measured against a known baseline.",
+      "depends_on": [],
+      "affected_files": [],
+      "recipe": null,
+      "acceptance_checks": ["./mvnw test"],
+      "risk": "low"
+    },
+    {
+      "id": "rewrite",
+      "title": "Apply approved OpenRewrite recipes",
+      "strategy": "openrewrite",
+      "rationale": "Deterministic transformations are preferred to generated edits.",
+      "depends_on": ["baseline"],
+      "affected_files": ["pom.xml"],
+      "recipe": "org.openrewrite.java.migrate.UpgradeToJava17",
+      "acceptance_checks": ["./mvnw test"],
+      "risk": "medium"
+    },
+    {
+      "id": "review-gaps",
+      "title": "Review remaining migration gaps",
+      "strategy": "ai",
+      "rationale": "Reason about gaps that approved recipes cannot address.",
+      "depends_on": ["rewrite"],
+      "affected_files": ["pom.xml"],
+      "recipe": null,
+      "acceptance_checks": ["./mvnw test"],
+      "risk": "medium"
+    }
+  ]
+}
