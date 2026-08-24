@@ -12,6 +12,7 @@ from refinery_ai.assessment.comparison import compare
 from refinery_ai.assessment.engine import AssessmentEngine
 from refinery_ai.assessment.reporting import assessment_text, comparison_text
 from refinery_ai.assessment.storage import AssessmentStore
+from refinery_ai.config import Settings
 from refinery_ai.factory import ModernizationFactory
 from refinery_ai.harness import HarnessRepositoryEnvironment
 from refinery_ai.models import ModernizationGoal, RunReport
@@ -58,12 +59,30 @@ def assess_command(
     json_output: Annotated[
         bool, typer.Option("--json", help="Print machine-readable JSON")
     ] = False,
+    sonarqube: Annotated[
+        bool | None,
+        typer.Option("--sonarqube/--no-sonarqube", help="Run temporary local SonarQube analysis"),
+    ] = None,
+    keep_sonarqube: Annotated[
+        bool, typer.Option("--keep-sonarqube", help="Keep the temporary server for diagnosis")
+    ] = False,
 ) -> None:
     """Assess a Java repository using deterministic local evidence."""
 
     store = AssessmentStore(repository)
     previous = store.load(compare_to) if compare_to else None
-    current = AssessmentEngine().assess(repository, name=name)
+    settings = Settings()
+    enabled = settings.sonarqube_enabled if sonarqube is None else sonarqube
+    if enabled:
+        typer.echo(
+            f"Running temporary local SonarQube analysis with {settings.sonarqube_image}...",
+            err=True,
+        )
+    current = AssessmentEngine(
+        sonarqube_enabled=enabled,
+        keep_sonarqube=keep_sonarqube,
+        settings=settings,
+    ).assess(repository, name=name)
     store.save(current)
     if previous:
         delta = compare(previous, current)
@@ -165,9 +184,23 @@ def summary(
     include_tests: Annotated[
         bool, typer.Option("--include-tests", help="Include test graph components")
     ] = False,
+    sonarqube: Annotated[
+        bool | None,
+        typer.Option("--sonarqube/--no-sonarqube", help="Run temporary local SonarQube analysis"),
+    ] = None,
+    keep_sonarqube: Annotated[
+        bool, typer.Option("--keep-sonarqube", help="Keep the temporary server for diagnosis")
+    ] = False,
 ) -> None:
     """Summarize project architecture and modernization posture."""
 
+    settings = Settings()
+    enabled = settings.sonarqube_enabled if sonarqube is None else sonarqube
+    if enabled:
+        typer.echo(
+            f"Running temporary local SonarQube analysis with {settings.sonarqube_image}...",
+            err=True,
+        )
     try:
         result = ProjectSummaryService().summarize(
             repository,
@@ -175,6 +208,9 @@ def summary(
             refresh=refresh,
             include_tests=include_tests,
             top=top,
+            sonarqube_enabled=enabled,
+            keep_sonarqube=keep_sonarqube,
+            settings=settings,
         )
     except SummaryError as error:
         typer.echo(f"Error: {error}", err=True)
@@ -182,11 +218,19 @@ def summary(
     rendered = (
         json.dumps(result.model_dump(mode="json"), indent=2)
         if json_output or (output is not None and output.suffix.casefold() == ".json")
-        else summary_markdown(result, terminal=output is None)
+        else summary_markdown(result, terminal=False)
     )
+    output_path = (
+        output.expanduser().resolve()
+        if output is not None
+        else repository.expanduser().resolve()
+        / ".refinery"
+        / ("summary.json" if json_output else "summary.md")
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(rendered)
     if output is not None:
-        output.expanduser().resolve().write_text(rendered)
-        typer.echo(f"Summary written to {output.expanduser().resolve()}")
+        typer.echo(f"Summary written to {output_path}")
     else:
         typer.echo(rendered, nl=False)
 

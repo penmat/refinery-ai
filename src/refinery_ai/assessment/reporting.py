@@ -31,6 +31,10 @@ def assessment_text(assessment: Assessment) -> str:
     lines.extend(["", f"Assessment ID: {assessment.assessment_id}"])
     if assessment.name:
         lines.append(f"Name: {assessment.name}")
+    sonar = assessment.analyzers.get("sonarqube")
+    if sonar is not None:
+        lines.extend(["", f"SonarQube: {sonar.status.value}"])
+        lines.extend(f"  {item.message}" for item in sonar.diagnostics)
     return "\n".join(lines)
 
 

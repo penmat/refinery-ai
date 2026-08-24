@@ -1,0 +1,142 @@
+"""Maven and Gradle SonarScanner selection and bounded execution."""
+
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import tempfile
+from collections.abc import Callable
+from pathlib import Path
+
+from refinery_ai.assessment.sonarqube.models import (
+    SonarQubeError,
+    SonarQubeTimeout,
+    SonarQubeUnavailable,
+    SonarScannerContext,
+)
+from refinery_ai.models import BuildSystem, DiscoverySnapshot
+
+RunCommand = Callable[..., subprocess.CompletedProcess[str]]
+_TASK_ID = re.compile(r"^ceTaskId=(.+)$", re.MULTILINE)
+
+
+class ScannerRunner:
+    def __init__(
+        self,
+        maven_scanner_version: str,
+        *,
+        timeout_seconds: int,
+        output_limit: int,
+        run: RunCommand = subprocess.run,
+    ) -> None:
+        self.maven_scanner_version = maven_scanner_version
+        self.timeout_seconds = timeout_seconds
+        self.output_limit = output_limit
+        self.run = run
+
+    def scan(self, context: SonarScannerContext, snapshot: DiscoverySnapshot) -> tuple[str, str]:
+        with tempfile.TemporaryDirectory(prefix="refinery-sonarqube-") as temporary:
+            temporary_root = Path(temporary)
+            metadata_path = temporary_root / "report-task.txt"
+            command, scanner = self.command(context, snapshot, metadata_path=metadata_path)
+            environment = {
+                "PATH": os.environ.get("PATH", ""),
+                "HOME": str(temporary_root),
+                "GRADLE_USER_HOME": str(temporary_root / "gradle"),
+                "SONAR_HOST_URL": context.server_url,
+                "SONAR_TOKEN": context.token,
+            }
+            if java_home := os.environ.get("JAVA_HOME"):
+                environment["JAVA_HOME"] = java_home
+            try:
+                result = self.run(
+                    command,
+                    cwd=context.repository,
+                    env=environment,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=self.timeout_seconds,
+                )
+            except FileNotFoundError as error:
+                raise SonarQubeUnavailable(
+                    f"Required build command is unavailable: {command[0]}"
+                ) from error
+            except subprocess.TimeoutExpired as error:
+                raise SonarQubeTimeout("SonarQube scanner timed out") from error
+            output = self._redact(
+                (result.stdout + "\n" + result.stderr)[-self.output_limit :], context
+            )
+            if result.returncode != 0:
+                raise SonarQubeError(
+                    f"SonarQube scanner failed with exit code {result.returncode}: {output}"
+                )
+            task_id = self._task_id(metadata_path)
+            return task_id, scanner
+
+    def command(
+        self,
+        context: SonarScannerContext,
+        snapshot: DiscoverySnapshot,
+        *,
+        metadata_path: Path | None = None,
+    ) -> tuple[list[str], str]:
+        metadata_argument = (
+            [f"-Dsonar.scanner.metadataFilePath={metadata_path}"] if metadata_path else []
+        )
+        if snapshot.build_system is BuildSystem.MAVEN:
+            executable = "./mvnw" if (context.repository / "mvnw").is_file() else "mvn"
+            goal = (
+                "org.sonarsource.scanner.maven:sonar-maven-plugin:"
+                f"{self.maven_scanner_version}:sonar"
+            )
+            return [
+                executable,
+                "compile",
+                goal,
+                f"-Dsonar.projectKey={context.project_key}",
+                *metadata_argument,
+            ], f"sonar-maven-plugin:{self.maven_scanner_version}"
+        if snapshot.build_system is BuildSystem.GRADLE:
+            if not self._gradle_plugin_configured(context.repository):
+                raise SonarQubeUnavailable(
+                    "Gradle SonarQube plugin is not configured; Refinery will not edit the build"
+                )
+            executable = "./gradlew" if (context.repository / "gradlew").is_file() else "gradle"
+            return [
+                executable,
+                "classes",
+                "sonar",
+                f"-Dsonar.projectKey={context.project_key}",
+                *metadata_argument,
+            ], "sonar-gradle-plugin:project-configured"
+        raise SonarQubeUnavailable("SonarQube supports only detected Maven or Gradle projects")
+
+    @staticmethod
+    def _task_id(path: Path) -> str:
+        try:
+            content = path.read_text()
+        except OSError as error:
+            raise SonarQubeError("Scanner completed without report-task.txt") from error
+        match = _TASK_ID.search(content)
+        if not match:
+            raise SonarQubeError("Scanner report does not contain a compute-task ID")
+        return match.group(1).strip()
+
+    @staticmethod
+    def _gradle_plugin_configured(repository: Path) -> bool:
+        for name in ("build.gradle", "build.gradle.kts"):
+            for path in repository.rglob(name):
+                try:
+                    if "org.sonarqube" in path.read_text(errors="replace"):
+                        return True
+                except OSError:
+                    continue
+        return False
+
+    @staticmethod
+    def _redact(value: str, context: SonarScannerContext) -> str:
+        return value.replace(context.token, "[REDACTED]").replace(
+            context.server_url, "[LOCAL_SONARQUBE]"
+        )

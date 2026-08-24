@@ -87,8 +87,12 @@ def test_assess_cli_persists_and_compares_by_name(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     runner = CliRunner()
 
-    baseline = runner.invoke(app, ["assess", str(repository), "--name", "baseline"])
-    comparison = runner.invoke(app, ["assess", str(repository), "--compare", "baseline"])
+    baseline = runner.invoke(
+        app, ["assess", str(repository), "--name", "baseline", "--no-sonarqube"]
+    )
+    comparison = runner.invoke(
+        app, ["assess", str(repository), "--compare", "baseline", "--no-sonarqube"]
+    )
 
     assert baseline.exit_code == 0
     assert "Modernization Score" in baseline.stdout

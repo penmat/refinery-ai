@@ -6,6 +6,7 @@ from collections import Counter
 from pathlib import Path
 
 from refinery_ai.assessment.engine import AssessmentEngine
+from refinery_ai.config import Settings
 from refinery_ai.context_graph import ContextGraphStore, repository_fingerprint
 from refinery_ai.discovery import discover
 from refinery_ai.harness import HarnessRepositoryEnvironment
@@ -42,6 +43,9 @@ class ProjectSummaryService:
         refresh: bool = False,
         include_tests: bool = False,
         top: int = 10,
+        sonarqube_enabled: bool = False,
+        keep_sonarqube: bool = False,
+        settings: Settings | None = None,
     ) -> ProjectSummary:
         root = repository.expanduser().resolve()
         if not root.is_dir():
@@ -64,7 +68,11 @@ class ProjectSummaryService:
             raise SummaryError(
                 f"Context graph belongs to {graph.repository}, not requested repository {root}"
             )
-        assessment = AssessmentEngine().assess(root)
+        assessment = AssessmentEngine(
+            sonarqube_enabled=sonarqube_enabled,
+            keep_sonarqube=keep_sonarqube,
+            settings=settings,
+        ).assess(root)
         nodes = self._included_nodes(graph, include_tests)
         node_ids = {node.id for node in nodes}
         edges = [edge for edge in graph.edges if edge.source in node_ids or edge.target in node_ids]
@@ -97,7 +105,12 @@ class ProjectSummaryService:
                 provider_runs=graph.provider_runs,
                 graph_stale=stale,
             ),
-            observations=self._observations(snapshot.java_version, assessment.metrics, stale),
+            observations=self._observations(
+                snapshot.java_version,
+                assessment.metrics,
+                stale,
+                assessment.analyzers.get("sonarqube"),
+            ),
         )
 
     @staticmethod
@@ -235,7 +248,10 @@ class ProjectSummaryService:
 
     @staticmethod
     def _observations(
-        java_version: str | None, metrics: dict[str, object], stale: bool
+        java_version: str | None,
+        metrics: dict[str, object],
+        stale: bool,
+        sonarqube: object | None = None,
     ) -> list[SummaryObservation]:
         observations: list[SummaryObservation] = []
         if stale:
@@ -263,6 +279,17 @@ class ProjectSummaryService:
                     severity="warning",
                     category="platform",
                     message="Legacy javax imports remain and may complicate Jakarta-era upgrades.",
+                )
+            )
+        status = getattr(sonarqube, "status", None)
+        if status is not None and str(status) != "completed":
+            diagnostics = getattr(sonarqube, "diagnostics", [])
+            detail = diagnostics[0].message if diagnostics else "No diagnostic was provided."
+            observations.append(
+                SummaryObservation(
+                    severity="warning",
+                    category="sonarqube",
+                    message=f"SonarQube analysis was {status}: {detail}",
                 )
             )
         return observations

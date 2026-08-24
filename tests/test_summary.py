@@ -4,6 +4,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from refinery_ai.assessment.models import AnalyzerResult, AnalyzerStatus, ToolIdentity
+from refinery_ai.assessment.sonarqube.analyzer import SonarQubeAnalyzer
 from refinery_ai.cli import app
 from refinery_ai.context_graph import ContextGraphStore, repository_fingerprint
 from refinery_ai.models import (
@@ -121,7 +123,48 @@ def test_summary_missing_graph_is_actionable(tmp_path: Path) -> None:
 def test_summary_cli_emits_json(tmp_path: Path) -> None:
     repository = summary_repository(tmp_path)
 
-    result = CliRunner().invoke(app, ["summary", str(repository), "--json"])
+    result = CliRunner().invoke(app, ["summary", str(repository), "--json", "--no-sonarqube"])
 
     assert result.exit_code == 0
     assert json.loads(result.stdout)["overview"]["name"] == "application"
+    persisted = repository / ".refinery/summary.json"
+    assert json.loads(persisted.read_text())["overview"]["name"] == "application"
+
+
+def test_summary_cli_persists_markdown_in_target_repository(tmp_path: Path) -> None:
+    repository = summary_repository(tmp_path)
+
+    result = CliRunner().invoke(app, ["summary", str(repository), "--no-sonarqube"])
+
+    assert result.exit_code == 0
+    persisted = repository / ".refinery/summary.md"
+    assert persisted.read_text() == result.stdout
+    assert result.stdout.startswith("# Project Architecture Summary")
+
+
+def test_summary_cli_defaults_sonarqube_on_and_allows_opt_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = summary_repository(tmp_path)
+    calls = 0
+
+    def unavailable(self: SonarQubeAnalyzer, repository: Path, snapshot: object) -> AnalyzerResult:
+        nonlocal calls
+        calls += 1
+        return AnalyzerResult(
+            analyzer="sonarqube",
+            status=AnalyzerStatus.UNAVAILABLE,
+            completeness=0,
+            duration_seconds=0,
+            tool=ToolIdentity(name="sonarqube", version="none", configuration_hash="x"),
+        )
+
+    monkeypatch.setattr(SonarQubeAnalyzer, "analyze", unavailable)
+    runner = CliRunner()
+
+    default = runner.invoke(app, ["summary", str(repository)])
+    disabled = runner.invoke(app, ["summary", str(repository), "--no-sonarqube"])
+
+    assert default.exit_code == 0
+    assert disabled.exit_code == 0
+    assert calls == 1

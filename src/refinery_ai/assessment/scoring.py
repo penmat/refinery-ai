@@ -7,6 +7,7 @@ import json
 
 from refinery_ai.assessment.models import (
     AnalyzerResult,
+    AnalyzerStatus,
     AssessmentProfile,
     Category,
     Deduction,
@@ -117,6 +118,85 @@ def score(results: dict[str, AnalyzerResult]) -> Score:
         )
     categories[Category.MAINTAINABILITY] = maintainability_score
 
+    sonar = results.get("sonarqube")
+    if sonar and sonar.status in {AnalyzerStatus.COMPLETED, AnalyzerStatus.PARTIAL}:
+        sonar_metrics = sonar.metrics
+        ncloc = max(float(sonar_metrics.get("ncloc") or 0), 1)
+        duplication = _float(sonar_metrics.get("duplicatedLinesDensity"))
+        if duplication is not None:
+            points = min(25.0, duplication * 1.25)
+            maintainability_score -= points
+            if points:
+                deductions.append(
+                    Deduction(
+                        category=Category.MAINTAINABILITY,
+                        points=points,
+                        reason=f"SonarQube reports {duplication:g}% duplicated lines",
+                        metric="sonarqube.duplicatedLinesDensity",
+                    )
+                )
+        cognitive = _float(sonar_metrics.get("cognitiveComplexity"))
+        if cognitive is not None:
+            cognitive_per_thousand = cognitive * 1000 / ncloc
+            points = min(30.0, cognitive_per_thousand * 0.3)
+            maintainability_score -= points
+            if points:
+                deductions.append(
+                    Deduction(
+                        category=Category.MAINTAINABILITY,
+                        points=points,
+                        reason=(
+                            f"SonarQube cognitive complexity is {cognitive_per_thousand:.1f} "
+                            "per 1,000 lines"
+                        ),
+                        metric="sonarqube.cognitiveComplexity",
+                    )
+                )
+        categories[Category.MAINTAINABILITY] = max(0.0, maintainability_score)
+
+        risk_findings = [finding for finding in sonar.findings if finding.category is Category.RISK]
+        blockers = sum(finding.severity == "blocker" for finding in risk_findings)
+        high = sum(finding.severity in {"high", "critical"} for finding in risk_findings)
+        medium = sum(finding.severity in {"medium", "major"} for finding in risk_findings)
+        blocker_points = min(40.0, blockers * 10.0)
+        high_points = min(40.0, high * 4.0)
+        medium_points = min(20.0, medium * 1.0)
+        risk_score = max(0.0, 100.0 - blocker_points - high_points - medium_points)
+        for points, count, label in (
+            (blocker_points, blockers, "blocker"),
+            (high_points, high, "high-severity"),
+            (medium_points, medium, "medium-severity"),
+        ):
+            if points:
+                deductions.append(
+                    Deduction(
+                        category=Category.RISK,
+                        points=points,
+                        reason=f"SonarQube reports {count} {label} risk findings",
+                        metric="sonarqube.findings",
+                    )
+                )
+        categories[Category.RISK] = risk_score
+
+        coverage = _float(sonar_metrics.get("coverage"))
+        branch_coverage = _float(sonar_metrics.get("branchCoverage"))
+        if coverage is not None:
+            test_score = (
+                coverage if branch_coverage is None else coverage * 0.6 + branch_coverage * 0.4
+            )
+            test_category_score = max(0.0, min(100.0, round(test_score, 1)))
+            categories[Category.TESTS] = test_category_score
+            points = 100.0 - test_category_score
+            if points:
+                deductions.append(
+                    Deduction(
+                        category=Category.TESTS,
+                        points=points,
+                        reason="SonarQube line and branch coverage leave executable code untested",
+                        metric="sonarqube.coverage",
+                    )
+                )
+
     build = results["build"].metrics
     build_score = 100.0
     if build.get("buildSystem") == "unknown":
@@ -161,4 +241,15 @@ def _java_major(value: object) -> int | None:
     try:
         return int(str(value).split(".")[0])
     except ValueError:
+        return None
+
+
+def _float(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if not isinstance(value, (int, float, str)):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
         return None

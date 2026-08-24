@@ -14,19 +14,47 @@ from refinery_ai.assessment.models import (
     RepositoryIdentity,
 )
 from refinery_ai.assessment.scoring import make_profile, score
+from refinery_ai.assessment.sonarqube import SonarQubeAnalyzer, SonarQubeOptions
+from refinery_ai.config import Settings
 from refinery_ai.discovery import discover
 
 
 class AssessmentEngine:
-    def __init__(self, analyzers: tuple[Analyzer, ...] = BUILT_IN_ANALYZERS) -> None:
+    def __init__(
+        self,
+        analyzers: tuple[Analyzer, ...] = BUILT_IN_ANALYZERS,
+        *,
+        sonarqube_enabled: bool = False,
+        keep_sonarqube: bool = False,
+        settings: Settings | None = None,
+    ) -> None:
         self.analyzers = analyzers
+        self.sonarqube_enabled = sonarqube_enabled
+        self.keep_sonarqube = keep_sonarqube
+        self.settings = settings or Settings()
 
     def assess(self, repository: Path, *, name: str | None = None) -> Assessment:
         root = repository.expanduser().resolve()
         snapshot = discover(root)
+        assessment_id = uuid4().hex
         results: dict[str, AnalyzerResult] = {}
         for analyzer in self.analyzers:
             results[analyzer.name] = analyzer.analyze(root, snapshot)
+        if self.sonarqube_enabled:
+            sonar = SonarQubeAnalyzer(
+                assessment_id,
+                SonarQubeOptions(
+                    image=self.settings.sonarqube_image,
+                    image_pull_timeout_seconds=self.settings.sonarqube_image_pull_timeout_seconds,
+                    startup_timeout_seconds=self.settings.sonarqube_startup_timeout_seconds,
+                    analysis_timeout_seconds=self.settings.sonarqube_analysis_timeout_seconds,
+                    poll_interval_seconds=self.settings.sonarqube_poll_interval_seconds,
+                    maven_scanner_version=self.settings.sonarqube_maven_scanner_version,
+                    keep_container=self.keep_sonarqube,
+                    output_limit=self.settings.max_output_characters,
+                ),
+            )
+            results[sonar.name] = sonar.analyze(root, snapshot)
         metrics = {
             analyzer_name: dict(result.metrics) for analyzer_name, result in sorted(results.items())
         }
@@ -40,7 +68,7 @@ class AssessmentEngine:
         )
         total_weight = sum(profile.category_weights.values())
         return Assessment(
-            assessment_id=uuid4().hex,
+            assessment_id=assessment_id,
             name=name,
             repository=RepositoryIdentity(
                 root=root,

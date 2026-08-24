@@ -61,6 +61,8 @@ The factory—not an unconstrained model—owns control flow, repository mutatio
 - Delegates build/runtime investigation to one bounded read-only Harness specialist.
 - Stops repeated failures and enforces repair-attempt budgets.
 - Persists JSON and Markdown run records in `.refinery/runs/`.
+- Produces versioned modernization assessments and uses a temporary local SonarQube Community
+  Build by default for maintainability, risk, and coverage evidence.
 - Stops at a review gate before applying OpenRewrite or AI-generated source changes.
 
 ## Requirements
@@ -68,6 +70,7 @@ The factory—not an unconstrained model—owns control flow, repository mutatio
 - Python 3.12+
 - [`uv`](https://docs.astral.sh/uv/) (`uv sync` installs the `graphifyy` package)
 - A JDK and Maven/Gradle, or the project wrappers, when running verification
+- Docker when running the default SonarQube-backed assessment
 - An AI provider API key only when using the Pydantic AI agents
 
 ## Setup
@@ -124,9 +127,27 @@ uv run refinery summary /path/to/java-project --json
 uv run refinery summary /path/to/java-project --output architecture-summary.md
 ```
 
-The default summary command is read-only. It combines the context graph with live discovery,
-bounded folder structure, and the deterministic modernization assessment. It warns when repository
-inputs no longer match the graph fingerprint.
+The summary command combines the context graph with live discovery, bounded folder structure, and
+the deterministic modernization assessment. Like `assess`, it uses temporary local SonarQube by
+default; pass `--no-sonarqube` for a lightweight summary. It persists the report in the target project at
+`.refinery/summary.md` (or `.refinery/summary.json` with `--json`) and warns when repository inputs
+no longer match the graph fingerprint. Use `--output` to override the report location.
+
+Assess modernization health. SonarQube is optional but enabled by default; Refinery starts a
+loopback-only temporary container, imports its evidence, and removes it afterward:
+
+```bash
+uv run refinery assess /path/to/java-project --name baseline
+uv run refinery assess /path/to/java-project --compare baseline
+```
+
+The first run downloads the pinned SonarQube image if it is not already cached. If Docker or the
+scan is unavailable, the lightweight assessment still completes and records the SonarQube
+diagnostic. Disable all Docker activity explicitly with:
+
+```bash
+uv run refinery assess /path/to/java-project --no-sonarqube
+```
 
 Planning and run commands automatically rebuild the context graph. The initial Graphify provider
 produces its native files and the builder produces the normalized artifact:
@@ -174,6 +195,11 @@ Settings use the `REFINERY_` prefix and may be placed in `.env`. See `.env.examp
 | `REFINERY_COMMAND_TIMEOUT_SECONDS` | `900` | Build command timeout |
 | `REFINERY_GRAPHIFY_TIMEOUT_SECONDS` | `900` | Graphify extraction timeout |
 | `REFINERY_ALLOW_DIRTY_WORKTREE` | `false` | Permit apply mode with existing changes |
+| `REFINERY_SONARQUBE_ENABLED` | `true` | Attempt temporary local SonarQube analysis |
+| `REFINERY_SONARQUBE_IMAGE` | `sonarqube:26.8.0.126808-community` | Pinned Community Build image |
+| `REFINERY_SONARQUBE_IMAGE_PULL_TIMEOUT_SECONDS` | `1800` | Initial image-download timeout |
+| `REFINERY_SONARQUBE_STARTUP_TIMEOUT_SECONDS` | `180` | Temporary server startup timeout |
+| `REFINERY_SONARQUBE_ANALYSIS_TIMEOUT_SECONDS` | `900` | Scanner and compute-task timeout |
 
 ## Package layout
 
@@ -220,6 +246,8 @@ Subprocesses receive argument lists directly and are never invoked through a she
 ## Current limitations
 
 - Gradle discovery does not yet parse dependencies or Java toolchains.
+- SonarQube Gradle analysis currently requires the project to configure the `org.sonarqube`
+  plugin; Refinery does not edit target build files.
 - Graphify is run in local, code-only mode. Semantic providers currently perform deterministic
   source and configuration analysis; deeper Java type resolution, runtime topology, dynamically
   constructed SQL, topics, and Redis keys are not yet inferred.

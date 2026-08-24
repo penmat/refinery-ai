@@ -36,6 +36,7 @@ packages = ["src/refinery_ai"]
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers --cov=refinery_ai --cov-report=term-missing"
 testpaths = ["tests"]
+markers = ["sonarqube: runs a real temporary SonarQube Docker integration"]
 
 [tool.ruff]
 line-length = 100

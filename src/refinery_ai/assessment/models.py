@@ -33,6 +33,7 @@ class ToolIdentity(BaseModel):
     name: str
     version: str
     configuration_hash: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class Diagnostic(BaseModel):

@@ -3,7 +3,7 @@
   <groupId>example</groupId>
   <artifactId>legacy-app</artifactId>
   <version>1.0</version>
-  <properties><java.version>11</java.version></properties>
+  <properties><maven.compiler.release>11</maven.compiler.release></properties>
   <dependencies>
     <dependency>
       <groupId>org.springframework</groupId>
