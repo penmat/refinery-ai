@@ -9,9 +9,9 @@
 - explicit denial of `.git`, environment files, key files, and secret paths;
 - a Refinery instruction boundary treating repository content as untrusted evidence.
 
-It does not include model-facing Shell or writable FileSystem. Planning and one bounded SubAgent were added later in H6. H4 migrated the default investigator; the later feature-flag task still owns user-selectable rollback.
+It does not include model-facing Shell or writable FileSystem. Planning and one bounded SubAgent were added later in H6. H4 migrated the default investigator, and H7 removed the pre-production legacy adapter.
 
-`HarnessRepositoryEnvironment.read_file` and `find_files` pilot line-addressable evidence reads and repository discovery. Current `DiscoverySnapshot`, `KnowledgeGraphInfo`, and `VerificationResult` models remain the adapter outputs. Deterministic discovery, Graphify, and OpenRewrite remain delegated to the legacy environment until their scheduled migration phases.
+`HarnessRepositoryEnvironment.read_file` and `find_files` provide line-addressable evidence reads and repository discovery. Current `DiscoverySnapshot`, `KnowledgeGraphInfo`, and `VerificationResult` models remain the adapter outputs. Graphify and OpenRewrite remain Refinery-owned domain tools composed directly behind the Harness environment.
 
 ## H3 — safe Shell pilot
 
@@ -49,7 +49,7 @@ The current MVP's deterministic `discover` operation is its repository investiga
 - results remain the unchanged `DiscoverySnapshot` domain model;
 - `rule_based_plan`, Pydantic planning agents, Graphify, persistence, and OpenRewrite are unchanged.
 
-The CLI `discover` command and the factory's default discovery path now use the Harness investigator. Explicitly injected `RepositoryEnvironment` implementations still work, preserving test and rollback seams. The H4 parity test compares all normalized snapshot fields against `LegacyRepositoryEnvironment`, asserts no fixture writes, and applies a deliberately generous local latency ceiling to detect material regressions without treating machine noise as a product failure.
+The CLI `discover` command and the factory's default discovery path use the Harness investigator. Explicitly injected `RepositoryEnvironment` implementations still work for focused tests or alternate environments. The H4 golden test checks the required normalized snapshot fields and asserts no fixture writes.
 
 Because the current MVP has no typed findings or gaps, H4 cannot compare artifacts that do not exist. The equivalent acceptance signal is complete `DiscoverySnapshot` parity and unchanged planner inputs. Adding new finding/gap schemas remains outside this migration phase.
 
@@ -78,3 +78,9 @@ The specialist returns the framework-neutral `BuildRuntimeSpecialistResult`. `me
 - retains contradictory values as explicit `SpecialistConflict` records rather than selecting a winner.
 
 Only build/runtime has migrated. Architecture/API, persistence, testing, and operations/security specialists remain deferred. The modernization planner and its domain contracts are unchanged.
+
+## H7 — direct default cutover
+
+Harness is the only built-in assessment environment. Because Refinery AI has not entered production, H7 intentionally omits a release-window fallback and removes `LegacyRepositoryEnvironment` entirely. `discover`, `graph`, `plan`, and `run` all construct or receive `HarnessRepositoryEnvironment`; Graphify and OpenRewrite remain directly composed Refinery domain tools rather than alternate environments.
+
+The `RepositoryEnvironment` protocol remains as the application-owned framework boundary. Dependency injection is retained for tests and future execution substrates, not as a legacy feature flag.

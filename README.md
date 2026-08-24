@@ -189,7 +189,7 @@ Subprocesses receive argument lists directly and are never invoked through a she
 - OpenRewrite dry runs require the plugin/recipe dependencies to be resolvable by the target build.
 - OpenRewrite source application is review-gated.
 - AI agents are available as typed boundaries but are not invoked by the default CLI workflow.
-- Harness is used for the default repository investigator, context controls, and one build/runtime specialist; Graphify, the architect/planner, persistence, OpenRewrite, and other specialists remain on their existing implementations. A user-selectable environment flag and operational parity reporting belong to later phases.
+- Harness is the sole built-in assessment environment and is used for repository investigation, context controls, and one build/runtime specialist. Graphify and OpenRewrite remain Refinery-owned domain tools behind that environment; the architect/planner, persistence, and other specialists remain unchanged.
 - Harness Shell command checks are policy guardrails, not OS-level network isolation. Assessment configuration denies network authority, and no network-capable command is exposed, but hard egress isolation requires a future sandbox/container execution environment.
 - Proposed AI patches are not automatically applied.
 - No web service, UI, pull-request automation, or remote-repository cloning.

@@ -8,6 +8,7 @@ import os
 import re
 import shlex
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -31,7 +32,7 @@ from pydantic_ai_harness.tool_output_limits import Band, LocalFileStore, Spill, 
 
 from refinery_ai.context import ContextReceipt, DurableContextStore
 from refinery_ai.discovery import IGNORED_DIRECTORIES, maven_details
-from refinery_ai.knowledge import KnowledgeGraphProvider
+from refinery_ai.knowledge import GraphifyKnowledgeGraph, KnowledgeGraphProvider
 from refinery_ai.models import (
     BuildSystem,
     DiscoverySnapshot,
@@ -40,8 +41,8 @@ from refinery_ai.models import (
     VerificationResult,
 )
 from refinery_ai.openrewrite import OpenRewriteAdapter
-from refinery_ai.repository import LegacyRepositoryEnvironment
 from refinery_ai.specialists import BuildRuntimeSpecialistResult
+from refinery_ai.verification import verification_command
 
 _EXIT_CODE = re.compile(r"\n\[exit code: (\d+)\]\Z")
 _SAFE_GIT_SUBCOMMANDS = frozenset({"branch", "diff", "ls-files", "rev-parse", "show", "status"})
@@ -277,12 +278,10 @@ class HarnessRepositoryEnvironment:
             env={"PATH": os.environ.get("PATH", ""), "HOME": str(self.repository)},
             denied_env_patterns=LLM_API_KEY_ENV_PATTERNS,
         )
-        self._legacy = LegacyRepositoryEnvironment(
-            knowledge=knowledge,
-            rewrite=rewrite,
-            graphify_timeout=graphify_timeout,
-            output_limit=output_limit,
+        self.knowledge = knowledge or GraphifyKnowledgeGraph(
+            timeout=graphify_timeout, output_limit=output_limit
         )
+        self.rewrite = rewrite or OpenRewriteAdapter()
 
     async def read_file(self, path: str, *, offset: int = 0, limit: int | None = None) -> str:
         """Read line-addressable evidence through Harness FileSystem."""
@@ -414,13 +413,16 @@ class HarnessRepositoryEnvironment:
         )
 
     def build_knowledge(self, repository: Path) -> KnowledgeGraphInfo:
-        return self._legacy.build_knowledge(repository)
+        return self.knowledge.build(repository)
 
     def query_knowledge(self, graph_path: Path, question: str) -> str:
-        return self._legacy.query_knowledge(graph_path, question)
+        query = cast(Callable[[Path, str], str] | None, getattr(self.knowledge, "query", None))
+        if query is None:
+            raise TypeError("Configured knowledge provider does not support queries")
+        return query(graph_path, question)
 
     def verification_command(self, snapshot: DiscoverySnapshot) -> list[str] | None:
-        return self._legacy.verification_command(snapshot)
+        return verification_command(snapshot)
 
     def verify(
         self,
@@ -464,7 +466,7 @@ class HarnessRepositoryEnvironment:
     def dry_run_rewrite(
         self, snapshot: DiscoverySnapshot, recipe: str, *, timeout: int
     ) -> VerificationResult:
-        return self._legacy.dry_run_rewrite(snapshot, recipe, timeout=timeout)
+        return self.rewrite.dry_run(snapshot, recipe, timeout=timeout)
 
 
 def _split_harness_output(output: str) -> tuple[str, str]:

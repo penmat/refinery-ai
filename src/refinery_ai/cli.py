@@ -11,7 +11,6 @@ import typer
 from refinery_ai.factory import ModernizationFactory
 from refinery_ai.harness import HarnessRepositoryEnvironment
 from refinery_ai.models import ModernizationGoal, RunReport
-from refinery_ai.repository import LegacyRepositoryEnvironment
 
 app = typer.Typer(help="Safe, auditable Java modernization.", no_args_is_help=True)
 
@@ -46,7 +45,7 @@ def graph(
 ) -> None:
     """Build the Graphify graph and return a scoped query result."""
 
-    environment = LegacyRepositoryEnvironment()
+    environment = HarnessRepositoryEnvironment(repository)
     info = environment.build_knowledge(repository)
     typer.echo(environment.query_knowledge(info.graph_path, question))
 
