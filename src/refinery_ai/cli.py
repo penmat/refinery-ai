@@ -134,11 +134,11 @@ def graph(
     question: Annotated[str, typer.Argument(help="Question for the code knowledge graph")],
     repository: Annotated[Path, typer.Option("--repository", "-r")] = Path("."),
 ) -> None:
-    """Build the Graphify graph and return a scoped query result."""
+    """Build the repository context graph and return a scoped query result."""
 
     environment = HarnessRepositoryEnvironment(repository)
-    info = environment.build_knowledge(repository)
-    typer.echo(environment.query_knowledge(info.graph_path, question))
+    info = environment.build_context(repository)
+    typer.echo(environment.query_context(info.graph_path, question))
 
 
 @app.command()

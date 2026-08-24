@@ -19,7 +19,7 @@ def test_prepare_persists_reports(tmp_path: Path) -> None:
         tmp_path, ModernizationGoal(description="Upgrade Java", target_java=17)
     )
     assert report.status is RunStatus.PLANNED
-    assert report.knowledge_graph.provider == "graphify"
+    assert report.context_graph.provider == "context-graph"
     assert (tmp_path / "graphify-out/graph.json").exists()
     assert (tmp_path / f".refinery/runs/{report.run_id}.json").exists()
     assert (tmp_path / f".refinery/runs/{report.run_id}.md").exists()

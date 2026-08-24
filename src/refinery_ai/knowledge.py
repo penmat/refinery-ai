@@ -1,4 +1,4 @@
-"""Graphify-backed code knowledge graph integration."""
+"""Graphify input adapter for the provider-neutral context graph."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ import sys
 from pathlib import Path
 from typing import Protocol
 
-from refinery_ai.models import KnowledgeGraphInfo
+from refinery_ai.context_graph import ContextFragment, ContextGraphBuilder, ContextRequest
+from refinery_ai.models import ContextEdge, ContextEvidence, ContextGraphInfo, ContextNode
 
 
 class KnowledgeGraphError(RuntimeError):
@@ -16,11 +17,13 @@ class KnowledgeGraphError(RuntimeError):
 
 
 class KnowledgeGraphProvider(Protocol):
-    def build(self, repository: Path) -> KnowledgeGraphInfo: ...
+    """Compatibility protocol for the original single-provider contract."""
+
+    def build(self, repository: Path) -> ContextGraphInfo: ...
 
 
-class GraphifyKnowledgeGraph:
-    """Build and query Graphify's deterministic local AST graph."""
+class GraphifyProvider:
+    """Collect Graphify's deterministic local AST graph as normalized context."""
 
     def __init__(
         self,
@@ -33,8 +36,15 @@ class GraphifyKnowledgeGraph:
         self.timeout = timeout
         self.output_limit = output_limit
 
-    def build(self, repository: Path) -> KnowledgeGraphInfo:
-        root = repository.resolve()
+    @property
+    def name(self) -> str:
+        return "graphify"
+
+    def supports(self, discovery: object | None) -> bool:
+        return True
+
+    def collect(self, request: ContextRequest) -> ContextFragment:
+        root = request.repository.resolve()
         graph_path = root / "graphify-out" / "graph.json"
         self._run([*self.command_prefix, "extract", ".", "--code-only"], cwd=root)
         if not graph_path.is_file():
@@ -45,13 +55,48 @@ class GraphifyKnowledgeGraph:
             graph = json.loads(graph_path.read_text())
         except (OSError, json.JSONDecodeError) as error:
             raise KnowledgeGraphError(f"Unable to read Graphify output: {error}") from error
-        nodes = graph.get("nodes", [])
-        edges = graph.get("edges", graph.get("links", []))
-        return KnowledgeGraphInfo(
-            graph_path=graph_path,
-            report_path=self._optional_path(root / "graphify-out" / "GRAPH_REPORT.md"),
-            node_count=len(nodes) if isinstance(nodes, list) else 0,
-            edge_count=len(edges) if isinstance(edges, list) else 0,
+        candidate_nodes = graph.get("nodes", [])
+        candidate_edges = graph.get("edges", graph.get("links", []))
+        raw_nodes = candidate_nodes if isinstance(candidate_nodes, list) else []
+        raw_edges = candidate_edges if isinstance(candidate_edges, list) else []
+        nodes = [self._node(item, index) for index, item in enumerate(raw_nodes)]
+        edges = [self._edge(item) for item in raw_edges]
+        return ContextFragment(
+            provider=self.name,
+            nodes=nodes,
+            edges=edges,
+            diagnostics=[f"Native Graphify artifact: {graph_path}"],
+        )
+
+    @staticmethod
+    def _node(value: object, index: int) -> ContextNode:
+        item = value if isinstance(value, dict) else {"value": value}
+        raw_id = item.get("id", item.get("name", index))
+        node_id = f"graphify:{raw_id}"
+        kind = str(item.get("type", item.get("kind", "symbol")))
+        name = str(item.get("name", item.get("label", raw_id)))
+        attributes = json.loads(json.dumps(item, default=str))
+        return ContextNode(
+            id=node_id,
+            kind=f"code.{kind}",
+            name=name,
+            attributes=attributes,
+            sources=[ContextEvidence(provider="graphify")],
+        )
+
+    @staticmethod
+    def _edge(value: object) -> ContextEdge:
+        item = value if isinstance(value, dict) else {"value": value}
+        source = item.get("source", item.get("from", "unknown"))
+        target = item.get("target", item.get("to", "unknown"))
+        kind = str(item.get("type", item.get("kind", "related")))
+        attributes = json.loads(json.dumps(item, default=str))
+        return ContextEdge(
+            source=f"graphify:{source}",
+            target=f"graphify:{target}",
+            kind=kind,
+            attributes=attributes,
+            sources=[ContextEvidence(provider="graphify")],
         )
 
     def query(self, graph_path: Path, question: str) -> str:
@@ -91,3 +136,10 @@ class GraphifyKnowledgeGraph:
                 f"Graphify failed with exit code {result.returncode}: {output}"
             )
         return result
+
+
+class GraphifyKnowledgeGraph(GraphifyProvider):
+    """Deprecated compatibility adapter for the original Graphify API."""
+
+    def build(self, repository: Path) -> ContextGraphInfo:
+        return ContextGraphBuilder([self]).build(repository)

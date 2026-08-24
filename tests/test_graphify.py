@@ -26,7 +26,9 @@ def test_build_reads_graphify_output(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     assert info.node_count == 2
     assert info.edge_count == 1
-    assert info.graph_path == output / "graph.json"
+    assert info.provider == "context-graph"
+    assert info.graph_path == tmp_path / ".refinery/context/context-graph.json"
+    assert info.provider_runs[0].provider == "graphify"
 
 
 def test_query_uses_explicit_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

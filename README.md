@@ -38,8 +38,10 @@ The factory—not an unconstrained model—owns control flow, repository mutatio
 
 - Detects Maven and Gradle repositories.
 - Inspects modules, Java/test file counts, Maven dependencies, Java version, frameworks, Git branch, and worktree state.
-- Builds a local Graphify knowledge graph with code symbols and cross-file relationships.
-- Stores Graphify's queryable AST graph under `graphify-out/graph.json`.
+- Builds a provider-neutral context graph from repository evidence.
+- Uses Graphify as the initial context provider for code symbols and cross-file relationships.
+- Stores the normalized graph under `.refinery/context/context-graph.json` while retaining
+  provider-native artifacts for diagnostics.
 - Produces and validates an ordered `ModernizationPlan`.
 - Provides typed Pydantic AI planning, migration, and repair agents.
 - Runs allowlisted OpenRewrite recipes in dry-run mode.
@@ -92,7 +94,7 @@ Inspect a Java repository without changing it:
 uv run refinery discover /path/to/java-project
 ```
 
-Build and query its Graphify code graph:
+Build and query its repository context graph:
 
 ```bash
 uv run refinery graph \
@@ -100,13 +102,16 @@ uv run refinery graph \
   --repository /path/to/java-project
 ```
 
-Planning and run commands automatically rebuild the code-only Graphify graph. Generated files include:
+Planning and run commands automatically rebuild the context graph. The initial Graphify provider
+produces its native files and the builder produces the normalized artifact:
 
 ```text
 graphify-out/
 ├── graph.json
 ├── manifest.json
 └── .graphify_analysis.json
+.refinery/context/
+└── context-graph.json
 ```
 
 Code-only extraction does not generate the optional HTML visualization or narrative report. Those can be produced separately with Graphify's clustering and export commands.
@@ -152,10 +157,11 @@ src/refinery_ai/
 ├── cli.py           # CLI boundary
 ├── config.py        # environment configuration
 ├── context.py       # typed durable context receipts and artifacts
+├── context_graph.py # provider-neutral collection, merge, storage, and queries
 ├── discovery.py     # deterministic Maven/Gradle inspection
 ├── factory.py       # workflow and safety gates
 ├── harness.py       # read-only Harness pilot and safe Shell policy
-├── knowledge.py     # Graphify build/query adapter
+├── knowledge.py     # Graphify context provider and compatibility adapter
 ├── models.py        # shared Pydantic contracts
 ├── openrewrite.py   # allowlisted dry-run adapter
 ├── planning.py      # deterministic planner and validation
@@ -171,21 +177,23 @@ src/refinery_ai/
 Refinery AI separates facts, decisions, and effects:
 
 1. Deterministic discovery records observed facts.
-2. Graphify deterministically indexes code through tree-sitter AST parsing.
-3. Planning produces typed proposals; the agent boundary accepts scoped Graphify context.
-4. Policy code validates plans before execution.
-5. Only the factory may run commands or apply changes.
-6. Every step defines acceptance checks.
-7. OpenRewrite recipes are allowlisted and initially run in dry-run mode.
-8. Generated patches are proposals; v0.1 never applies them automatically.
-9. Failures stop the run, and repair attempts have hard budgets.
+2. Context providers collect facts with source provenance; Graphify initially supplies AST facts.
+3. The context builder deterministically merges provider fragments into a versioned graph.
+4. Planning produces typed proposals; the agent boundary accepts scoped repository context.
+5. Policy code validates plans before execution.
+6. Only the factory may run commands or apply changes.
+7. Every step defines acceptance checks.
+8. OpenRewrite recipes are allowlisted and initially run in dry-run mode.
+9. Generated patches are proposals; v0.1 never applies them automatically.
+10. Failures stop the run, and repair attempts have hard budgets.
 
 Subprocesses receive argument lists directly and are never invoked through a shell. Stored command output is bounded.
 
 ## Current limitations
 
 - Gradle discovery does not yet parse dependencies or Java toolchains.
-- Graphify is run in local, code-only mode; semantic extraction of documents and media is disabled.
+- Graphify is currently the only context provider and is run in local, code-only mode. Spring and
+  infrastructure-specific semantic providers are planned next.
 - OpenRewrite dry runs require the plugin/recipe dependencies to be resolvable by the target build.
 - OpenRewrite source application is review-gated.
 - AI agents are available as typed boundaries but are not invoked by the default CLI workflow.

@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from refinery_ai.models import DiscoverySnapshot, KnowledgeGraphInfo, VerificationResult
+from refinery_ai.models import ContextGraphInfo, DiscoverySnapshot, VerificationResult
 
 
 class RepositoryEnvironment(Protocol):
@@ -17,9 +17,9 @@ class RepositoryEnvironment(Protocol):
 
     def discover(self, repository: Path) -> DiscoverySnapshot: ...
 
-    def build_knowledge(self, repository: Path) -> KnowledgeGraphInfo: ...
+    def build_context(self, repository: Path) -> ContextGraphInfo: ...
 
-    def query_knowledge(self, graph_path: Path, question: str) -> str: ...
+    def query_context(self, graph_path: Path, question: str) -> str: ...
 
     def verification_command(self, snapshot: DiscoverySnapshot) -> list[str] | None: ...
 

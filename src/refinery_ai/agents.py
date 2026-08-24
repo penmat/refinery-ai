@@ -53,7 +53,7 @@ def create_planning_agent(model: str) -> Agent[PlanningDependencies, Modernizati
         return (
             f"Discovery: {ctx.deps.snapshot.model_dump_json()}\n"
             f"Knowledge graph: {ctx.deps.graph_summary}\n"
-            f"Scoped Graphify context: {ctx.deps.graph_context}"
+            f"Scoped repository context: {ctx.deps.graph_context}"
         )
 
     return agent

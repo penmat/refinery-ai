@@ -58,14 +58,14 @@ class ModernizationFactory:
         snapshot = environment.discover(repository)
         state_dir = snapshot.repository / self.settings.state_directory
         state_dir.mkdir(parents=True, exist_ok=True)
-        graph = environment.build_knowledge(snapshot.repository)
+        graph = environment.build_context(snapshot.repository)
         plan = rule_based_plan(snapshot, goal)
         validate_plan(plan)
         report = RunReport(
             run_id=uuid4().hex,
             status=RunStatus.PLANNED,
             snapshot=snapshot,
-            knowledge_graph=graph,
+            context_graph=graph,
             plan=plan,
         )
         self._save(report)

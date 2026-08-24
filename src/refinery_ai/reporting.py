@@ -10,9 +10,11 @@ def to_markdown(report: RunReport) -> str:
         f"**Status:** {report.status.value}",
         f"**Repository:** `{report.snapshot.repository}`",
         f"**Goal:** {report.plan.goal.description}",
-        f"**Knowledge graph:** `{report.knowledge_graph.graph_path}`",
-        f"**Graph size:** {report.knowledge_graph.node_count} nodes, "
-        f"{report.knowledge_graph.edge_count} edges",
+        f"**Context graph:** `{report.context_graph.graph_path}`",
+        f"**Graph size:** {report.context_graph.node_count} nodes, "
+        f"{report.context_graph.edge_count} edges",
+        f"**Context providers:** "
+        f"{', '.join(run.provider for run in report.context_graph.provider_runs) or 'none'}",
         "",
         "## Plan",
         "",
