@@ -200,6 +200,7 @@ Settings use the `REFINERY_` prefix and may be placed in `.env`. See `.env.examp
 | `REFINERY_SONARQUBE_IMAGE_PULL_TIMEOUT_SECONDS` | `1800` | Initial image-download timeout |
 | `REFINERY_SONARQUBE_STARTUP_TIMEOUT_SECONDS` | `180` | Temporary server startup timeout |
 | `REFINERY_SONARQUBE_ANALYSIS_TIMEOUT_SECONDS` | `900` | Scanner and compute-task timeout |
+| `REFINERY_SONARQUBE_GRADLE_SCANNER_VERSION` | `7.2.2.6593` | Pinned temporary Gradle scanner plugin |
 
 ## Package layout
 
@@ -246,8 +247,8 @@ Subprocesses receive argument lists directly and are never invoked through a she
 ## Current limitations
 
 - Gradle discovery does not yet parse dependencies or Java toolchains.
-- SonarQube Gradle analysis currently requires the project to configure the `org.sonarqube`
-  plugin; Refinery does not edit target build files.
+- SonarQube Gradle analysis injects a pinned scanner plugin through a temporary init script when
+  the project does not configure `org.sonarqube`; Refinery does not edit target build files.
 - Graphify is run in local, code-only mode. Semantic providers currently perform deterministic
   source and configuration analysis; deeper Java type resolution, runtime topology, dynamically
   constructed SQL, topics, and Redis keys are not yet inferred.

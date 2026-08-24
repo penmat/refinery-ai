@@ -31,11 +31,10 @@ from pydantic_ai_harness.tool_output_limits import Band, LocalFileStore, Spill, 
 
 from refinery_ai.context import ContextReceipt, DurableContextStore
 from refinery_ai.context_graph import ContextGraphBuilder, ContextGraphQuery
-from refinery_ai.discovery import IGNORED_DIRECTORIES, maven_details
+from refinery_ai.discovery import IGNORED_DIRECTORIES, maven_details, select_build_files
 from refinery_ai.infrastructure import DatabaseProvider, KafkaProvider, RedisProvider
 from refinery_ai.knowledge import GraphifyProvider, KnowledgeGraphProvider
 from refinery_ai.models import (
-    BuildSystem,
     ContextGraphInfo,
     DiscoverySnapshot,
     Module,
@@ -328,7 +327,14 @@ class HarnessRepositoryEnvironment:
             raise HarnessPolicyError("Discovery repository does not match Harness root")
 
         async def investigate() -> tuple[list[str], dict[str, str]]:
-            patterns = ("pom.xml", "build.gradle", "build.gradle.kts", "**/*.java")
+            patterns = (
+                "pom.xml",
+                "build.gradle",
+                "build.gradle.kts",
+                "settings.gradle",
+                "settings.gradle.kts",
+                "**/*.java",
+            )
             found = await asyncio.gather(*(self.find_files(pattern) for pattern in patterns))
             paths = sorted(
                 {
@@ -355,14 +361,22 @@ class HarnessRepositoryEnvironment:
         gradle_files = [
             Path(path) for path in paths if Path(path).name in {"build.gradle", "build.gradle.kts"}
         ]
-        build_system = (
-            BuildSystem.MAVEN
-            if pom_files
-            else BuildSystem.GRADLE
-            if gradle_files
-            else BuildSystem.UNKNOWN
+        root_has_gradle_marker = any(
+            Path(path)
+            in {
+                Path("build.gradle"),
+                Path("build.gradle.kts"),
+                Path("settings.gradle"),
+                Path("settings.gradle.kts"),
+            }
+            for path in paths
         )
-        build_files = pom_files or gradle_files
+        build_system, build_files = select_build_files(
+            Path("."),
+            pom_files,
+            gradle_files,
+            root_has_gradle_marker=root_has_gradle_marker,
+        )
         java_files = [Path(path) for path in paths if path.endswith(".java")]
         modules: list[Module] = []
         dependencies = []

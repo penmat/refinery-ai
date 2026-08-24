@@ -69,6 +69,36 @@ def _maven_details(path: Path) -> tuple[list[Dependency], str | None]:
         return [], None
 
 
+def select_build_files(
+    root: Path,
+    pom_files: list[Path],
+    gradle_files: list[Path],
+    *,
+    root_has_gradle_marker: bool = False,
+) -> tuple[BuildSystem, list[Path]]:
+    """Choose the repository build from root authority, then nearest descriptor depth."""
+
+    def relative(path: Path) -> Path:
+        return path.relative_to(root) if path.is_absolute() else path
+
+    root_pom = any(relative(path) == Path("pom.xml") for path in pom_files)
+    if root_pom:
+        return BuildSystem.MAVEN, pom_files
+    if root_has_gradle_marker:
+        return BuildSystem.GRADLE, gradle_files
+    if not pom_files:
+        return (BuildSystem.GRADLE, gradle_files) if gradle_files else (BuildSystem.UNKNOWN, [])
+    if not gradle_files:
+        return BuildSystem.MAVEN, pom_files
+    pom_depth = min(len(relative(path).parts) for path in pom_files)
+    gradle_depth = min(len(relative(path).parts) for path in gradle_files)
+    return (
+        (BuildSystem.GRADLE, gradle_files)
+        if gradle_depth < pom_depth
+        else (BuildSystem.MAVEN, pom_files)
+    )
+
+
 def discover(repository: Path) -> DiscoverySnapshot:
     """Inspect build metadata without modifying or building the repository."""
 
@@ -82,14 +112,13 @@ def discover(repository: Path) -> DiscoverySnapshot:
         for path in sorted([*root.glob("**/build.gradle"), *root.glob("**/build.gradle.kts")])
         if _is_source_file(path)
     ]
-    build_system = (
-        BuildSystem.MAVEN
-        if pom_files
-        else BuildSystem.GRADLE
-        if gradle_files
-        else BuildSystem.UNKNOWN
+    root_has_gradle_marker = any(
+        (root / name).is_file()
+        for name in ("build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts")
     )
-    build_files = pom_files or gradle_files
+    build_system, build_files = select_build_files(
+        root, pom_files, gradle_files, root_has_gradle_marker=root_has_gradle_marker
+    )
     modules: list[Module] = []
     dependencies: list[Dependency] = []
     java_version: str | None = None

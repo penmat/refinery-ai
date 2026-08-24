@@ -41,6 +41,7 @@ class SonarQubeOptions:
     analysis_timeout_seconds: int
     poll_interval_seconds: float
     maven_scanner_version: str
+    gradle_scanner_version: str
     keep_container: bool = False
     output_limit: int = 20_000
 
@@ -63,6 +64,7 @@ class SonarQubeAnalyzer:
         self.client_type = client_type
         self.scanner = scanner or ScannerRunner(
             options.maven_scanner_version,
+            options.gradle_scanner_version,
             timeout_seconds=options.analysis_timeout_seconds,
             output_limit=options.output_limit,
         )
@@ -206,6 +208,7 @@ class SonarQubeAnalyzer:
         payload = {
             "image": self.options.image,
             "mavenScannerVersion": self.options.maven_scanner_version,
+            "gradleScannerVersion": self.options.gradle_scanner_version,
             "metadata": metadata,
         }
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))

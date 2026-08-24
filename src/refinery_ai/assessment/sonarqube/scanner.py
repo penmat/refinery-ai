@@ -25,12 +25,14 @@ class ScannerRunner:
     def __init__(
         self,
         maven_scanner_version: str,
+        gradle_scanner_version: str,
         *,
         timeout_seconds: int,
         output_limit: int,
         run: RunCommand = subprocess.run,
     ) -> None:
         self.maven_scanner_version = maven_scanner_version
+        self.gradle_scanner_version = gradle_scanner_version
         self.timeout_seconds = timeout_seconds
         self.output_limit = output_limit
         self.run = run
@@ -39,7 +41,18 @@ class ScannerRunner:
         with tempfile.TemporaryDirectory(prefix="refinery-sonarqube-") as temporary:
             temporary_root = Path(temporary)
             metadata_path = temporary_root / "report-task.txt"
-            command, scanner = self.command(context, snapshot, metadata_path=metadata_path)
+            gradle_init_script = None
+            if snapshot.build_system is BuildSystem.GRADLE and not self._gradle_plugin_configured(
+                context.repository
+            ):
+                gradle_init_script = temporary_root / "sonarqube.init.gradle"
+                self._write_gradle_init_script(gradle_init_script)
+            command, scanner = self.command(
+                context,
+                snapshot,
+                metadata_path=metadata_path,
+                gradle_init_script=gradle_init_script,
+            )
             environment = {
                 "PATH": os.environ.get("PATH", ""),
                 "HOME": str(temporary_root),
@@ -81,6 +94,7 @@ class ScannerRunner:
         snapshot: DiscoverySnapshot,
         *,
         metadata_path: Path | None = None,
+        gradle_init_script: Path | None = None,
     ) -> tuple[list[str], str]:
         metadata_argument = (
             [f"-Dsonar.scanner.metadataFilePath={metadata_path}"] if metadata_path else []
@@ -99,18 +113,28 @@ class ScannerRunner:
                 *metadata_argument,
             ], f"sonar-maven-plugin:{self.maven_scanner_version}"
         if snapshot.build_system is BuildSystem.GRADLE:
-            if not self._gradle_plugin_configured(context.repository):
+            configured = self._gradle_plugin_configured(context.repository)
+            if not configured and gradle_init_script is None:
                 raise SonarQubeUnavailable(
-                    "Gradle SonarQube plugin is not configured; Refinery will not edit the build"
+                    "Gradle SonarQube plugin is not configured and no temporary init script "
+                    "was supplied"
                 )
             executable = "./gradlew" if (context.repository / "gradlew").is_file() else "gradle"
+            init_arguments = (
+                ["--init-script", str(gradle_init_script)] if gradle_init_script else []
+            )
             return [
                 executable,
+                *init_arguments,
                 "classes",
                 "sonar",
                 f"-Dsonar.projectKey={context.project_key}",
                 *metadata_argument,
-            ], "sonar-gradle-plugin:project-configured"
+            ], (
+                "sonar-gradle-plugin:project-configured"
+                if configured
+                else f"sonar-gradle-plugin:{self.gradle_scanner_version}:temporary-init"
+            )
         raise SonarQubeUnavailable("SonarQube supports only detected Maven or Gradle projects")
 
     @staticmethod
@@ -134,6 +158,22 @@ class ScannerRunner:
                 except OSError:
                     continue
         return False
+
+    def _write_gradle_init_script(self, path: Path) -> None:
+        path.write_text(
+            "initscript {\n"
+            "    repositories { gradlePluginPortal() }\n"
+            "    dependencies {\n"
+            "        classpath 'org.sonarsource.scanner.gradle:sonarqube-gradle-plugin:"
+            f"{self.gradle_scanner_version}'\n"
+            "    }\n"
+            "}\n"
+            "allprojects {\n"
+            "    if (project == rootProject) {\n"
+            "        apply plugin: org.sonarqube.gradle.SonarQubePlugin\n"
+            "    }\n"
+            "}\n"
+        )
 
     @staticmethod
     def _redact(value: str, context: SonarScannerContext) -> str:

@@ -50,6 +50,7 @@ class AssessmentEngine:
                     analysis_timeout_seconds=self.settings.sonarqube_analysis_timeout_seconds,
                     poll_interval_seconds=self.settings.sonarqube_poll_interval_seconds,
                     maven_scanner_version=self.settings.sonarqube_maven_scanner_version,
+                    gradle_scanner_version=self.settings.sonarqube_gradle_scanner_version,
                     keep_container=self.keep_sonarqube,
                     output_limit=self.settings.max_output_characters,
                 ),

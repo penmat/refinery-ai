@@ -24,3 +24,4 @@ class Settings(BaseSettings):
     sonarqube_analysis_timeout_seconds: int = 900
     sonarqube_poll_interval_seconds: float = 2.0
     sonarqube_maven_scanner_version: str = "5.5.0.6356"
+    sonarqube_gradle_scanner_version: str = "7.2.2.6593"

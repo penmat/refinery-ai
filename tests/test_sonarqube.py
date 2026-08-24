@@ -58,6 +58,7 @@ def sonar_options(**changes: Any) -> SonarQubeOptions:
         "analysis_timeout_seconds": 20,
         "poll_interval_seconds": 0.01,
         "maven_scanner_version": "5.5.0.6356",
+        "gradle_scanner_version": "7.2.2.6593",
     }
     values.update(changes)
     return SonarQubeOptions(**values)
@@ -91,7 +92,7 @@ def test_container_is_loopback_only_and_always_removed() -> None:
 def test_scanner_builds_pinned_maven_command_without_token(tmp_path: Path) -> None:
     repository = maven_repository(tmp_path)
     context = SonarScannerContext(repository, "http://127.0.0.1:9000", "secret", "project:key")
-    runner = ScannerRunner("5.5.0.6356", timeout_seconds=20, output_limit=1000)
+    runner = ScannerRunner("5.5.0.6356", "7.2.2.6593", timeout_seconds=20, output_limit=1000)
 
     command, identity = runner.command(context, discover(repository))
 
@@ -113,7 +114,9 @@ def test_scanner_redacts_token_and_server_on_failure(tmp_path: Path) -> None:
     def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         return completed(command, 1, err="top-secret http://127.0.0.1:9000 failed")
 
-    runner = ScannerRunner("5.5.0.6356", timeout_seconds=20, output_limit=1000, run=run)
+    runner = ScannerRunner(
+        "5.5.0.6356", "7.2.2.6593", timeout_seconds=20, output_limit=1000, run=run
+    )
 
     with pytest.raises(SonarQubeError) as caught:
         runner.scan(context, discover(repository))
@@ -121,6 +124,27 @@ def test_scanner_redacts_token_and_server_on_failure(tmp_path: Path) -> None:
     assert "top-secret" not in str(caught.value)
     assert "http://127.0.0.1:9000" not in str(caught.value)
     assert "[REDACTED]" in str(caught.value)
+
+
+def test_scanner_injects_temporary_gradle_plugin_without_editing_build(tmp_path: Path) -> None:
+    (tmp_path / "build.gradle").write_text("plugins { id 'java' }")
+    context = SonarScannerContext(tmp_path, "http://127.0.0.1:9000", "secret", "project:key")
+    runner = ScannerRunner("5.5.0.6356", "7.2.2.6593", timeout_seconds=20, output_limit=1000)
+    init_script = tmp_path / "temporary-sonar.init.gradle"
+    runner._write_gradle_init_script(init_script)
+
+    command, identity = runner.command(
+        context,
+        discover(tmp_path),
+        metadata_path=tmp_path / "report-task.txt",
+        gradle_init_script=init_script,
+    )
+
+    assert command[:5] == ["gradle", "--init-script", str(init_script), "classes", "sonar"]
+    assert "7.2.2.6593" in init_script.read_text()
+    assert "gradlePluginPortal()" in init_script.read_text()
+    assert identity == "sonar-gradle-plugin:7.2.2.6593:temporary-init"
+    assert (tmp_path / "build.gradle").read_text() == "plugins { id 'java' }"
 
 
 class FakeResponse:

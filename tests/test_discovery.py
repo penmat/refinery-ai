@@ -32,6 +32,19 @@ def test_discovers_gradle_repository(tmp_path: Path) -> None:
     assert discover(tmp_path).build_system is BuildSystem.GRADLE
 
 
+def test_root_gradle_build_wins_over_nested_maven_examples(tmp_path: Path) -> None:
+    (tmp_path / "build.gradle").write_text("plugins { id 'java' }")
+    (tmp_path / "settings.gradle").write_text("rootProject.name = 'application'")
+    example = tmp_path / "examples/quickstart"
+    example.mkdir(parents=True)
+    (example / "pom.xml").write_text("<project><modelVersion>4.0.0</modelVersion></project>")
+
+    result = discover(tmp_path)
+
+    assert result.build_system is BuildSystem.GRADLE
+    assert result.build_files == [Path("build.gradle")]
+
+
 def test_rejects_missing_repository(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="does not exist"):
         discover(tmp_path / "missing")
