@@ -137,6 +137,7 @@ def graph(
     """Build the repository context graph and return a scoped query result."""
 
     environment = HarnessRepositoryEnvironment(repository)
+    environment.discover(repository)
     info = environment.build_context(repository)
     typer.echo(environment.query_context(info.graph_path, question))
 

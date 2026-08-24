@@ -39,7 +39,9 @@ The factory—not an unconstrained model—owns control flow, repository mutatio
 - Detects Maven and Gradle repositories.
 - Inspects modules, Java/test file counts, Maven dependencies, Java version, frameworks, Git branch, and worktree state.
 - Builds a provider-neutral context graph from repository evidence.
-- Uses Graphify as the initial context provider for code symbols and cross-file relationships.
+- Uses Graphify as a context provider for code symbols and cross-file relationships.
+- Adds Spring semantic context for beans, dependency injection, HTTP endpoints, configuration,
+  persistence mappings, Kafka listeners, and cache usage.
 - Stores the normalized graph under `.refinery/context/context-graph.json` while retaining
   provider-native artifacts for diagnostics.
 - Produces and validates an ordered `ModernizationPlan`.
@@ -169,6 +171,7 @@ src/refinery_ai/
 ├── reporting.py     # JSON/Markdown audit output
 ├── repository.py    # Refinery-owned repository environment seam
 ├── specialists.py   # typed specialist output and deterministic merge
+├── spring.py        # Spring annotation and framework semantic provider
 └── verification.py  # bounded build execution
 ```
 
@@ -192,8 +195,9 @@ Subprocesses receive argument lists directly and are never invoked through a she
 ## Current limitations
 
 - Gradle discovery does not yet parse dependencies or Java toolchains.
-- Graphify is currently the only context provider and is run in local, code-only mode. Spring and
-  infrastructure-specific semantic providers are planned next.
+- Graphify is run in local, code-only mode. The Spring provider currently performs deterministic
+  source annotation analysis; deeper type resolution and non-Spring infrastructure providers are
+  planned next.
 - OpenRewrite dry runs require the plugin/recipe dependencies to be resolvable by the target build.
 - OpenRewrite source application is review-gated.
 - AI agents are available as typed boundaries but are not invoked by the default CLI workflow.

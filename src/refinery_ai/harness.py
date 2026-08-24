@@ -42,6 +42,7 @@ from refinery_ai.models import (
 )
 from refinery_ai.openrewrite import OpenRewriteAdapter
 from refinery_ai.specialists import BuildRuntimeSpecialistResult
+from refinery_ai.spring import SpringProvider
 from refinery_ai.verification import verification_command
 
 _EXIT_CODE = re.compile(r"\n\[exit code: (\d+)\]\Z")
@@ -281,9 +282,13 @@ class HarnessRepositoryEnvironment:
         )
         self.knowledge = knowledge
         self.context_builder = context_builder or ContextGraphBuilder(
-            [GraphifyProvider(timeout=graphify_timeout, output_limit=output_limit)]
+            [
+                GraphifyProvider(timeout=graphify_timeout, output_limit=output_limit),
+                SpringProvider(),
+            ]
         )
         self.context_query = ContextGraphQuery(self.context_builder.store)
+        self._last_discovery: DiscoverySnapshot | None = None
         self.rewrite = rewrite or OpenRewriteAdapter()
 
     async def read_file(self, path: str, *, offset: int = 0, limit: int | None = None) -> str:
@@ -403,7 +408,7 @@ class HarnessRepositoryEnvironment:
             timeout=self.policy.command_timeout_seconds,
             output_limit=self.policy.tool_output_limit_characters,
         )
-        return DiscoverySnapshot(
+        snapshot = DiscoverySnapshot(
             repository=root,
             build_system=build_system,
             build_files=build_files,
@@ -414,11 +419,13 @@ class HarnessRepositoryEnvironment:
             git_branch=branch.stdout.strip() if branch.green else None,
             dirty=bool(status.stdout.strip()) if status.green else False,
         )
+        self._last_discovery = snapshot
+        return snapshot
 
     def build_context(self, repository: Path) -> ContextGraphInfo:
         if self.knowledge is not None:
             return self.knowledge.build(repository)
-        return self.context_builder.build(repository)
+        return self.context_builder.build(repository, self._last_discovery)
 
     def build_knowledge(self, repository: Path) -> ContextGraphInfo:
         """Compatibility alias for the pre-ContextGraph repository protocol."""
