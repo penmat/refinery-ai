@@ -3,6 +3,8 @@
 Refinery builds one versioned context graph from independently useful providers. Each provider
 emits normalized nodes and edges with file and line provenance. The builder merges matching stable
 IDs and records provider status and diagnostics in `.refinery/context/context-graph.json`.
+Graphs also record their creation time and a fingerprint of relevant repository inputs so consumers
+can identify stale evidence.
 
 ## Graphify provider
 
@@ -27,6 +29,17 @@ Provider output uses stable namespaces such as `spring:bean`, `http:endpoint`, `
 `kafka:topic`, `redis:cache`, and `configuration:property`. The source implementation is deliberately
 deterministic and local. Full Java symbol resolution, composed annotations, XML configuration, and
 runtime wiring are not yet inferred.
+
+## Architecture summaries
+
+`refinery summary REPOSITORY` reads the existing normalized graph and combines it with live
+discovery, folder structure, and deterministic assessment metrics. It reports architectural shape,
+interfaces, data usage, prominent components, modernization posture, and provider completeness.
+The command does not rebuild or write repository state unless `--refresh` or `--output` is supplied.
+
+Use `--json` for the typed summary contract, `--output FILE` for a reusable report, and `--top N` to
+control the number of prominent components. A graph from another repository is rejected, while a
+fingerprint mismatch is reported as a stale-evidence warning.
 
 ## Infrastructure providers
 

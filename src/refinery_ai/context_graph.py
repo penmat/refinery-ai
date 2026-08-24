@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -130,6 +131,7 @@ class ContextGraphBuilder:
             )
         graph = ContextGraph(
             repository=root,
+            repository_fingerprint=repository_fingerprint(root),
             nodes=sorted(nodes.values(), key=lambda item: item.id),
             edges=sorted(edges.values(), key=lambda item: (item.source, item.target, item.kind)),
             provider_runs=runs,
@@ -204,3 +206,30 @@ class ContextGraphQuery:
             },
             indent=2,
         )
+
+
+def repository_fingerprint(repository: Path) -> str:
+    """Hash relevant repository inputs while ignoring generated state."""
+
+    ignored = {".git", ".gradle", ".idea", ".refinery", "build", "target", "graphify-out"}
+    relevant_names = {
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "settings.gradle",
+        "settings.gradle.kts",
+    }
+    relevant_suffixes = {".java", ".kt", ".xml", ".sql", ".properties", ".yml", ".yaml"}
+    digest = hashlib.sha256()
+    for path in sorted(repository.rglob("*")):
+        if not path.is_file() or ignored.intersection(path.relative_to(repository).parts):
+            continue
+        if path.name not in relevant_names and path.suffix.casefold() not in relevant_suffixes:
+            continue
+        relative = path.relative_to(repository)
+        digest.update(relative.as_posix().encode())
+        try:
+            digest.update(path.read_bytes())
+        except OSError:
+            continue
+    return digest.hexdigest()

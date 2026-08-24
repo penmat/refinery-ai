@@ -17,7 +17,7 @@ def test_spring_provider_collects_framework_semantics() -> None:
     assert "http:endpoint:POST:/orders" in nodes
     assert "database:table:orders" in nodes
     assert "kafka:topic:orders.created" in nodes
-    assert "redis:cache:orders" in nodes
+    assert "cache:region:orders" in nodes
     assert "configuration:property:orders.region" in nodes
     assert "configuration:property:orders.client" in nodes
     assert (

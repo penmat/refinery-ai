@@ -106,6 +106,24 @@ uv run refinery graph \
   --repository /path/to/java-project
 ```
 
+Summarize project architecture and modernization posture from an existing context graph:
+
+```bash
+uv run refinery summary /path/to/java-project
+```
+
+Rebuild the graph first, emit JSON, or write a Markdown report:
+
+```bash
+uv run refinery summary /path/to/java-project --refresh
+uv run refinery summary /path/to/java-project --json
+uv run refinery summary /path/to/java-project --output architecture-summary.md
+```
+
+The default summary command is read-only. It combines the context graph with live discovery,
+bounded folder structure, and the deterministic modernization assessment. It warns when repository
+inputs no longer match the graph fingerprint.
+
 Planning and run commands automatically rebuild the context graph. The initial Graphify provider
 produces its native files and the builder produces the normalized artifact:
 

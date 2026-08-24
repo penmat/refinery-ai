@@ -91,6 +91,8 @@ class ProviderRun(BaseModel):
 class ContextGraph(BaseModel):
     schema_version: int = 1
     repository: Path
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    repository_fingerprint: str | None = None
     nodes: list[ContextNode] = Field(default_factory=list)
     edges: list[ContextEdge] = Field(default_factory=list)
     provider_runs: list[ProviderRun] = Field(default_factory=list)

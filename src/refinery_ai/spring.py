@@ -169,8 +169,10 @@ class SpringProvider:
         if mapping:
             base = self._mapping_path(owner.annotations.get("RequestMapping", ""))
             path = self._join_path(base, self._mapping_path(annotations[mapping]))
-            verb = mapping.removesuffix("Mapping").upper() or self._request_method(
-                annotations[mapping]
+            verb = (
+                self._request_method(annotations[mapping])
+                if mapping == "RequestMapping"
+                else mapping.removesuffix("Mapping").upper()
             )
             endpoint_id = f"http:endpoint:{verb}:{path}"
             fragment.nodes.append(
@@ -224,7 +226,7 @@ class SpringProvider:
                 annotations,
                 annotation,
                 "cacheNames",
-                "redis.cache",
+                "cache.region",
                 kind,
                 evidence,
                 fragment,
@@ -346,7 +348,7 @@ class SpringProvider:
         )
         if not value:
             return
-        prefix = "kafka:topic" if node_kind == "kafka.topic" else "redis:cache"
+        prefix = "kafka:topic" if node_kind == "kafka.topic" else "cache:region"
         resource_id = f"{prefix}:{value}"
         fragment.nodes.append(
             ContextNode(id=resource_id, kind=node_kind, name=value, sources=[evidence])
@@ -400,12 +402,11 @@ class SpringProvider:
 
     @staticmethod
     def _mapping_path(value: str) -> str:
-        return (
-            SpringProvider._named_value(value, "path")
-            or SpringProvider._named_value(value, "value")
-            or SpringProvider._string_value(value)
-            or ""
-        )
+        for name in ("path", "value"):
+            match = re.search(rf"\b{name}\s*=\s*(?:\{{\s*)?[\"']([^\"']*)", value)
+            if match:
+                return match.group(1)
+        return SpringProvider._string_value(value) or ""
 
     @staticmethod
     def _request_method(value: str) -> str:

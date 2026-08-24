@@ -15,6 +15,8 @@ from refinery_ai.assessment.storage import AssessmentStore
 from refinery_ai.factory import ModernizationFactory
 from refinery_ai.harness import HarnessRepositoryEnvironment
 from refinery_ai.models import ModernizationGoal, RunReport
+from refinery_ai.summary import ProjectSummaryService, SummaryError
+from refinery_ai.summary.reporting import summary_markdown
 
 app = typer.Typer(help="Safe, auditable Java modernization.", no_args_is_help=True)
 assessment_app = typer.Typer(help="Inspect and compare saved assessments.", no_args_is_help=True)
@@ -140,6 +142,53 @@ def graph(
     environment.discover(repository)
     info = environment.build_context(repository)
     typer.echo(environment.query_context(info.graph_path, question))
+
+
+@app.command()
+def summary(
+    repository: Annotated[
+        Path, typer.Argument(exists=True, file_okay=False, help="Java repository to summarize")
+    ] = Path("."),
+    refresh: Annotated[
+        bool, typer.Option("--refresh", help="Rebuild the context graph before summarizing")
+    ] = False,
+    graph_path: Annotated[
+        Path | None, typer.Option("--graph", help="Read a specific context graph")
+    ] = None,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Print machine-readable JSON")
+    ] = False,
+    output: Annotated[
+        Path | None, typer.Option("--output", "-o", help="Write the summary to a file")
+    ] = None,
+    top: Annotated[int, typer.Option("--top", min=1, help="Prominent components to show")] = 10,
+    include_tests: Annotated[
+        bool, typer.Option("--include-tests", help="Include test graph components")
+    ] = False,
+) -> None:
+    """Summarize project architecture and modernization posture."""
+
+    try:
+        result = ProjectSummaryService().summarize(
+            repository,
+            graph_path=graph_path,
+            refresh=refresh,
+            include_tests=include_tests,
+            top=top,
+        )
+    except SummaryError as error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    rendered = (
+        json.dumps(result.model_dump(mode="json"), indent=2)
+        if json_output or (output is not None and output.suffix.casefold() == ".json")
+        else summary_markdown(result, terminal=output is None)
+    )
+    if output is not None:
+        output.expanduser().resolve().write_text(rendered)
+        typer.echo(f"Summary written to {output.expanduser().resolve()}")
+    else:
+        typer.echo(rendered, nl=False)
 
 
 @app.command()
