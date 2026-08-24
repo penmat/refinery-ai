@@ -8,11 +8,17 @@ from typing import Annotated
 
 import typer
 
+from refinery_ai.assessment.comparison import compare
+from refinery_ai.assessment.engine import AssessmentEngine
+from refinery_ai.assessment.reporting import assessment_text, comparison_text
+from refinery_ai.assessment.storage import AssessmentStore
 from refinery_ai.factory import ModernizationFactory
 from refinery_ai.harness import HarnessRepositoryEnvironment
 from refinery_ai.models import ModernizationGoal, RunReport
 
 app = typer.Typer(help="Safe, auditable Java modernization.", no_args_is_help=True)
+assessment_app = typer.Typer(help="Inspect and compare saved assessments.", no_args_is_help=True)
+app.add_typer(assessment_app, name="assessment")
 
 
 def _print(report: RunReport) -> None:
@@ -36,6 +42,91 @@ def discover_command(
 
     environment = HarnessRepositoryEnvironment(repository)
     typer.echo(json.dumps(environment.discover(repository).model_dump(mode="json"), indent=2))
+
+
+@app.command("assess")
+def assess_command(
+    repository: Annotated[Path, typer.Argument(exists=True, file_okay=False)] = Path("."),
+    name: Annotated[
+        str | None, typer.Option("--name", help="Friendly name for this assessment")
+    ] = None,
+    compare_to: Annotated[
+        str | None, typer.Option("--compare", help="Saved assessment ID or name")
+    ] = None,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Print machine-readable JSON")
+    ] = False,
+) -> None:
+    """Assess a Java repository using deterministic local evidence."""
+
+    store = AssessmentStore(repository)
+    previous = store.load(compare_to) if compare_to else None
+    current = AssessmentEngine().assess(repository, name=name)
+    store.save(current)
+    if previous:
+        delta = compare(previous, current)
+        typer.echo(
+            json.dumps(delta.model_dump(mode="json"), indent=2)
+            if json_output
+            else comparison_text(previous, current, delta)
+        )
+    else:
+        typer.echo(
+            json.dumps(current.model_dump(mode="json"), indent=2)
+            if json_output
+            else assessment_text(current)
+        )
+
+
+@assessment_app.command("show")
+def assessment_show(
+    reference: Annotated[str, typer.Argument(help="Assessment ID or friendly name")],
+    repository: Annotated[Path, typer.Option("--repository", "-r")] = Path("."),
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Show a saved assessment."""
+
+    assessment = AssessmentStore(repository).load(reference)
+    typer.echo(
+        json.dumps(assessment.model_dump(mode="json"), indent=2)
+        if json_output
+        else assessment_text(assessment)
+    )
+
+
+@assessment_app.command("list")
+def assessment_list(
+    repository: Annotated[Path, typer.Option("--repository", "-r")] = Path("."),
+) -> None:
+    """List saved assessments."""
+
+    for assessment in AssessmentStore(repository).list():
+        label = f" ({assessment.name})" if assessment.name else ""
+        typer.echo(f"{assessment.assessment_id}{label}  {_score_text(assessment.score.overall)}")
+
+
+@assessment_app.command("compare")
+def assessment_compare(
+    previous_reference: Annotated[str, typer.Argument(help="Earlier assessment ID or name")],
+    current_reference: Annotated[str, typer.Argument(help="Later assessment ID or name")],
+    repository: Annotated[Path, typer.Option("--repository", "-r")] = Path("."),
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Compare two saved assessments."""
+
+    store = AssessmentStore(repository)
+    previous = store.load(previous_reference)
+    current = store.load(current_reference)
+    delta = compare(previous, current)
+    typer.echo(
+        json.dumps(delta.model_dump(mode="json"), indent=2)
+        if json_output
+        else comparison_text(previous, current, delta)
+    )
+
+
+def _score_text(value: float | None) -> str:
+    return "not assessed" if value is None else f"score={value:g}"
 
 
 @app.command()
