@@ -27,3 +27,21 @@ Provider output uses stable namespaces such as `spring:bean`, `http:endpoint`, `
 `kafka:topic`, `redis:cache`, and `configuration:property`. The source implementation is deliberately
 deterministic and local. Full Java symbol resolution, composed annotations, XML configuration, and
 runtime wiring are not yet inferred.
+
+## Infrastructure providers
+
+`DatabaseProvider` activates for JDBC, JPA, database driver, Flyway, or Liquibase dependencies. It
+records configured database engines and connections, tables and foreign-key references found in SQL
+files, and literal SQL table reads and writes made through common JDBC-style calls. Connection
+locations are redacted in graph attributes.
+
+`KafkaProvider` activates for Kafka dependencies. It records configured clusters and topic
+properties, `@KafkaListener` consumers, and literal topics passed to producer `send` calls.
+
+`RedisProvider` activates for Redis or Redisson dependencies. It records configured Redis instances,
+`@RedisHash` keyspaces, and literal keys used through common Redis template operations. Connection
+hosts are redacted in graph attributes.
+
+All three providers work independently of Spring and merge their evidence with Spring-derived nodes
+when canonical resource IDs match. Dynamically assembled SQL, topic names, and Redis keys are left
+unresolved instead of being guessed.

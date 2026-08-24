@@ -42,6 +42,8 @@ The factory—not an unconstrained model—owns control flow, repository mutatio
 - Uses Graphify as a context provider for code symbols and cross-file relationships.
 - Adds Spring semantic context for beans, dependency injection, HTTP endpoints, configuration,
   persistence mappings, Kafka listeners, and cache usage.
+- Adds infrastructure context from database drivers and SQL migrations, Kafka clients and
+  configuration, and Redis templates, keyspaces, and connection configuration.
 - Stores the normalized graph under `.refinery/context/context-graph.json` while retaining
   provider-native artifacts for diagnostics.
 - Produces and validates an ordered `ModernizationPlan`.
@@ -163,6 +165,7 @@ src/refinery_ai/
 ├── discovery.py     # deterministic Maven/Gradle inspection
 ├── factory.py       # workflow and safety gates
 ├── harness.py       # read-only Harness pilot and safe Shell policy
+├── infrastructure.py # database, Kafka, and Redis context providers
 ├── knowledge.py     # Graphify context provider and compatibility adapter
 ├── models.py        # shared Pydantic contracts
 ├── openrewrite.py   # allowlisted dry-run adapter
@@ -195,9 +198,9 @@ Subprocesses receive argument lists directly and are never invoked through a she
 ## Current limitations
 
 - Gradle discovery does not yet parse dependencies or Java toolchains.
-- Graphify is run in local, code-only mode. The Spring provider currently performs deterministic
-  source annotation analysis; deeper type resolution and non-Spring infrastructure providers are
-  planned next.
+- Graphify is run in local, code-only mode. Semantic providers currently perform deterministic
+  source and configuration analysis; deeper Java type resolution, runtime topology, dynamically
+  constructed SQL, topics, and Redis keys are not yet inferred.
 - OpenRewrite dry runs require the plugin/recipe dependencies to be resolvable by the target build.
 - OpenRewrite source application is review-gated.
 - AI agents are available as typed boundaries but are not invoked by the default CLI workflow.

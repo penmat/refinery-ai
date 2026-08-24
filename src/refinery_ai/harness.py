@@ -32,6 +32,7 @@ from pydantic_ai_harness.tool_output_limits import Band, LocalFileStore, Spill, 
 from refinery_ai.context import ContextReceipt, DurableContextStore
 from refinery_ai.context_graph import ContextGraphBuilder, ContextGraphQuery
 from refinery_ai.discovery import IGNORED_DIRECTORIES, maven_details
+from refinery_ai.infrastructure import DatabaseProvider, KafkaProvider, RedisProvider
 from refinery_ai.knowledge import GraphifyProvider, KnowledgeGraphProvider
 from refinery_ai.models import (
     BuildSystem,
@@ -285,6 +286,9 @@ class HarnessRepositoryEnvironment:
             [
                 GraphifyProvider(timeout=graphify_timeout, output_limit=output_limit),
                 SpringProvider(),
+                DatabaseProvider(),
+                KafkaProvider(),
+                RedisProvider(),
             ]
         )
         self.context_query = ContextGraphQuery(self.context_builder.store)
