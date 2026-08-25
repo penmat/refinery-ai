@@ -18,6 +18,7 @@ from refinery_ai.assessment.dependencies.models import (
 )
 from refinery_ai.assessment.dependencies.osv import OsvClient, _cvss3
 from refinery_ai.assessment.dependencies.purl import maven_purl
+from refinery_ai.assessment.dependency_artifacts import write_dependency_artifact
 from refinery_ai.assessment.engine import AssessmentEngine
 from refinery_ai.assessment.models import AnalyzerStatus, Category
 from refinery_ai.assessment.scoring import score
@@ -222,3 +223,26 @@ def test_disabled_osv_tls_verification_is_recorded(tmp_path: Path) -> None:
     assert result.status is AnalyzerStatus.COMPLETED
     assert result.tool.metadata["osvTlsVerification"] is False
     assert "verification was disabled" in result.diagnostics[0].message
+
+
+def test_dependency_artifact_preserves_full_structured_findings(tmp_path: Path) -> None:
+    (tmp_path / "pom.xml").write_text("<project/>")
+    assessment = AssessmentEngine().assess(tmp_path)
+    dependency = ResolvedDependency("org.example", "library", "1.0")
+    purl = maven_purl(dependency)
+    result = DependencyAnalyzer(
+        options(),
+        collector=FakeCollector([dependency]),  # type: ignore[arg-type]
+        osv=FakeOsv(  # type: ignore[arg-type]
+            {purl: [Vulnerability("GHSA-example", None, "Detailed issue", "high")]}
+        ),
+    ).analyze(tmp_path, discover(tmp_path))
+    assessment.analyzers["dependencies"] = result
+    assessment.metrics["dependencies"] = dict(result.metrics)
+
+    path = write_dependency_artifact(assessment)
+
+    assert path is not None and path.is_file()
+    payload = json.loads(path.read_text())
+    assert payload["findings"][0]["message"].endswith("Detailed issue")
+    assert result.metrics["reportPath"] == str(path.relative_to(tmp_path))

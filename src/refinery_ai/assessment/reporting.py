@@ -38,6 +38,19 @@ def assessment_text(assessment: Assessment) -> str:
     dependencies = assessment.analyzers.get("dependencies")
     if dependencies is not None:
         lines.extend(["", f"Dependency analysis: {dependencies.status.value}"])
+        if dependencies.status.value == "completed":
+            metrics = dependencies.metrics
+            lines.append(
+                f"  OSV findings: {metrics.get('vulnerabilityCount', 0)} "
+                "("
+                f"{metrics.get('criticalVulnerabilityCount', 0)} critical, "
+                f"{metrics.get('highVulnerabilityCount', 0)} high, "
+                f"{metrics.get('mediumVulnerabilityCount', 0)} medium, "
+                f"{metrics.get('lowVulnerabilityCount', 0)} low, "
+                f"{metrics.get('unknownVulnerabilityCount', 0)} unknown)"
+            )
+        if report_path := dependencies.metrics.get("reportPath"):
+            lines.append(f"  Detailed findings: {report_path}")
         lines.extend(f"  {item.message}" for item in dependencies.diagnostics)
     return "\n".join(lines)
 

@@ -9,6 +9,7 @@ from typing import Annotated
 import typer
 
 from refinery_ai.assessment.comparison import compare
+from refinery_ai.assessment.dependency_artifacts import write_dependency_artifact
 from refinery_ai.assessment.engine import AssessmentEngine
 from refinery_ai.assessment.reporting import assessment_text, comparison_text
 from refinery_ai.assessment.storage import AssessmentStore
@@ -106,6 +107,7 @@ def assess_command(
         keep_sonarqube=keep_sonarqube,
         settings=settings,
     ).assess(repository, name=name)
+    write_dependency_artifact(current)
     store.save(current)
     if previous:
         delta = compare(previous, current)

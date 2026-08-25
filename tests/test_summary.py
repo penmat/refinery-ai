@@ -198,7 +198,12 @@ def test_summary_markdown_includes_dependency_results(
     assert "### Dependency analysis" in result.stdout
     assert "Resolved dependencies: 14 (3 direct)" in result.stdout
     assert "Vulnerable dependencies: 1" in result.stdout
-    assert "org.example:library:1 is affected by GHSA-example" in result.stdout
+    assert "org.example:library:1 is affected by GHSA-example" not in result.stdout
+    artifacts = list((repository / ".refinery/dependencies").glob("osv-findings-*.json"))
+    assert len(artifacts) == 1
+    artifact = json.loads(artifacts[0].read_text())
+    assert artifact["findings"][0]["rule"] == "GHSA-example"
+    assert str(Path(".refinery/dependencies") / artifacts[0].name) in result.stdout
 
 
 def test_summary_cli_defaults_sonarqube_on_and_allows_opt_out(

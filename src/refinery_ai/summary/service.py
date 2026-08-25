@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
+from refinery_ai.assessment.dependency_artifacts import write_dependency_artifact
 from refinery_ai.assessment.engine import AssessmentEngine
 from refinery_ai.config import Settings
 from refinery_ai.context_graph import ContextGraphStore, repository_fingerprint
@@ -75,6 +76,7 @@ class ProjectSummaryService:
             keep_sonarqube=keep_sonarqube,
             settings=settings,
         ).assess(root)
+        write_dependency_artifact(assessment)
         nodes = self._included_nodes(graph, include_tests)
         node_ids = {node.id for node in nodes}
         edges = [edge for edge in graph.edges if edge.source in node_ids or edge.target in node_ids]
@@ -96,7 +98,11 @@ class ProjectSummaryService:
                     category.value: value for category, value in assessment.score.categories.items()
                 },
                 metrics=assessment.metrics,
-                findings=[finding.message for finding in assessment.findings],
+                findings=[
+                    finding.message
+                    for finding in assessment.findings
+                    if finding.category.value != "dependencies"
+                ],
                 findings_by_category={
                     category.value: [
                         finding.message
@@ -104,6 +110,7 @@ class ProjectSummaryService:
                         if finding.category is category
                     ]
                     for category in assessment.score.categories
+                    if category.value != "dependencies"
                 },
                 analyzer_statuses={
                     name: result.status.value for name, result in assessment.analyzers.items()

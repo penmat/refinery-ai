@@ -97,10 +97,8 @@ def summary_markdown(summary: ProjectSummary, *, terminal: bool = False) -> str:
                 f"{dependency_metrics.get('lowVulnerabilityCount', 0)} low, "
                 f"{dependency_metrics.get('unknownVulnerabilityCount', 0)} unknown)"
             )
-            dependency_findings = summary.modernization.findings_by_category.get("dependencies", [])
-            lines.extend(f"  - {finding}" for finding in dependency_findings[:20])
-            if len(dependency_findings) > 20:
-                lines.append(f"  - … and {len(dependency_findings) - 20} more")
+        if report_path := dependency_metrics.get("reportPath"):
+            lines.append(f"- Detailed findings: {report_path}")
         for diagnostic in summary.modernization.analyzer_diagnostics.get("dependencies", []):
             lines.append(f"- Diagnostic: {diagnostic}")
     lines.extend(["", section("Evidence quality"), ""])

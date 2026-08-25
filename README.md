@@ -162,6 +162,10 @@ leaves Dependency Health unassessed. Disable it with:
 uv run refinery assess /path/to/java-project --no-dependencies
 ```
 
+Human-readable assessment and summary reports show aggregate OSV counts only. Complete structured
+findings are retained per run in `.refinery/dependencies/osv-findings-<assessment-id>.json`, and the
+report prints the exact artifact path for later analysis.
+
 OSV requests use the bundled `certifi` CA trust store. On a network that intercepts TLS with a
 private certificate, configure that certificate in the trust chain when possible. As an explicit
 temporary fallback, `--no-osv-verify-ssl` disables certificate verification for OSV requests and
