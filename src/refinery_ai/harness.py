@@ -30,13 +30,14 @@ from pydantic_ai_harness.filesystem import FileSystemToolset
 from pydantic_ai_harness.tool_output_limits import Band, LocalFileStore, Spill, Truncate
 
 from refinery_ai.context import ContextReceipt, DurableContextStore
-from refinery_ai.context_graph import ContextGraphBuilder, ContextGraphQuery
+from refinery_ai.context_graph.builder import ContextGraphBuilder
+from refinery_ai.context_graph.models import ContextGraphInfo
+from refinery_ai.context_graph.query import ContextGraphQuery
 from refinery_ai.discovery import IGNORED_DIRECTORIES, maven_details, select_build_files
 from refinery_ai.infrastructure import DatabaseProvider, KafkaProvider, RedisProvider
 from refinery_ai.knowledge import GraphifyProvider, KnowledgeGraphProvider
 from refinery_ai.logging import get_logger, log_command
 from refinery_ai.models import (
-    ContextGraphInfo,
     DiscoverySnapshot,
     Module,
     VerificationResult,

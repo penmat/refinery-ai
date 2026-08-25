@@ -1,5 +1,9 @@
 # Context graph providers
 
+The context graph is a dedicated subsystem under `refinery_ai/context_graph/`. Persisted models,
+provider contracts, deterministic merging, storage, querying, and repository fingerprinting live in
+focused modules. Graphify and semantic providers will move into its `providers/` package next.
+
 Refinery builds one versioned context graph from independently useful providers. Each provider
 emits normalized nodes and edges with file and line provenance. The builder merges matching stable
 IDs and records provider status and diagnostics in `.refinery/context/context-graph.json`.

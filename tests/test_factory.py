@@ -1,16 +1,17 @@
 from pathlib import Path
 
+from refinery_ai.context_graph.models import ContextGraphInfo
 from refinery_ai.factory import ModernizationFactory
-from refinery_ai.models import KnowledgeGraphInfo, ModernizationGoal, RunStatus
+from refinery_ai.models import ModernizationGoal, RunStatus
 
 
 class FakeKnowledgeGraph:
-    def build(self, repository: Path) -> KnowledgeGraphInfo:
+    def build(self, repository: Path) -> ContextGraphInfo:
         output = repository / "graphify-out"
         output.mkdir(exist_ok=True)
         graph = output / "graph.json"
         graph.write_text('{"nodes": [], "edges": []}')
-        return KnowledgeGraphInfo(graph_path=graph)
+        return ContextGraphInfo(graph_path=graph)
 
 
 def test_prepare_persists_reports(tmp_path: Path) -> None:

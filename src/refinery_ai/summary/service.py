@@ -8,10 +8,12 @@ from pathlib import Path
 from refinery_ai.assessment.dependency_artifacts import write_dependency_artifact
 from refinery_ai.assessment.engine import AssessmentEngine
 from refinery_ai.config import Settings
-from refinery_ai.context_graph import ContextGraphStore, repository_fingerprint
+from refinery_ai.context_graph.fingerprint import repository_fingerprint
+from refinery_ai.context_graph.models import ContextEdge, ContextGraph, ContextNode
+from refinery_ai.context_graph.store import ContextGraphStore
 from refinery_ai.discovery import discover
 from refinery_ai.harness import HarnessRepositoryEnvironment
-from refinery_ai.models import ContextEdge, ContextGraph, ContextNode, DiscoverySnapshot
+from refinery_ai.models import DiscoverySnapshot
 from refinery_ai.summary.models import (
     ArchitectureSummary,
     DataArchitecture,

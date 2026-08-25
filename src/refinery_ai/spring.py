@@ -6,8 +6,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from refinery_ai.context_graph import ContextFragment, ContextRequest
-from refinery_ai.models import ContextEdge, ContextEvidence, ContextNode, DiscoverySnapshot
+from refinery_ai.context_graph.contracts import ContextFragment, ContextRequest
+from refinery_ai.context_graph.models import ContextEdge, ContextEvidence, ContextNode
+from refinery_ai.models import DiscoverySnapshot
 
 _IGNORED_PARTS = {".git", ".gradle", ".idea", ".refinery", "build", "target", "graphify-out"}
 _ANNOTATION = re.compile(r"@(?P<name>[\w.]+)(?:\s*\((?P<args>[^)]*)\))?")

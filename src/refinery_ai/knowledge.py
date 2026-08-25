@@ -8,9 +8,15 @@ import sys
 from pathlib import Path
 from typing import Protocol
 
-from refinery_ai.context_graph import ContextFragment, ContextGraphBuilder, ContextRequest
+from refinery_ai.context_graph.builder import ContextGraphBuilder
+from refinery_ai.context_graph.contracts import ContextFragment, ContextRequest
+from refinery_ai.context_graph.models import (
+    ContextEdge,
+    ContextEvidence,
+    ContextGraphInfo,
+    ContextNode,
+)
 from refinery_ai.logging import get_logger, log_command
-from refinery_ai.models import ContextEdge, ContextEvidence, ContextGraphInfo, ContextNode
 
 logger = get_logger(__name__)
 

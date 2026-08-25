@@ -239,7 +239,7 @@ src/refinery_ai/
 ├── cli.py           # CLI boundary
 ├── config.py        # environment configuration
 ├── context.py       # typed durable context receipts and artifacts
-├── context_graph.py # provider-neutral collection, merge, storage, and queries
+├── context_graph/   # graph models, provider contracts, merge, storage, and queries
 ├── discovery.py     # deterministic Maven/Gradle inspection
 ├── factory.py       # workflow and safety gates
 ├── harness.py       # read-only Harness pilot and safe Shell policy

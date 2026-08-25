@@ -12,16 +12,17 @@ from refinery_ai.assessment.models import (
     ToolIdentity,
 )
 from refinery_ai.cli import app
-from refinery_ai.context_graph import ContextGraphStore, repository_fingerprint
-from refinery_ai.inspectors.dependencies import DependencyAnalyzer
-from refinery_ai.inspectors.sonarqube import SonarQubeAnalyzer
-from refinery_ai.models import (
+from refinery_ai.context_graph.fingerprint import repository_fingerprint
+from refinery_ai.context_graph.models import (
     ContextEdge,
     ContextEvidence,
     ContextGraph,
     ContextNode,
     ProviderRun,
 )
+from refinery_ai.context_graph.store import ContextGraphStore
+from refinery_ai.inspectors.dependencies import DependencyAnalyzer
+from refinery_ai.inspectors.sonarqube import SonarQubeAnalyzer
 from refinery_ai.summary import ProjectSummaryService, SummaryError
 from refinery_ai.summary.reporting import summary_markdown
 

@@ -9,7 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from refinery_ai.models import ContextGraphInfo, DiscoverySnapshot, VerificationResult
+from refinery_ai.context_graph.models import ContextGraphInfo
+from refinery_ai.models import DiscoverySnapshot, VerificationResult
 
 
 class RepositoryEnvironment(Protocol):

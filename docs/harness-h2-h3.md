@@ -11,7 +11,7 @@
 
 It does not include model-facing Shell or writable FileSystem. Planning and one bounded SubAgent were added later in H6. H4 migrated the default investigator, and H7 removed the pre-production legacy adapter.
 
-`HarnessRepositoryEnvironment.read_file` and `find_files` provide line-addressable evidence reads and repository discovery. Current `DiscoverySnapshot`, `KnowledgeGraphInfo`, and `VerificationResult` models remain the adapter outputs. Graphify and OpenRewrite remain Refinery-owned domain tools composed directly behind the Harness environment.
+`HarnessRepositoryEnvironment.read_file` and `find_files` provide line-addressable evidence reads and repository discovery. Current `DiscoverySnapshot`, `ContextGraphInfo`, and `VerificationResult` models remain the adapter outputs. Graphify and OpenRewrite remain Refinery-owned domain tools composed directly behind the Harness environment.
 
 ## H3 — safe Shell pilot
 

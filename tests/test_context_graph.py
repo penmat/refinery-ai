@@ -1,13 +1,10 @@
 import json
 from pathlib import Path
 
-from refinery_ai.context_graph import (
-    ContextFragment,
-    ContextGraphBuilder,
-    ContextGraphQuery,
-    ContextRequest,
-)
-from refinery_ai.models import ContextEdge, ContextEvidence, ContextNode
+from refinery_ai.context_graph.builder import ContextGraphBuilder
+from refinery_ai.context_graph.contracts import ContextFragment, ContextRequest
+from refinery_ai.context_graph.models import ContextEdge, ContextEvidence, ContextNode
+from refinery_ai.context_graph.query import ContextGraphQuery
 
 
 class FirstProvider:

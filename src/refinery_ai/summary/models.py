@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from refinery_ai.models import ContextEvidence, ProviderRun
+from refinery_ai.context_graph.models import ContextEvidence, ProviderRun
 
 
 class ProjectOverview(BaseModel):

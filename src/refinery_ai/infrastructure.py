@@ -8,8 +8,9 @@ from pathlib import Path
 
 from pydantic import JsonValue
 
-from refinery_ai.context_graph import ContextFragment, ContextRequest
-from refinery_ai.models import ContextEdge, ContextEvidence, ContextNode, DiscoverySnapshot
+from refinery_ai.context_graph.contracts import ContextFragment, ContextRequest
+from refinery_ai.context_graph.models import ContextEdge, ContextEvidence, ContextNode
+from refinery_ai.models import DiscoverySnapshot
 
 _IGNORED = {".git", ".gradle", ".idea", ".refinery", "build", "target", "graphify-out"}
 _JAVA_TYPE = re.compile(r"\b(?:class|interface|record)\s+(\w+)")
