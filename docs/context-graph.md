@@ -2,7 +2,8 @@
 
 The context graph is a dedicated subsystem under `refinery_ai/context_graph/`. Persisted models,
 provider contracts, deterministic merging, storage, querying, and repository fingerprinting live in
-focused modules. Graphify and semantic providers will move into its `providers/` package next.
+focused modules. Graphify, Spring, database, Kafka, and Redis providers all live in its `providers/`
+package and share only repository-scanning and evidence-construction utilities.
 
 Refinery builds one versioned context graph from independently useful providers. Each provider
 emits normalized nodes and edges with file and line provenance. The builder merges matching stable
@@ -45,7 +46,7 @@ Use `--json` for the typed summary contract, `--output FILE` for a reusable repo
 control the number of prominent components. A graph from another repository is rejected, while a
 fingerprint mismatch is reported as a stale-evidence warning.
 
-## Infrastructure providers
+## Resource providers
 
 `DatabaseProvider` activates for JDBC, JPA, database driver, Flyway, or Liquibase dependencies. It
 records configured database engines and connections, tables and foreign-key references found in SQL

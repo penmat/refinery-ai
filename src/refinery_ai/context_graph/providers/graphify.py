@@ -1,4 +1,4 @@
-"""Graphify input adapter for the provider-neutral context graph."""
+"""Graphify provider for structural code evidence."""
 
 from __future__ import annotations
 
@@ -6,14 +6,11 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Protocol
 
-from refinery_ai.context_graph.builder import ContextGraphBuilder
 from refinery_ai.context_graph.contracts import ContextFragment, ContextRequest
 from refinery_ai.context_graph.models import (
     ContextEdge,
     ContextEvidence,
-    ContextGraphInfo,
     ContextNode,
 )
 from refinery_ai.logging import get_logger, log_command
@@ -21,14 +18,8 @@ from refinery_ai.logging import get_logger, log_command
 logger = get_logger(__name__)
 
 
-class KnowledgeGraphError(RuntimeError):
+class GraphifyError(RuntimeError):
     """Raised when Graphify cannot build or query the code graph."""
-
-
-class KnowledgeGraphProvider(Protocol):
-    """Compatibility protocol for the original single-provider contract."""
-
-    def build(self, repository: Path) -> ContextGraphInfo: ...
 
 
 class GraphifyProvider:
@@ -57,13 +48,13 @@ class GraphifyProvider:
         graph_path = root / "graphify-out" / "graph.json"
         self._run([*self.command_prefix, "extract", ".", "--code-only"], cwd=root)
         if not graph_path.is_file():
-            raise KnowledgeGraphError(
+            raise GraphifyError(
                 f"Graphify completed without creating its expected graph: {graph_path}"
             )
         try:
             graph = json.loads(graph_path.read_text())
         except (OSError, json.JSONDecodeError) as error:
-            raise KnowledgeGraphError(f"Unable to read Graphify output: {error}") from error
+            raise GraphifyError(f"Unable to read Graphify output: {error}") from error
         candidate_nodes = graph.get("nodes", [])
         candidate_edges = graph.get("edges", graph.get("links", []))
         raw_nodes = candidate_nodes if isinstance(candidate_nodes, list) else []
@@ -131,25 +122,16 @@ class GraphifyProvider:
                 timeout=self.timeout,
             )
         except FileNotFoundError as error:
-            raise KnowledgeGraphError(
+            raise GraphifyError(
                 "Graphify is not installed. Run `uv sync` in the Refinery repository."
             ) from error
         except subprocess.TimeoutExpired as error:
-            raise KnowledgeGraphError(f"Graphify timed out after {self.timeout} seconds") from error
+            raise GraphifyError(f"Graphify timed out after {self.timeout} seconds") from error
         if result.returncode != 0:
             output = (result.stderr or result.stdout)[-self.output_limit :]
             if "No module named graphify" in output:
-                raise KnowledgeGraphError(
+                raise GraphifyError(
                     "Graphify is not installed. Run `uv sync` in the Refinery repository."
                 )
-            raise KnowledgeGraphError(
-                f"Graphify failed with exit code {result.returncode}: {output}"
-            )
+            raise GraphifyError(f"Graphify failed with exit code {result.returncode}: {output}")
         return result
-
-
-class GraphifyKnowledgeGraph(GraphifyProvider):
-    """Deprecated compatibility adapter for the original Graphify API."""
-
-    def build(self, repository: Path) -> ContextGraphInfo:
-        return ContextGraphBuilder([self]).build(repository)

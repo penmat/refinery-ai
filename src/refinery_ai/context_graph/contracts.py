@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from refinery_ai.context_graph.models import ContextEdge, ContextNode
+from refinery_ai.context_graph.models import ContextEdge, ContextGraphInfo, ContextNode
 from refinery_ai.models import DiscoverySnapshot
 
 
@@ -31,3 +31,9 @@ class ContextProvider(Protocol):
     def supports(self, discovery: DiscoverySnapshot | None) -> bool: ...
 
     def collect(self, request: ContextRequest) -> ContextFragment: ...
+
+
+class ContextGraphBuildService(Protocol):
+    """Minimal injected context-graph build boundary."""
+
+    def build(self, repository: Path) -> ContextGraphInfo: ...

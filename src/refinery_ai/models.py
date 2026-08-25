@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import AliasChoices, BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from refinery_ai.context_graph.models import ContextGraphInfo
 
@@ -125,14 +125,6 @@ class RunReport(BaseModel):
     run_id: str
     status: RunStatus
     snapshot: DiscoverySnapshot
-    context_graph: ContextGraphInfo = Field(
-        validation_alias=AliasChoices("context_graph", "knowledge_graph")
-    )
+    context_graph: ContextGraphInfo
     plan: ModernizationPlan
     steps: list[StepResult] = Field(default_factory=list)
-
-    @property
-    def knowledge_graph(self) -> ContextGraphInfo:
-        """Compatibility accessor for reports created before ContextGraph."""
-
-        return self.context_graph

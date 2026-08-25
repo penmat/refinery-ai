@@ -4,7 +4,7 @@
 
 # Refinery AI
 
-Refinery AI is an early-stage, safe-by-default modernization factory for Java applications. It discovers a repository, builds a local knowledge graph, creates a typed migration plan, routes deterministic work toward OpenRewrite, and verifies every approved step.
+Refinery AI is an early-stage, safe-by-default modernization factory for Java applications. It discovers a repository, builds a local context graph, creates a typed migration plan, routes deterministic work toward OpenRewrite, and verifies every approved step.
 
 Version **0.1.0** is a runnable architectural foundation. Discovery, Graphify AST indexing, deterministic planning, safety gates, OpenRewrite dry runs, build verification, repair budgets, typed Pydantic AI agent boundaries, and run reports are implemented. Repository investigation now uses a read-only Pydantic AI Harness FileSystem/RepoContext pilot and safe assessment Shell profile behind the `RepositoryEnvironment` seam. Source-changing OpenRewrite and AI execution remain explicitly review-gated.
 
@@ -214,6 +214,8 @@ Settings use the `REFINERY_` prefix and may be placed in `.env`. See `.env.examp
 | Setting | Default | Purpose |
 |---|---:|---|
 | `REFINERY_MODEL` | `openai:gpt-5-mini` | Pydantic AI model identifier |
+| `REFINERY_LITELLM_MODEL` | `ollama_chat/llama3.1:8b` | LiteLLM provider and model identifier |
+| `REFINERY_LITELLM_API_BASE` | `http://localhost:11434` | LiteLLM provider API base URL |
 | `REFINERY_MAX_REPAIR_ATTEMPTS` | `3` | Repair-loop attempt limit |
 | `REFINERY_COMMAND_TIMEOUT_SECONDS` | `900` | Build command timeout |
 | `REFINERY_GRAPHIFY_TIMEOUT_SECONDS` | `900` | Graphify extraction timeout |
@@ -231,6 +233,27 @@ Settings use the `REFINERY_` prefix and may be placed in `.env`. See `.env.examp
 | `REFINERY_SONARQUBE_ANALYSIS_TIMEOUT_SECONDS` | `900` | Scanner and compute-task timeout |
 | `REFINERY_SONARQUBE_GRADLE_SCANNER_VERSION` | `7.2.2.6593` | Pinned temporary Gradle scanner plugin |
 
+## LiteLLM tool loop
+
+`run_tool_loop` accepts `{role, prompt}` messages and typed Python functions. It derives
+JSON schemas from function signatures, executes requested calls, appends their results,
+and continues until the model answers or the turn limit is reached.
+
+```python
+from refinery_ai.llm import run_tool_loop
+
+def find_service(name: str) -> dict[str, str]:
+    """Find a service by name."""
+    return {"name": name, "owner": "platform"}
+
+result = run_tool_loop(
+    [{"role": "user", "prompt": "Who owns the billing service?"}],
+    tools=[find_service],
+    max_turns=4,
+)
+print(result.content)
+```
+
 ## Package layout
 
 ```text
@@ -239,13 +262,11 @@ src/refinery_ai/
 ├── cli.py           # CLI boundary
 ├── config.py        # environment configuration
 ├── context.py       # typed durable context receipts and artifacts
-├── context_graph/   # graph models, provider contracts, merge, storage, and queries
+├── context_graph/   # graph core and all built-in evidence providers
 ├── discovery.py     # deterministic Maven/Gradle inspection
 ├── factory.py       # workflow and safety gates
 ├── harness.py       # read-only Harness pilot and safe Shell policy
-├── infrastructure.py # database, Kafka, and Redis context providers
 ├── inspectors/       # reusable evidence runner and integrations including OSV and SonarQube
-├── knowledge.py     # Graphify context provider and compatibility adapter
 ├── models.py        # shared Pydantic contracts
 ├── openrewrite.py   # allowlisted dry-run adapter
 ├── planning.py      # deterministic planner and validation
@@ -253,7 +274,6 @@ src/refinery_ai/
 ├── reporting.py     # JSON/Markdown audit output
 ├── repository.py    # Refinery-owned repository environment seam
 ├── specialists.py   # typed specialist output and deterministic merge
-├── spring.py        # Spring annotation and framework semantic provider
 └── verification.py  # bounded build execution
 ```
 

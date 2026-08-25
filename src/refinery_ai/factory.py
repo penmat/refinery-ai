@@ -7,8 +7,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from refinery_ai.config import Settings
+from refinery_ai.context_graph.contracts import ContextGraphBuildService
 from refinery_ai.harness import AssessmentHarnessPolicy, HarnessRepositoryEnvironment
-from refinery_ai.knowledge import KnowledgeGraphProvider
 from refinery_ai.models import (
     ModernizationGoal,
     RunReport,
@@ -30,12 +30,12 @@ class ModernizationFactory:
         self,
         settings: Settings | None = None,
         rewrite: OpenRewriteAdapter | None = None,
-        knowledge: KnowledgeGraphProvider | None = None,
+        context_graph: ContextGraphBuildService | None = None,
         environment: RepositoryEnvironment | None = None,
     ) -> None:
         self.settings = settings or Settings()
         self.environment = environment
-        self.knowledge = knowledge
+        self.context_graph = context_graph
         self.rewrite = rewrite
 
     def _environment(self, repository: Path) -> RepositoryEnvironment:
@@ -47,7 +47,7 @@ class ModernizationFactory:
                 command_timeout_seconds=self.settings.command_timeout_seconds,
                 tool_output_limit_characters=self.settings.max_output_characters,
             ),
-            knowledge=self.knowledge,
+            context_graph=self.context_graph,
             rewrite=self.rewrite,
             graphify_timeout=self.settings.graphify_timeout_seconds,
             output_limit=self.settings.max_output_characters,

@@ -1,4 +1,4 @@
-"""Spring-specific semantic context collection."""
+"""Spring-specific semantic context-graph provider."""
 
 from __future__ import annotations
 

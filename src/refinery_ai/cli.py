@@ -185,7 +185,7 @@ def _score_text(value: float | None) -> str:
 
 @app.command()
 def graph(
-    question: Annotated[str, typer.Argument(help="Question for the code knowledge graph")],
+    question: Annotated[str, typer.Argument(help="Question for the code context graph")],
     repository: Annotated[Path, typer.Option("--repository", "-r")] = Path("."),
 ) -> None:
     """Build the repository context graph and return a scoped query result."""

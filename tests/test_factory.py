@@ -5,7 +5,7 @@ from refinery_ai.factory import ModernizationFactory
 from refinery_ai.models import ModernizationGoal, RunStatus
 
 
-class FakeKnowledgeGraph:
+class FakeContextGraph:
     def build(self, repository: Path) -> ContextGraphInfo:
         output = repository / "graphify-out"
         output.mkdir(exist_ok=True)
@@ -16,7 +16,7 @@ class FakeKnowledgeGraph:
 
 def test_prepare_persists_reports(tmp_path: Path) -> None:
     (tmp_path / "pom.xml").write_text("<project><modelVersion>4.0.0</modelVersion></project>")
-    report = ModernizationFactory(knowledge=FakeKnowledgeGraph()).prepare(
+    report = ModernizationFactory(context_graph=FakeContextGraph()).prepare(
         tmp_path, ModernizationGoal(description="Upgrade Java", target_java=17)
     )
     assert report.status is RunStatus.PLANNED
@@ -27,7 +27,7 @@ def test_prepare_persists_reports(tmp_path: Path) -> None:
 
 
 def test_apply_stops_on_unknown_build_system(tmp_path: Path) -> None:
-    report = ModernizationFactory(knowledge=FakeKnowledgeGraph()).run(
+    report = ModernizationFactory(context_graph=FakeContextGraph()).run(
         tmp_path, ModernizationGoal(description="Upgrade Java"), apply=True
     )
     assert report.status is RunStatus.FAILED

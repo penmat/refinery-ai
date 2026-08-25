@@ -53,6 +53,6 @@ def test_rejects_missing_repository(tmp_path: Path) -> None:
 def test_ignores_refinery_state_when_checking_worktree(tmp_path: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     (tmp_path / ".refinery").mkdir()
-    (tmp_path / ".refinery" / "knowledge.db").touch()
+    (tmp_path / ".refinery" / "context.db").touch()
 
     assert not discover(tmp_path).dirty

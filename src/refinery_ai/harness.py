@@ -31,11 +31,17 @@ from pydantic_ai_harness.tool_output_limits import Band, LocalFileStore, Spill, 
 
 from refinery_ai.context import ContextReceipt, DurableContextStore
 from refinery_ai.context_graph.builder import ContextGraphBuilder
+from refinery_ai.context_graph.contracts import ContextGraphBuildService
 from refinery_ai.context_graph.models import ContextGraphInfo
+from refinery_ai.context_graph.providers import (
+    DatabaseProvider,
+    GraphifyProvider,
+    KafkaProvider,
+    RedisProvider,
+    SpringProvider,
+)
 from refinery_ai.context_graph.query import ContextGraphQuery
 from refinery_ai.discovery import IGNORED_DIRECTORIES, maven_details, select_build_files
-from refinery_ai.infrastructure import DatabaseProvider, KafkaProvider, RedisProvider
-from refinery_ai.knowledge import GraphifyProvider, KnowledgeGraphProvider
 from refinery_ai.logging import get_logger, log_command
 from refinery_ai.models import (
     DiscoverySnapshot,
@@ -44,7 +50,6 @@ from refinery_ai.models import (
 )
 from refinery_ai.openrewrite import OpenRewriteAdapter
 from refinery_ai.specialists import BuildRuntimeSpecialistResult
-from refinery_ai.spring import SpringProvider
 from refinery_ai.verification import verification_command
 
 logger = get_logger(__name__)
@@ -253,7 +258,7 @@ class HarnessRepositoryEnvironment:
         repository: Path,
         *,
         policy: AssessmentHarnessPolicy | None = None,
-        knowledge: KnowledgeGraphProvider | None = None,
+        context_graph: ContextGraphBuildService | None = None,
         context_builder: ContextGraphBuilder | None = None,
         rewrite: OpenRewriteAdapter | None = None,
         graphify_timeout: int = 900,
@@ -284,7 +289,7 @@ class HarnessRepositoryEnvironment:
             env={"PATH": os.environ.get("PATH", ""), "HOME": str(self.repository)},
             denied_env_patterns=LLM_API_KEY_ENV_PATTERNS,
         )
-        self.knowledge = knowledge
+        self.context_graph = context_graph
         self.context_builder = context_builder or ContextGraphBuilder(
             [
                 GraphifyProvider(timeout=graphify_timeout, output_limit=output_limit),
@@ -445,22 +450,12 @@ class HarnessRepositoryEnvironment:
         return snapshot
 
     def build_context(self, repository: Path) -> ContextGraphInfo:
-        if self.knowledge is not None:
-            return self.knowledge.build(repository)
+        if self.context_graph is not None:
+            return self.context_graph.build(repository)
         return self.context_builder.build(repository, self._last_discovery)
-
-    def build_knowledge(self, repository: Path) -> ContextGraphInfo:
-        """Compatibility alias for the pre-ContextGraph repository protocol."""
-
-        return self.build_context(repository)
 
     def query_context(self, graph_path: Path, question: str) -> str:
         return self.context_query.query(graph_path, question)
-
-    def query_knowledge(self, graph_path: Path, question: str) -> str:
-        """Compatibility alias for the pre-ContextGraph repository protocol."""
-
-        return self.query_context(graph_path, question)
 
     def verification_command(self, snapshot: DiscoverySnapshot) -> list[str] | None:
         return verification_command(snapshot)

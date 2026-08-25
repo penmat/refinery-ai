@@ -1,9 +1,9 @@
 from pathlib import Path
 
 from refinery_ai.context_graph.builder import ContextGraphBuilder
+from refinery_ai.context_graph.providers.spring import SpringProvider
 from refinery_ai.context_graph.store import ContextGraphStore
 from refinery_ai.discovery import discover
-from refinery_ai.spring import SpringProvider
 
 
 def test_spring_provider_collects_framework_semantics() -> None:

@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from refinery_ai.knowledge import GraphifyKnowledgeGraph, KnowledgeGraphError
+from refinery_ai.context_graph.builder import ContextGraphBuilder
+from refinery_ai.context_graph.contracts import ContextRequest
+from refinery_ai.context_graph.providers.graphify import GraphifyError, GraphifyProvider
 
 
 def completed(command: list[str], stdout: str = "") -> subprocess.CompletedProcess[str]:
@@ -22,7 +24,7 @@ def test_build_reads_graphify_output(tmp_path: Path, monkeypatch: pytest.MonkeyP
         return completed(["graphify"])
 
     monkeypatch.setattr(subprocess, "run", run)
-    info = GraphifyKnowledgeGraph().build(tmp_path)
+    info = ContextGraphBuilder([GraphifyProvider()]).build(tmp_path)
 
     assert info.node_count == 2
     assert info.edge_count == 1
@@ -42,7 +44,7 @@ def test_query_uses_explicit_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         return completed(command, "scoped result\n")
 
     monkeypatch.setattr(subprocess, "run", run)
-    result = GraphifyKnowledgeGraph().query(graph, "show service dependencies")
+    result = GraphifyProvider().query(graph, "show service dependencies")
 
     assert result == "scoped result"
     assert seen[-5:] == [
@@ -61,5 +63,5 @@ def test_missing_graphify_has_actionable_error(
         raise FileNotFoundError
 
     monkeypatch.setattr(subprocess, "run", run)
-    with pytest.raises(KnowledgeGraphError, match="uv sync"):
-        GraphifyKnowledgeGraph().build(tmp_path)
+    with pytest.raises(GraphifyError, match="uv sync"):
+        GraphifyProvider().collect(ContextRequest(repository=tmp_path))

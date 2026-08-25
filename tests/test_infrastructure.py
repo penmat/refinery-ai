@@ -1,9 +1,9 @@
 from pathlib import Path
 
 from refinery_ai.context_graph.builder import ContextGraphBuilder
+from refinery_ai.context_graph.providers import DatabaseProvider, KafkaProvider, RedisProvider
 from refinery_ai.context_graph.store import ContextGraphStore
 from refinery_ai.discovery import discover
-from refinery_ai.infrastructure import DatabaseProvider, KafkaProvider, RedisProvider
 
 
 def test_infrastructure_providers_collect_usage_and_configuration() -> None:
