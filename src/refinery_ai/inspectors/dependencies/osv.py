@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from refinery_ai.assessment.dependencies.models import DependencyAnalysisError, Vulnerability
+from refinery_ai.inspectors.dependencies.models import DependencyAnalysisError, Vulnerability
 
 
 class OsvClient:

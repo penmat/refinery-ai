@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from refinery_ai.assessment.sonarqube.models import (
+from refinery_ai.inspectors.sonarqube.models import (
     SonarQubeError,
     SonarQubeTimeout,
     SonarQubeUnavailable,

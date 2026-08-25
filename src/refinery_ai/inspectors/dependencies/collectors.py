@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from refinery_ai.assessment.dependencies.models import (
+from refinery_ai.inspectors.dependencies.models import (
     DependencyAnalysisError,
     DependencyAnalysisTimeout,
     ResolvedDependency,

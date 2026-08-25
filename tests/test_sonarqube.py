@@ -19,19 +19,21 @@ from refinery_ai.assessment.models import (
     ToolIdentity,
 )
 from refinery_ai.assessment.scoring import score
-from refinery_ai.assessment.sonarqube.analyzer import (
-    SonarQubeAnalyzer,
-    SonarQubeOptions,
-    project_key_for,
-)
-from refinery_ai.assessment.sonarqube.client import SonarQubeClient
-from refinery_ai.assessment.sonarqube.docker import DockerOptions, SonarQubeContainer
-from refinery_ai.assessment.sonarqube.models import SonarQubeError, SonarScannerContext
-from refinery_ai.assessment.sonarqube.normalization import normalize_findings, normalize_metrics
-from refinery_ai.assessment.sonarqube.scanner import ScannerRunner
 from refinery_ai.cli import app
 from refinery_ai.config import Settings
 from refinery_ai.discovery import discover
+from refinery_ai.inspectors import InspectionRequest
+from refinery_ai.inspectors.sonarqube import (
+    SonarQubeAnalyzer,
+    SonarQubeInspector,
+    SonarQubeOptions,
+)
+from refinery_ai.inspectors.sonarqube.client import SonarQubeClient
+from refinery_ai.inspectors.sonarqube.docker import DockerOptions, SonarQubeContainer
+from refinery_ai.inspectors.sonarqube.inspector import project_key_for
+from refinery_ai.inspectors.sonarqube.models import SonarQubeError, SonarScannerContext
+from refinery_ai.inspectors.sonarqube.normalization import normalize_findings, normalize_metrics
+from refinery_ai.inspectors.sonarqube.scanner import ScannerRunner
 
 
 def completed(
@@ -258,6 +260,31 @@ def test_project_key_is_stable_and_hides_full_path(tmp_path: Path) -> None:
     first = project_key_for(tmp_path)
     assert first == project_key_for(tmp_path)
     assert str(tmp_path) not in first
+
+
+def test_sonarqube_inspector_uses_shared_inspection_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot = discover(tmp_path)
+    expected = AnalyzerResult(
+        analyzer="sonarqube",
+        status=AnalyzerStatus.UNAVAILABLE,
+        completeness=0,
+        duration_seconds=0,
+        tool=ToolIdentity(name="sonarqube", version="none", configuration_hash="x"),
+    )
+    inspector = SonarQubeInspector("abcdef123456", sonar_options())
+
+    def analyze(repository: Path, received_snapshot: object) -> AnalyzerResult:
+        assert repository == tmp_path.resolve()
+        assert received_snapshot is snapshot
+        return expected
+
+    monkeypatch.setattr(inspector, "analyze", analyze)
+
+    result = inspector.inspect(InspectionRequest(repository=tmp_path.resolve(), snapshot=snapshot))
+
+    assert result is expected
 
 
 def test_bootstrap_falls_back_when_password_change_response_is_uncertain() -> None:

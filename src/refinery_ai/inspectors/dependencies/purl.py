@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-from refinery_ai.assessment.dependencies.models import ResolvedDependency
+from refinery_ai.inspectors.dependencies.models import ResolvedDependency
 
 
 def maven_purl(dependency: ResolvedDependency) -> str:

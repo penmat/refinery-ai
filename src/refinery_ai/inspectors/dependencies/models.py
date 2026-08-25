@@ -1,4 +1,4 @@
-"""Internal dependency-analysis contracts."""
+"""Dependency-inspection contracts."""
 
 from __future__ import annotations
 

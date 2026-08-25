@@ -4,7 +4,6 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from refinery_ai.assessment.dependencies.analyzer import DependencyAnalyzer
 from refinery_ai.assessment.models import (
     AnalyzerResult,
     AnalyzerStatus,
@@ -12,9 +11,10 @@ from refinery_ai.assessment.models import (
     Finding,
     ToolIdentity,
 )
-from refinery_ai.assessment.sonarqube.analyzer import SonarQubeAnalyzer
 from refinery_ai.cli import app
 from refinery_ai.context_graph import ContextGraphStore, repository_fingerprint
+from refinery_ai.inspectors.dependencies import DependencyAnalyzer
+from refinery_ai.inspectors.sonarqube import SonarQubeAnalyzer
 from refinery_ai.models import (
     ContextEdge,
     ContextEvidence,

@@ -1,4 +1,4 @@
-"""Built-in Phase 1 analyzers using repository-local evidence only."""
+"""Built-in inspectors using repository-local evidence only."""
 
 from __future__ import annotations
 
@@ -6,25 +6,21 @@ import hashlib
 import re
 import time
 from pathlib import Path
-from typing import Protocol
 
 from refinery_ai.assessment.models import AnalyzerResult, AnalyzerStatus, ToolIdentity
-from refinery_ai.models import BuildSystem, DiscoverySnapshot
+from refinery_ai.inspectors.contracts import InspectionRequest, Inspector
+from refinery_ai.models import BuildSystem
 
-ANALYZER_VERSION = "1.0"
+INSPECTOR_VERSION = "1.0"
 _CONFIGURATION = "phase1-local-v1"
 _CONFIGURATION_HASH = hashlib.sha256(_CONFIGURATION.encode()).hexdigest()
 _IGNORED = {".git", ".gradle", ".idea", ".refinery", "build", "target", "graphify-out"}
 
 
-class Analyzer(Protocol):
-    name: str
-
-    def analyze(self, repository: Path, snapshot: DiscoverySnapshot) -> AnalyzerResult: ...
-
-
 def identity(name: str) -> ToolIdentity:
-    return ToolIdentity(name=name, version=ANALYZER_VERSION, configuration_hash=_CONFIGURATION_HASH)
+    return ToolIdentity(
+        name=name, version=INSPECTOR_VERSION, configuration_hash=_CONFIGURATION_HASH
+    )
 
 
 def _result(
@@ -40,11 +36,12 @@ def _result(
     )
 
 
-class DiscoveryAnalyzer:
+class DiscoveryInspector:
     name = "discovery"
 
-    def analyze(self, repository: Path, snapshot: DiscoverySnapshot) -> AnalyzerResult:
+    def inspect(self, request: InspectionRequest) -> AnalyzerResult:
         started = time.monotonic()
+        snapshot = request.snapshot
         return _result(
             self.name,
             started,
@@ -56,12 +53,13 @@ class DiscoveryAnalyzer:
         )
 
 
-class PlatformAnalyzer:
+class PlatformInspector:
     name = "platform"
 
-    def analyze(self, repository: Path, snapshot: DiscoverySnapshot) -> AnalyzerResult:
+    def inspect(self, request: InspectionRequest) -> AnalyzerResult:
         started = time.monotonic()
-        java_files = _java_files(repository)
+        snapshot = request.snapshot
+        java_files = _java_files(request.repository)
         uses_javax = False
         uses_jakarta = False
         for path in java_files:
@@ -84,11 +82,13 @@ class PlatformAnalyzer:
         )
 
 
-class BuildAnalyzer:
+class BuildInspector:
     name = "build"
 
-    def analyze(self, repository: Path, snapshot: DiscoverySnapshot) -> AnalyzerResult:
+    def inspect(self, request: InspectionRequest) -> AnalyzerResult:
         started = time.monotonic()
+        repository = request.repository
+        snapshot = request.snapshot
         wrapper = (
             (repository / "mvnw").is_file()
             if snapshot.build_system is BuildSystem.MAVEN
@@ -107,12 +107,12 @@ class BuildAnalyzer:
         )
 
 
-class SourceAnalyzer:
+class SourceInspector:
     name = "source"
 
-    def analyze(self, repository: Path, snapshot: DiscoverySnapshot) -> AnalyzerResult:
+    def inspect(self, request: InspectionRequest) -> AnalyzerResult:
         started = time.monotonic()
-        files = _java_files(repository)
+        files = _java_files(request.repository)
         production = [path for path in files if "src/test" not in path.as_posix()]
         test = [path for path in files if "src/test" in path.as_posix()]
         lines = 0
@@ -150,9 +150,9 @@ def _java_files(repository: Path) -> list[Path]:
     ]
 
 
-BUILT_IN_ANALYZERS: tuple[Analyzer, ...] = (
-    DiscoveryAnalyzer(),
-    PlatformAnalyzer(),
-    BuildAnalyzer(),
-    SourceAnalyzer(),
+BUILT_IN_INSPECTORS: tuple[Inspector[AnalyzerResult], ...] = (
+    DiscoveryInspector(),
+    PlatformInspector(),
+    BuildInspector(),
+    SourceInspector(),
 )

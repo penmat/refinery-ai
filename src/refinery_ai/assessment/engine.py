@@ -6,8 +6,6 @@ import subprocess
 from pathlib import Path
 from uuid import uuid4
 
-from refinery_ai.assessment.analyzers import BUILT_IN_ANALYZERS, Analyzer
-from refinery_ai.assessment.dependencies import DependencyAnalyzer, DependencyAnalyzerOptions
 from refinery_ai.assessment.models import (
     AnalyzerResult,
     Assessment,
@@ -15,22 +13,28 @@ from refinery_ai.assessment.models import (
     RepositoryIdentity,
 )
 from refinery_ai.assessment.scoring import make_profile, score
-from refinery_ai.assessment.sonarqube import SonarQubeAnalyzer, SonarQubeOptions
 from refinery_ai.config import Settings
-from refinery_ai.discovery import discover
+from refinery_ai.inspectors import (
+    BUILT_IN_INSPECTORS,
+    InspectionRunner,
+    Inspector,
+    InspectorRegistry,
+)
+from refinery_ai.inspectors.dependencies import DependencyAnalyzerOptions, DependencyInspector
+from refinery_ai.inspectors.sonarqube import SonarQubeInspector, SonarQubeOptions
 
 
 class AssessmentEngine:
     def __init__(
         self,
-        analyzers: tuple[Analyzer, ...] = BUILT_IN_ANALYZERS,
+        inspectors: tuple[Inspector[AnalyzerResult], ...] = BUILT_IN_INSPECTORS,
         *,
         dependency_analysis_enabled: bool = False,
         sonarqube_enabled: bool = False,
         keep_sonarqube: bool = False,
         settings: Settings | None = None,
     ) -> None:
-        self.analyzers = analyzers
+        self.inspectors = inspectors
         self.dependency_analysis_enabled = dependency_analysis_enabled
         self.sonarqube_enabled = sonarqube_enabled
         self.keep_sonarqube = keep_sonarqube
@@ -38,42 +42,47 @@ class AssessmentEngine:
 
     def assess(self, repository: Path, *, name: str | None = None) -> Assessment:
         root = repository.expanduser().resolve()
-        snapshot = discover(root)
         assessment_id = uuid4().hex
-        results: dict[str, AnalyzerResult] = {}
-        for analyzer in self.analyzers:
-            results[analyzer.name] = analyzer.analyze(root, snapshot)
+        inspectors = list(self.inspectors)
         if self.dependency_analysis_enabled:
-            dependencies = DependencyAnalyzer(
-                DependencyAnalyzerOptions(
-                    maven_plugin_version=self.settings.maven_dependency_plugin_version,
-                    resolution_timeout_seconds=(
-                        self.settings.dependency_resolution_timeout_seconds
-                    ),
-                    osv_url=self.settings.osv_api_url,
-                    osv_timeout_seconds=self.settings.osv_timeout_seconds,
-                    osv_batch_size=self.settings.osv_batch_size,
-                    osv_verify_ssl=self.settings.osv_verify_ssl,
-                    output_limit=self.settings.max_output_characters,
+            inspectors.append(
+                DependencyInspector(
+                    DependencyAnalyzerOptions(
+                        maven_plugin_version=self.settings.maven_dependency_plugin_version,
+                        resolution_timeout_seconds=(
+                            self.settings.dependency_resolution_timeout_seconds
+                        ),
+                        osv_url=self.settings.osv_api_url,
+                        osv_timeout_seconds=self.settings.osv_timeout_seconds,
+                        osv_batch_size=self.settings.osv_batch_size,
+                        osv_verify_ssl=self.settings.osv_verify_ssl,
+                        output_limit=self.settings.max_output_characters,
+                    )
                 )
             )
-            results[dependencies.name] = dependencies.analyze(root, snapshot)
         if self.sonarqube_enabled:
-            sonar = SonarQubeAnalyzer(
-                assessment_id,
-                SonarQubeOptions(
-                    image=self.settings.sonarqube_image,
-                    image_pull_timeout_seconds=self.settings.sonarqube_image_pull_timeout_seconds,
-                    startup_timeout_seconds=self.settings.sonarqube_startup_timeout_seconds,
-                    analysis_timeout_seconds=self.settings.sonarqube_analysis_timeout_seconds,
-                    poll_interval_seconds=self.settings.sonarqube_poll_interval_seconds,
-                    maven_scanner_version=self.settings.sonarqube_maven_scanner_version,
-                    gradle_scanner_version=self.settings.sonarqube_gradle_scanner_version,
-                    keep_container=self.keep_sonarqube,
-                    output_limit=self.settings.max_output_characters,
-                ),
+            inspectors.append(
+                SonarQubeInspector(
+                    assessment_id,
+                    SonarQubeOptions(
+                        image=self.settings.sonarqube_image,
+                        image_pull_timeout_seconds=(
+                            self.settings.sonarqube_image_pull_timeout_seconds
+                        ),
+                        startup_timeout_seconds=self.settings.sonarqube_startup_timeout_seconds,
+                        analysis_timeout_seconds=self.settings.sonarqube_analysis_timeout_seconds,
+                        poll_interval_seconds=self.settings.sonarqube_poll_interval_seconds,
+                        maven_scanner_version=self.settings.sonarqube_maven_scanner_version,
+                        gradle_scanner_version=self.settings.sonarqube_gradle_scanner_version,
+                        keep_container=self.keep_sonarqube,
+                        output_limit=self.settings.max_output_characters,
+                    ),
+                )
             )
-            results[sonar.name] = sonar.analyze(root, snapshot)
+        registry = InspectorRegistry(inspectors)
+        inspection = InspectionRunner(registry).inspect(root)
+        snapshot = inspection.request.snapshot
+        results: dict[str, AnalyzerResult] = dict(inspection.results)
         metrics = {
             analyzer_name: dict(result.metrics) for analyzer_name, result in sorted(results.items())
         }

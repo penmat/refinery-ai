@@ -6,23 +6,25 @@ from typing import Any
 
 import pytest
 
-from refinery_ai.assessment.dependencies.analyzer import (
-    DependencyAnalyzer,
-    DependencyAnalyzerOptions,
-)
-from refinery_ai.assessment.dependencies.collectors import ResolvedDependencyCollector
-from refinery_ai.assessment.dependencies.models import (
-    DependencyAnalysisError,
-    ResolvedDependency,
-    Vulnerability,
-)
-from refinery_ai.assessment.dependencies.osv import OsvClient, _cvss3
-from refinery_ai.assessment.dependencies.purl import maven_purl
 from refinery_ai.assessment.dependency_artifacts import write_dependency_artifact
 from refinery_ai.assessment.engine import AssessmentEngine
 from refinery_ai.assessment.models import AnalyzerStatus, Category
 from refinery_ai.assessment.scoring import score
 from refinery_ai.discovery import discover
+from refinery_ai.inspectors import InspectionRequest
+from refinery_ai.inspectors.dependencies import (
+    DependencyAnalyzer,
+    DependencyAnalyzerOptions,
+    DependencyInspector,
+)
+from refinery_ai.inspectors.dependencies.collectors import ResolvedDependencyCollector
+from refinery_ai.inspectors.dependencies.models import (
+    DependencyAnalysisError,
+    ResolvedDependency,
+    Vulnerability,
+)
+from refinery_ai.inspectors.dependencies.osv import OsvClient, _cvss3
+from refinery_ai.inspectors.dependencies.purl import maven_purl
 from refinery_ai.models import BuildSystem
 
 
@@ -176,6 +178,20 @@ def test_dependency_analyzer_emits_osv_findings(tmp_path: Path) -> None:
     base = AssessmentEngine().assess(tmp_path)
     base.analyzers["dependencies"] = result
     assert score(base.analyzers).categories[Category.DEPENDENCIES] == 90
+
+
+def test_dependency_inspector_uses_shared_inspection_request(tmp_path: Path) -> None:
+    snapshot = discover(tmp_path)
+    inspector = DependencyInspector(
+        options(),
+        collector=FakeCollector([]),  # type: ignore[arg-type]
+        osv=FakeOsv({}),  # type: ignore[arg-type]
+    )
+
+    result = inspector.inspect(InspectionRequest(repository=tmp_path.resolve(), snapshot=snapshot))
+
+    assert result.analyzer == "dependencies"
+    assert result.status is AnalyzerStatus.COMPLETED
 
 
 def test_dependency_resolution_failure_is_unavailable(tmp_path: Path) -> None:

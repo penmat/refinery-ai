@@ -1,4 +1,4 @@
-"""Orchestrate one temporary local SonarQube analysis."""
+"""Inspect a repository with one temporary local SonarQube analysis."""
 
 from __future__ import annotations
 
@@ -16,20 +16,21 @@ from refinery_ai.assessment.models import (
     Diagnostic,
     ToolIdentity,
 )
-from refinery_ai.assessment.sonarqube.client import SonarQubeClient
-from refinery_ai.assessment.sonarqube.docker import DockerOptions, SonarQubeContainer
-from refinery_ai.assessment.sonarqube.models import (
+from refinery_ai.inspectors.contracts import InspectionRequest
+from refinery_ai.inspectors.sonarqube.client import SonarQubeClient
+from refinery_ai.inspectors.sonarqube.docker import DockerOptions, SonarQubeContainer
+from refinery_ai.inspectors.sonarqube.models import (
     SonarQubeError,
     SonarQubeTimeout,
     SonarQubeUnavailable,
     SonarScannerContext,
 )
-from refinery_ai.assessment.sonarqube.normalization import (
+from refinery_ai.inspectors.sonarqube.normalization import (
     METRIC_KEYS,
     normalize_findings,
     normalize_metrics,
 )
-from refinery_ai.assessment.sonarqube.scanner import ScannerRunner
+from refinery_ai.inspectors.sonarqube.scanner import ScannerRunner
 from refinery_ai.models import DiscoverySnapshot
 
 
@@ -227,3 +228,10 @@ def project_key_for(repository: Path) -> str:
     )
     digest = hashlib.sha256(str(root).encode()).hexdigest()[:12]
     return f"refinery:{name or 'repository'}:{digest}"
+
+
+class SonarQubeInspector(SonarQubeAnalyzer):
+    """SonarQube inspector entry point."""
+
+    def inspect(self, request: InspectionRequest) -> AnalyzerResult:
+        return self.analyze(request.repository, request.snapshot)

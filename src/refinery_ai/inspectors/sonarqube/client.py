@@ -11,7 +11,7 @@ import urllib.request
 from collections.abc import Callable
 from typing import Any
 
-from refinery_ai.assessment.sonarqube.models import SonarQubeError, SonarQubeTimeout
+from refinery_ai.inspectors.sonarqube.models import SonarQubeError, SonarQubeTimeout
 
 OpenUrl = Callable[..., Any]
 

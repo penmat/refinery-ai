@@ -1,4 +1,4 @@
-"""Resolved dependency analysis orchestration."""
+"""Resolved dependency and vulnerability inspection orchestration."""
 
 from __future__ import annotations
 
@@ -9,13 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from refinery_ai.assessment.dependencies.collectors import ResolvedDependencyCollector
-from refinery_ai.assessment.dependencies.models import (
-    DependencyAnalysisError,
-    DependencyAnalysisTimeout,
-)
-from refinery_ai.assessment.dependencies.osv import OsvClient
-from refinery_ai.assessment.dependencies.purl import maven_purl
 from refinery_ai.assessment.models import (
     AnalyzerResult,
     AnalyzerStatus,
@@ -24,6 +17,14 @@ from refinery_ai.assessment.models import (
     Finding,
     ToolIdentity,
 )
+from refinery_ai.inspectors.contracts import InspectionRequest
+from refinery_ai.inspectors.dependencies.collectors import ResolvedDependencyCollector
+from refinery_ai.inspectors.dependencies.models import (
+    DependencyAnalysisError,
+    DependencyAnalysisTimeout,
+)
+from refinery_ai.inspectors.dependencies.osv import OsvClient
+from refinery_ai.inspectors.dependencies.purl import maven_purl
 from refinery_ai.models import DiscoverySnapshot
 
 
@@ -153,3 +154,10 @@ class DependencyAnalyzer:
             configuration_hash=hashlib.sha256(canonical.encode()).hexdigest(),
             metadata=metadata,
         )
+
+
+class DependencyInspector(DependencyAnalyzer):
+    """Dependency and vulnerability inspector entry point."""
+
+    def inspect(self, request: InspectionRequest) -> AnalyzerResult:
+        return self.analyze(request.repository, request.snapshot)

@@ -1,4 +1,4 @@
-"""Normalize SonarQube measures and issues into Refinery evidence."""
+"""Normalize SonarQube measures and issues into inspector evidence."""
 
 from __future__ import annotations
 

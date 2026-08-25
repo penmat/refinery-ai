@@ -1,4 +1,4 @@
-"""Internal SonarQube contracts and typed failures."""
+"""SonarQube inspector contracts and typed failures."""
 
 from __future__ import annotations
 

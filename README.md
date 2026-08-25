@@ -243,6 +243,7 @@ src/refinery_ai/
 ├── factory.py       # workflow and safety gates
 ├── harness.py       # read-only Harness pilot and safe Shell policy
 ├── infrastructure.py # database, Kafka, and Redis context providers
+├── inspectors/       # reusable evidence runner and integrations including OSV and SonarQube
 ├── knowledge.py     # Graphify context provider and compatibility adapter
 ├── models.py        # shared Pydantic contracts
 ├── openrewrite.py   # allowlisted dry-run adapter
@@ -275,7 +276,7 @@ Subprocesses receive argument lists directly and are never invoked through a she
 ## Current limitations
 
 - Lightweight Gradle discovery does not parse dependencies or Java toolchains; the assessment's
-  optional resolved-dependency analyzer obtains the effective dependency graph from Gradle itself.
+  optional resolved-dependency inspector obtains the effective dependency graph from Gradle itself.
 - SonarQube Gradle analysis injects a pinned scanner plugin through a temporary init script when
   the project does not configure `org.sonarqube`; Refinery does not edit target build files.
 - Graphify is run in local, code-only mode. Semantic providers currently perform deterministic
