@@ -63,6 +63,8 @@ The factory—not an unconstrained model—owns control flow, repository mutatio
 - Persists JSON and Markdown run records in `.refinery/runs/`.
 - Produces versioned modernization assessments and uses a temporary local SonarQube Community
   Build by default for maintainability, risk, and coverage evidence.
+- Resolves the effective Maven or Gradle runtime graph, normalizes Maven Package URLs, and checks
+  OSV by default for dependency-health evidence.
 - Stops at a review gate before applying OpenRewrite or AI-generated source changes.
 
 ## Requirements
@@ -70,6 +72,7 @@ The factory—not an unconstrained model—owns control flow, repository mutatio
 - Python 3.12+
 - [`uv`](https://docs.astral.sh/uv/) (`uv sync` installs the `graphifyy` package)
 - A JDK and Maven/Gradle, or the project wrappers, when running verification
+- Network access to configured artifact repositories and OSV for dependency analysis
 - Docker when running the default SonarQube-backed assessment
 - An AI provider API key only when using the Pydantic AI agents
 
@@ -128,10 +131,11 @@ uv run refinery summary /path/to/java-project --output architecture-summary.md
 ```
 
 The summary command combines the context graph with live discovery, bounded folder structure, and
-the deterministic modernization assessment. Like `assess`, it uses temporary local SonarQube by
-default; pass `--no-sonarqube` for a lightweight summary. It persists the report in the target project at
-`.refinery/summary.md` (or `.refinery/summary.json` with `--json`) and warns when repository inputs
-no longer match the graph fingerprint. Use `--output` to override the report location.
+the deterministic modernization assessment. Like `assess`, it uses temporary local SonarQube and
+resolved dependency analysis by default; pass `--no-sonarqube` and/or `--no-dependencies` to opt
+out. It persists the report in the target project at `.refinery/summary.md` (or
+`.refinery/summary.json` with `--json`) and warns when repository inputs no longer match the graph
+fingerprint. Use `--output` to override the report location.
 
 Assess modernization health. SonarQube is optional but enabled by default; Refinery starts a
 loopback-only temporary container, imports its evidence, and removes it afterward:
@@ -148,6 +152,20 @@ diagnostic. Disable all Docker activity explicitly with:
 ```bash
 uv run refinery assess /path/to/java-project --no-sonarqube
 ```
+
+Dependency analysis is also optional but enabled by default. It asks Maven or Gradle for the
+resolved runtime graph (including transitive versions), converts each component to a versioned
+Maven Package URL, and queries the OSV batch API. A build-resolution or OSV failure is reported and
+leaves Dependency Health unassessed. Disable it with:
+
+```bash
+uv run refinery assess /path/to/java-project --no-dependencies
+```
+
+OSV requests use the bundled `certifi` CA trust store. On a network that intercepts TLS with a
+private certificate, configure that certificate in the trust chain when possible. As an explicit
+temporary fallback, `--no-osv-verify-ssl` disables certificate verification for OSV requests and
+records a warning in the assessment.
 
 Planning and run commands automatically rebuild the context graph. The initial Graphify provider
 produces its native files and the builder produces the normalized artifact:
@@ -195,6 +213,12 @@ Settings use the `REFINERY_` prefix and may be placed in `.env`. See `.env.examp
 | `REFINERY_COMMAND_TIMEOUT_SECONDS` | `900` | Build command timeout |
 | `REFINERY_GRAPHIFY_TIMEOUT_SECONDS` | `900` | Graphify extraction timeout |
 | `REFINERY_ALLOW_DIRTY_WORKTREE` | `false` | Permit apply mode with existing changes |
+| `REFINERY_DEPENDENCY_ANALYSIS_ENABLED` | `true` | Resolve dependencies and query OSV |
+| `REFINERY_DEPENDENCY_RESOLUTION_TIMEOUT_SECONDS` | `900` | Maven/Gradle graph timeout |
+| `REFINERY_MAVEN_DEPENDENCY_PLUGIN_VERSION` | `3.11.0` | Pinned dependency-tree plugin |
+| `REFINERY_OSV_API_URL` | `https://api.osv.dev` | OSV service base URL |
+| `REFINERY_OSV_TIMEOUT_SECONDS` | `30` | Timeout for each OSV request |
+| `REFINERY_OSV_VERIFY_SSL` | `true` | Verify OSV TLS certificates using the bundled CA store |
 | `REFINERY_SONARQUBE_ENABLED` | `true` | Attempt temporary local SonarQube analysis |
 | `REFINERY_SONARQUBE_IMAGE` | `sonarqube:26.8.0.126808-community` | Pinned Community Build image |
 | `REFINERY_SONARQUBE_IMAGE_PULL_TIMEOUT_SECONDS` | `1800` | Initial image-download timeout |
@@ -246,7 +270,8 @@ Subprocesses receive argument lists directly and are never invoked through a she
 
 ## Current limitations
 
-- Gradle discovery does not yet parse dependencies or Java toolchains.
+- Lightweight Gradle discovery does not parse dependencies or Java toolchains; the assessment's
+  optional resolved-dependency analyzer obtains the effective dependency graph from Gradle itself.
 - SonarQube Gradle analysis injects a pinned scanner plugin through a temporary init script when
   the project does not configure `org.sonarqube`; Refinery does not edit target build files.
 - Graphify is run in local, code-only mode. Semantic providers currently perform deterministic

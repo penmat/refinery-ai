@@ -35,6 +35,10 @@ def assessment_text(assessment: Assessment) -> str:
     if sonar is not None:
         lines.extend(["", f"SonarQube: {sonar.status.value}"])
         lines.extend(f"  {item.message}" for item in sonar.diagnostics)
+    dependencies = assessment.analyzers.get("dependencies")
+    if dependencies is not None:
+        lines.extend(["", f"Dependency analysis: {dependencies.status.value}"])
+        lines.extend(f"  {item.message}" for item in dependencies.diagnostics)
     return "\n".join(lines)
 
 

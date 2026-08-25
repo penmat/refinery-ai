@@ -43,6 +43,7 @@ class ProjectSummaryService:
         refresh: bool = False,
         include_tests: bool = False,
         top: int = 10,
+        dependency_analysis_enabled: bool = False,
         sonarqube_enabled: bool = False,
         keep_sonarqube: bool = False,
         settings: Settings | None = None,
@@ -69,6 +70,7 @@ class ProjectSummaryService:
                 f"Context graph belongs to {graph.repository}, not requested repository {root}"
             )
         assessment = AssessmentEngine(
+            dependency_analysis_enabled=dependency_analysis_enabled,
             sonarqube_enabled=sonarqube_enabled,
             keep_sonarqube=keep_sonarqube,
             settings=settings,
@@ -95,6 +97,22 @@ class ProjectSummaryService:
                 },
                 metrics=assessment.metrics,
                 findings=[finding.message for finding in assessment.findings],
+                findings_by_category={
+                    category.value: [
+                        finding.message
+                        for finding in assessment.findings
+                        if finding.category is category
+                    ]
+                    for category in assessment.score.categories
+                },
+                analyzer_statuses={
+                    name: result.status.value for name, result in assessment.analyzers.items()
+                },
+                analyzer_diagnostics={
+                    name: [diagnostic.message for diagnostic in result.diagnostics]
+                    for name, result in assessment.analyzers.items()
+                    if result.diagnostics
+                },
             ),
             evidence=EvidenceSummary(
                 graph_path=selected_graph,
@@ -110,6 +128,7 @@ class ProjectSummaryService:
                 assessment.metrics,
                 stale,
                 assessment.analyzers.get("sonarqube"),
+                assessment.analyzers.get("dependencies"),
             ),
         )
 
@@ -252,6 +271,7 @@ class ProjectSummaryService:
         metrics: dict[str, object],
         stale: bool,
         sonarqube: object | None = None,
+        dependencies: object | None = None,
     ) -> list[SummaryObservation]:
         observations: list[SummaryObservation] = []
         if stale:
@@ -290,6 +310,17 @@ class ProjectSummaryService:
                     severity="warning",
                     category="sonarqube",
                     message=f"SonarQube analysis was {status}: {detail}",
+                )
+            )
+        dependency_status = getattr(dependencies, "status", None)
+        if dependency_status is not None and str(dependency_status) != "completed":
+            diagnostics = getattr(dependencies, "diagnostics", [])
+            detail = diagnostics[0].message if diagnostics else "No diagnostic was provided."
+            observations.append(
+                SummaryObservation(
+                    severity="warning",
+                    category="dependencies",
+                    message=f"Dependency analysis was {dependency_status}: {detail}",
                 )
             )
         return observations

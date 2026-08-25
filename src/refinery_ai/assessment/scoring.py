@@ -103,6 +103,34 @@ def score(results: dict[str, AnalyzerResult]) -> Score:
         )
     categories[Category.PLATFORM] = max(0.0, platform_score)
 
+    dependencies = results.get("dependencies")
+    if dependencies and dependencies.status is AnalyzerStatus.COMPLETED:
+        critical = int(dependencies.metrics.get("criticalVulnerabilityCount") or 0)
+        high = int(dependencies.metrics.get("highVulnerabilityCount") or 0)
+        medium = int(dependencies.metrics.get("mediumVulnerabilityCount") or 0)
+        low = int(dependencies.metrics.get("lowVulnerabilityCount") or 0)
+        unknown = int(dependencies.metrics.get("unknownVulnerabilityCount") or 0)
+        dependency_score = 100.0
+        for count, rate, cap, label, metric in (
+            (critical, 20.0, 60.0, "critical", "criticalVulnerabilityCount"),
+            (high, 10.0, 40.0, "high", "highVulnerabilityCount"),
+            (medium, 4.0, 24.0, "medium", "mediumVulnerabilityCount"),
+            (low, 1.0, 10.0, "low", "lowVulnerabilityCount"),
+            (unknown, 4.0, 20.0, "unknown-severity", "unknownVulnerabilityCount"),
+        ):
+            points = min(cap, count * rate)
+            dependency_score -= points
+            if points:
+                deductions.append(
+                    Deduction(
+                        category=Category.DEPENDENCIES,
+                        points=points,
+                        reason=f"OSV reports {count} {label} vulnerable dependency findings",
+                        metric=f"dependencies.{metric}",
+                    )
+                )
+        categories[Category.DEPENDENCIES] = max(0.0, dependency_score)
+
     source = results["source"].metrics
     rate = float(source.get("largeJavaFilesPerThousand") or 0)
     maintainability_score = max(0.0, 100.0 - min(50.0, rate * 0.5))

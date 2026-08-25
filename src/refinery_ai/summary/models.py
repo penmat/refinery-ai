@@ -68,6 +68,9 @@ class ModernizationPosture(BaseModel):
     category_scores: dict[str, float | None] = Field(default_factory=dict)
     metrics: dict[str, Any] = Field(default_factory=dict)
     findings: list[str] = Field(default_factory=list)
+    findings_by_category: dict[str, list[str]] = Field(default_factory=dict)
+    analyzer_statuses: dict[str, str] = Field(default_factory=dict)
+    analyzer_diagnostics: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class EvidenceSummary(BaseModel):

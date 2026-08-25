@@ -88,10 +88,26 @@ def test_assess_cli_persists_and_compares_by_name(tmp_path: Path) -> None:
     runner = CliRunner()
 
     baseline = runner.invoke(
-        app, ["assess", str(repository), "--name", "baseline", "--no-sonarqube"]
+        app,
+        [
+            "assess",
+            str(repository),
+            "--name",
+            "baseline",
+            "--no-sonarqube",
+            "--no-dependencies",
+        ],
     )
     comparison = runner.invoke(
-        app, ["assess", str(repository), "--compare", "baseline", "--no-sonarqube"]
+        app,
+        [
+            "assess",
+            str(repository),
+            "--compare",
+            "baseline",
+            "--no-sonarqube",
+            "--no-dependencies",
+        ],
     )
 
     assert baseline.exit_code == 0

@@ -59,6 +59,20 @@ def assess_command(
     json_output: Annotated[
         bool, typer.Option("--json", help="Print machine-readable JSON")
     ] = False,
+    dependencies: Annotated[
+        bool | None,
+        typer.Option(
+            "--dependencies/--no-dependencies",
+            help="Resolve dependencies and check them with OSV",
+        ),
+    ] = None,
+    osv_verify_ssl: Annotated[
+        bool | None,
+        typer.Option(
+            "--osv-verify-ssl/--no-osv-verify-ssl",
+            help="Verify OSV TLS certificates",
+        ),
+    ] = None,
     sonarqube: Annotated[
         bool | None,
         typer.Option("--sonarqube/--no-sonarqube", help="Run temporary local SonarQube analysis"),
@@ -72,13 +86,22 @@ def assess_command(
     store = AssessmentStore(repository)
     previous = store.load(compare_to) if compare_to else None
     settings = Settings()
+    dependencies_enabled = (
+        settings.dependency_analysis_enabled if dependencies is None else dependencies
+    )
+    settings.osv_verify_ssl = settings.osv_verify_ssl if osv_verify_ssl is None else osv_verify_ssl
     enabled = settings.sonarqube_enabled if sonarqube is None else sonarqube
+    if dependencies_enabled:
+        typer.echo("Resolving dependencies and checking OSV...", err=True)
+        if not settings.osv_verify_ssl:
+            typer.echo("Warning: OSV TLS certificate verification is disabled.", err=True)
     if enabled:
         typer.echo(
             f"Running temporary local SonarQube analysis with {settings.sonarqube_image}...",
             err=True,
         )
     current = AssessmentEngine(
+        dependency_analysis_enabled=dependencies_enabled,
         sonarqube_enabled=enabled,
         keep_sonarqube=keep_sonarqube,
         settings=settings,
@@ -184,6 +207,20 @@ def summary(
     include_tests: Annotated[
         bool, typer.Option("--include-tests", help="Include test graph components")
     ] = False,
+    dependencies: Annotated[
+        bool | None,
+        typer.Option(
+            "--dependencies/--no-dependencies",
+            help="Resolve dependencies and check them with OSV",
+        ),
+    ] = None,
+    osv_verify_ssl: Annotated[
+        bool | None,
+        typer.Option(
+            "--osv-verify-ssl/--no-osv-verify-ssl",
+            help="Verify OSV TLS certificates",
+        ),
+    ] = None,
     sonarqube: Annotated[
         bool | None,
         typer.Option("--sonarqube/--no-sonarqube", help="Run temporary local SonarQube analysis"),
@@ -195,7 +232,15 @@ def summary(
     """Summarize project architecture and modernization posture."""
 
     settings = Settings()
+    dependencies_enabled = (
+        settings.dependency_analysis_enabled if dependencies is None else dependencies
+    )
+    settings.osv_verify_ssl = settings.osv_verify_ssl if osv_verify_ssl is None else osv_verify_ssl
     enabled = settings.sonarqube_enabled if sonarqube is None else sonarqube
+    if dependencies_enabled:
+        typer.echo("Resolving dependencies and checking OSV...", err=True)
+        if not settings.osv_verify_ssl:
+            typer.echo("Warning: OSV TLS certificate verification is disabled.", err=True)
     if enabled:
         typer.echo(
             f"Running temporary local SonarQube analysis with {settings.sonarqube_image}...",
@@ -208,6 +253,7 @@ def summary(
             refresh=refresh,
             include_tests=include_tests,
             top=top,
+            dependency_analysis_enabled=dependencies_enabled,
             sonarqube_enabled=enabled,
             keep_sonarqube=keep_sonarqube,
             settings=settings,

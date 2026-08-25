@@ -4,6 +4,16 @@ from __future__ import annotations
 
 from refinery_ai.summary.models import ProjectSummary
 
+_CATEGORY_LABELS = {
+    "platform": "Platform Modernization",
+    "dependencies": "Dependency Health",
+    "maintainability": "Maintainability",
+    "risk": "Defect & Security Risk",
+    "architecture": "Architecture Health",
+    "tests": "Test Confidence",
+    "build": "Build & Delivery Health",
+}
+
 
 def summary_markdown(summary: ProjectSummary, *, terminal: bool = False) -> str:
     heading = "Project Architecture Summary" if terminal else "# Project Architecture Summary"
@@ -56,8 +66,43 @@ def summary_markdown(summary: ProjectSummary, *, terminal: bool = False) -> str:
     lines.extend(["", section("Modernization posture"), ""])
     lines.append(f"- Score: {'not assessed' if score is None else f'{score:g}/100'}")
     lines.append(f"- Evidence completeness: {summary.modernization.evidence_completeness:.0%}")
+    lines.append("- Category scores:")
+    for category, label in _CATEGORY_LABELS.items():
+        value = summary.modernization.category_scores.get(category)
+        rendered = "not assessed" if value is None else f"{value:g}/100"
+        lines.append(f"  - {label}: {rendered}")
     for observation in summary.observations:
         lines.append(f"- [{observation.severity}] {observation.message}")
+    dependency_status = summary.modernization.analyzer_statuses.get("dependencies")
+    if dependency_status is not None:
+        dependency_heading = "Dependency analysis" if terminal else "### Dependency analysis"
+        lines.extend(["", dependency_heading, ""])
+        lines.append(f"- Status: {dependency_status}")
+        dependency_metrics = summary.modernization.metrics.get("dependencies", {})
+        if isinstance(dependency_metrics, dict) and dependency_status == "completed":
+            lines.append(
+                f"- Resolved dependencies: {dependency_metrics.get('dependencyCount', 0)} "
+                f"({dependency_metrics.get('directDependencyCount', 0)} direct)"
+            )
+            lines.append(
+                "- Vulnerable dependencies: "
+                f"{dependency_metrics.get('vulnerableDependencyCount', 0)}"
+            )
+            lines.append(
+                f"- OSV findings: {dependency_metrics.get('vulnerabilityCount', 0)} "
+                "("
+                f"{dependency_metrics.get('criticalVulnerabilityCount', 0)} critical, "
+                f"{dependency_metrics.get('highVulnerabilityCount', 0)} high, "
+                f"{dependency_metrics.get('mediumVulnerabilityCount', 0)} medium, "
+                f"{dependency_metrics.get('lowVulnerabilityCount', 0)} low, "
+                f"{dependency_metrics.get('unknownVulnerabilityCount', 0)} unknown)"
+            )
+            dependency_findings = summary.modernization.findings_by_category.get("dependencies", [])
+            lines.extend(f"  - {finding}" for finding in dependency_findings[:20])
+            if len(dependency_findings) > 20:
+                lines.append(f"  - … and {len(dependency_findings) - 20} more")
+        for diagnostic in summary.modernization.analyzer_diagnostics.get("dependencies", []):
+            lines.append(f"- Diagnostic: {diagnostic}")
     lines.extend(["", section("Evidence quality"), ""])
     lines.append(f"- Context graph: {summary.evidence.graph_path}")
     lines.append(

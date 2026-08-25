@@ -7,6 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from refinery_ai.assessment.analyzers import BUILT_IN_ANALYZERS, Analyzer
+from refinery_ai.assessment.dependencies import DependencyAnalyzer, DependencyAnalyzerOptions
 from refinery_ai.assessment.models import (
     AnalyzerResult,
     Assessment,
@@ -24,11 +25,13 @@ class AssessmentEngine:
         self,
         analyzers: tuple[Analyzer, ...] = BUILT_IN_ANALYZERS,
         *,
+        dependency_analysis_enabled: bool = False,
         sonarqube_enabled: bool = False,
         keep_sonarqube: bool = False,
         settings: Settings | None = None,
     ) -> None:
         self.analyzers = analyzers
+        self.dependency_analysis_enabled = dependency_analysis_enabled
         self.sonarqube_enabled = sonarqube_enabled
         self.keep_sonarqube = keep_sonarqube
         self.settings = settings or Settings()
@@ -40,6 +43,21 @@ class AssessmentEngine:
         results: dict[str, AnalyzerResult] = {}
         for analyzer in self.analyzers:
             results[analyzer.name] = analyzer.analyze(root, snapshot)
+        if self.dependency_analysis_enabled:
+            dependencies = DependencyAnalyzer(
+                DependencyAnalyzerOptions(
+                    maven_plugin_version=self.settings.maven_dependency_plugin_version,
+                    resolution_timeout_seconds=(
+                        self.settings.dependency_resolution_timeout_seconds
+                    ),
+                    osv_url=self.settings.osv_api_url,
+                    osv_timeout_seconds=self.settings.osv_timeout_seconds,
+                    osv_batch_size=self.settings.osv_batch_size,
+                    osv_verify_ssl=self.settings.osv_verify_ssl,
+                    output_limit=self.settings.max_output_characters,
+                )
+            )
+            results[dependencies.name] = dependencies.analyze(root, snapshot)
         if self.sonarqube_enabled:
             sonar = SonarQubeAnalyzer(
                 assessment_id,

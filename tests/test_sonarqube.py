@@ -285,6 +285,7 @@ def test_cli_defaults_on_and_no_sonarqube_skips_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repository = maven_repository(tmp_path)
+    monkeypatch.setenv("REFINERY_DEPENDENCY_ANALYSIS_ENABLED", "false")
     calls = 0
 
     def unavailable(self: SonarQubeAnalyzer, repository: Path, snapshot: object) -> AnalyzerResult:

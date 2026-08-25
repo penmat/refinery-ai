@@ -4,7 +4,14 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from refinery_ai.assessment.models import AnalyzerResult, AnalyzerStatus, ToolIdentity
+from refinery_ai.assessment.dependencies.analyzer import DependencyAnalyzer
+from refinery_ai.assessment.models import (
+    AnalyzerResult,
+    AnalyzerStatus,
+    Category,
+    Finding,
+    ToolIdentity,
+)
 from refinery_ai.assessment.sonarqube.analyzer import SonarQubeAnalyzer
 from refinery_ai.cli import app
 from refinery_ai.context_graph import ContextGraphStore, repository_fingerprint
@@ -123,7 +130,10 @@ def test_summary_missing_graph_is_actionable(tmp_path: Path) -> None:
 def test_summary_cli_emits_json(tmp_path: Path) -> None:
     repository = summary_repository(tmp_path)
 
-    result = CliRunner().invoke(app, ["summary", str(repository), "--json", "--no-sonarqube"])
+    result = CliRunner().invoke(
+        app,
+        ["summary", str(repository), "--json", "--no-sonarqube", "--no-dependencies"],
+    )
 
     assert result.exit_code == 0
     assert json.loads(result.stdout)["overview"]["name"] == "application"
@@ -134,7 +144,9 @@ def test_summary_cli_emits_json(tmp_path: Path) -> None:
 def test_summary_cli_persists_markdown_in_target_repository(tmp_path: Path) -> None:
     repository = summary_repository(tmp_path)
 
-    result = CliRunner().invoke(app, ["summary", str(repository), "--no-sonarqube"])
+    result = CliRunner().invoke(
+        app, ["summary", str(repository), "--no-sonarqube", "--no-dependencies"]
+    )
 
     assert result.exit_code == 0
     persisted = repository / ".refinery/summary.md"
@@ -142,10 +154,58 @@ def test_summary_cli_persists_markdown_in_target_repository(tmp_path: Path) -> N
     assert result.stdout.startswith("# Project Architecture Summary")
 
 
+def test_summary_markdown_includes_dependency_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = summary_repository(tmp_path)
+
+    def completed(self: DependencyAnalyzer, repository: Path, snapshot: object) -> AnalyzerResult:
+        return AnalyzerResult(
+            analyzer="dependencies",
+            status=AnalyzerStatus.COMPLETED,
+            completeness=1,
+            duration_seconds=0,
+            tool=ToolIdentity(name="dependencies", version="1", configuration_hash="x"),
+            metrics={
+                "dependencyCount": 14,
+                "directDependencyCount": 3,
+                "vulnerableDependencyCount": 1,
+                "vulnerabilityCount": 1,
+                "criticalVulnerabilityCount": 0,
+                "highVulnerabilityCount": 1,
+                "mediumVulnerabilityCount": 0,
+                "lowVulnerabilityCount": 0,
+                "unknownVulnerabilityCount": 0,
+            },
+            findings=[
+                Finding(
+                    fingerprint="osv:GHSA-example:pkg:maven/org.example/library@1",
+                    analyzer="dependencies",
+                    rule="GHSA-example",
+                    category=Category.DEPENDENCIES,
+                    severity="high",
+                    message="org.example:library:1 is affected by GHSA-example",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(DependencyAnalyzer, "analyze", completed)
+
+    result = CliRunner().invoke(app, ["summary", str(repository), "--no-sonarqube"])
+
+    assert result.exit_code == 0
+    assert "Dependency Health: 90/100" in result.stdout
+    assert "### Dependency analysis" in result.stdout
+    assert "Resolved dependencies: 14 (3 direct)" in result.stdout
+    assert "Vulnerable dependencies: 1" in result.stdout
+    assert "org.example:library:1 is affected by GHSA-example" in result.stdout
+
+
 def test_summary_cli_defaults_sonarqube_on_and_allows_opt_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repository = summary_repository(tmp_path)
+    monkeypatch.setenv("REFINERY_DEPENDENCY_ANALYSIS_ENABLED", "false")
     calls = 0
 
     def unavailable(self: SonarQubeAnalyzer, repository: Path, snapshot: object) -> AnalyzerResult:
