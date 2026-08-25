@@ -254,6 +254,29 @@ result = run_tool_loop(
 print(result.content)
 ```
 
+Persisted inspector results and the normalized context graph can be exposed as semantic,
+bounded, read-only tools. Evidence collection remains outside the model-controlled loop.
+
+```python
+from pathlib import Path
+
+from refinery_ai.llm import run_tool_loop
+from refinery_ai.tools import RepositoryEvidenceTools
+
+evidence = RepositoryEvidenceTools(Path("/path/to/java-project"))
+result = run_tool_loop(
+    [{"role": "user", "prompt": "Trace the Order API to its dependencies and risks."}],
+    tools=evidence.tools(),
+    max_turns=8,
+)
+print(result.content)
+```
+
+The catalog includes repository overview, symbol inventory, symbol search and explanation,
+callers, callees, dependencies, dependents, finding search, and bounded inspector results.
+Missing assessments, graphs, or call-level evidence produce explicit coverage information so
+the model does not confuse absent evidence with proof that a relationship does not exist.
+
 ## Package layout
 
 ```text
@@ -274,6 +297,7 @@ src/refinery_ai/
 ├── reporting.py     # JSON/Markdown audit output
 ├── repository.py    # Refinery-owned repository environment seam
 ├── specialists.py   # typed specialist output and deterministic merge
+├── tools/           # bounded read-only LLM evidence tools
 └── verification.py  # bounded build execution
 ```
 

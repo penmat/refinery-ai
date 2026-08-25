@@ -59,7 +59,7 @@ def tool_definition(tool: Tool) -> dict[str, Any]:
 
     signature = inspect.signature(tool)
     try:
-        hints = get_type_hints(tool)
+        hints = get_type_hints(tool, include_extras=True)
     except (NameError, TypeError):
         hints = {}
 
