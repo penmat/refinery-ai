@@ -12,6 +12,9 @@ from collections.abc import Callable
 from typing import Any
 
 from refinery_ai.inspectors.sonarqube.models import SonarQubeError, SonarQubeTimeout
+from refinery_ai.logging import get_logger
+
+logger = get_logger(__name__)
 
 OpenUrl = Callable[..., Any]
 
@@ -163,6 +166,7 @@ class SonarQubeClient:
         fields: dict[str, str] | None = None,
         basic_credentials: tuple[str, str] | None = None,
     ) -> str:
+        logger.info("Calling SonarQube: %s %s", method, path)
         url = f"{self.base_url}{path}"
         if query:
             url = f"{url}?{urllib.parse.urlencode(query)}"

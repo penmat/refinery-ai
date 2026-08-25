@@ -12,7 +12,10 @@ from refinery_ai.inspectors.contracts import (
     InspectionResultT,
 )
 from refinery_ai.inspectors.registry import InspectorRegistry
+from refinery_ai.logging import get_logger
 from refinery_ai.models import DiscoverySnapshot
+
+logger = get_logger(__name__)
 
 
 class InspectionRunner[InspectionResultT]:
@@ -41,5 +44,7 @@ class InspectionRunner[InspectionResultT]:
         request = InspectionRequest(repository=root, snapshot=selected_snapshot)
         results: dict[str, InspectionResultT] = {}
         for inspector in self.registry.select(names):
+            logger.info("Running inspector: %s", inspector.name)
             results[inspector.name] = inspector.inspect(request)
+            logger.info("Completed inspector: %s", inspector.name)
         return InspectionBundle(request=request, results=results)

@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Protocol
 
 from refinery_ai.context_graph import ContextFragment, ContextGraphBuilder, ContextRequest
+from refinery_ai.logging import get_logger, log_command
 from refinery_ai.models import ContextEdge, ContextEvidence, ContextGraphInfo, ContextNode
+
+logger = get_logger(__name__)
 
 
 class KnowledgeGraphError(RuntimeError):
@@ -111,6 +114,7 @@ class GraphifyProvider:
         return path if path.is_file() else None
 
     def _run(self, command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+        log_command(logger, command, cwd=cwd)
         try:
             result = subprocess.run(
                 command,

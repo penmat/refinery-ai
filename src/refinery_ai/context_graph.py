@@ -11,6 +11,7 @@ from typing import Protocol, cast
 
 from pydantic import JsonValue
 
+from refinery_ai.logging import get_logger
 from refinery_ai.models import (
     ContextEdge,
     ContextGraph,
@@ -19,6 +20,8 @@ from refinery_ai.models import (
     DiscoverySnapshot,
     ProviderRun,
 )
+
+logger = get_logger(__name__)
 
 
 class ContextGraphError(RuntimeError):
@@ -100,6 +103,7 @@ class ContextGraphBuilder:
                 runs.append(ProviderRun(provider=provider.name, status="skipped"))
                 continue
             try:
+                logger.info("Running context provider: %s", provider.name)
                 fragment = provider.collect(request)
             except Exception as error:
                 if provider.name not in self.optional_providers:
@@ -112,6 +116,7 @@ class ContextGraphBuilder:
                     )
                 )
                 continue
+            logger.info("Completed context provider: %s", provider.name)
             for node in fragment.nodes:
                 existing = nodes.get(node.id)
                 nodes[node.id] = node if existing is None else self._merge_node(existing, node)

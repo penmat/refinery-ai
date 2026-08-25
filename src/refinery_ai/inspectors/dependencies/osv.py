@@ -12,6 +12,9 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from refinery_ai.inspectors.dependencies.models import DependencyAnalysisError, Vulnerability
+from refinery_ai.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class OsvClient:
@@ -77,6 +80,7 @@ class OsvClient:
     def _request_json(
         self, method: str, path: str, payload: dict[str, Any] | None = None
     ) -> dict[str, Any]:
+        logger.info("Calling OSV: %s %s", method, path)
         data = json.dumps(payload).encode() if payload is not None else None
         request = Request(
             f"{self.base_url}{path}",

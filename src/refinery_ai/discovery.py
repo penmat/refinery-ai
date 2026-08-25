@@ -8,13 +8,18 @@ import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from pathlib import Path
 
+from refinery_ai.logging import get_logger, log_command
 from refinery_ai.models import BuildSystem, Dependency, DiscoverySnapshot, Module
+
+logger = get_logger(__name__)
 
 IGNORED_DIRECTORIES = {".git", ".gradle", ".idea", ".refinery", "build", "target"}
 
 
 def _git(root: Path, *args: str) -> str | None:
-    result = subprocess.run(["git", *args], cwd=root, text=True, capture_output=True, check=False)
+    command = ["git", *args]
+    log_command(logger, command, cwd=root)
+    result = subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
     return result.stdout.strip() if result.returncode == 0 else None
 
 

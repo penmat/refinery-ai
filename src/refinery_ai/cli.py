@@ -16,6 +16,7 @@ from refinery_ai.assessment.storage import AssessmentStore
 from refinery_ai.config import Settings
 from refinery_ai.factory import ModernizationFactory
 from refinery_ai.harness import HarnessRepositoryEnvironment
+from refinery_ai.logging import configure_logging
 from refinery_ai.models import ModernizationGoal, RunReport
 from refinery_ai.summary import ProjectSummaryService, SummaryError
 from refinery_ai.summary.reporting import summary_markdown
@@ -23,6 +24,13 @@ from refinery_ai.summary.reporting import summary_markdown
 app = typer.Typer(help="Safe, auditable Java modernization.", no_args_is_help=True)
 assessment_app = typer.Typer(help="Inspect and compare saved assessments.", no_args_is_help=True)
 app.add_typer(assessment_app, name="assessment")
+
+
+@app.callback()
+def configure_cli_logging() -> None:
+    """Enable progress logging for commands and inspection tools."""
+
+    configure_logging()
 
 
 def _print(report: RunReport) -> None:

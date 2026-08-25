@@ -7,7 +7,10 @@ import subprocess
 import time
 from pathlib import Path
 
+from refinery_ai.logging import get_logger, log_command
 from refinery_ai.models import BuildSystem, DiscoverySnapshot, VerificationResult
+
+logger = get_logger(__name__)
 
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
@@ -35,6 +38,7 @@ def verify(
     """Run an approved argument vector, capturing bounded diagnostic output."""
 
     started = time.monotonic()
+    log_command(logger, command, cwd=repository)
     try:
         result = subprocess.run(
             command, cwd=repository, text=True, capture_output=True, check=False, timeout=timeout

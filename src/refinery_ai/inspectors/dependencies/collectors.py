@@ -13,7 +13,10 @@ from refinery_ai.inspectors.dependencies.models import (
     DependencyAnalysisTimeout,
     ResolvedDependency,
 )
+from refinery_ai.logging import get_logger, log_command
 from refinery_ai.models import BuildSystem
+
+logger = get_logger(__name__)
 
 _GRADLE_INIT = r"""import groovy.json.JsonOutput
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
@@ -187,6 +190,7 @@ class ResolvedDependencyCollector:
         return _unique(dependencies)
 
     def _run(self, command: list[str], repository: Path, label: str) -> None:
+        log_command(logger, command, cwd=repository)
         try:
             result = subprocess.run(
                 command,

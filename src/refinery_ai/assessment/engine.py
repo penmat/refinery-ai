@@ -22,6 +22,9 @@ from refinery_ai.inspectors import (
 )
 from refinery_ai.inspectors.dependencies import DependencyAnalyzerOptions, DependencyInspector
 from refinery_ai.inspectors.sonarqube import SonarQubeInspector, SonarQubeOptions
+from refinery_ai.logging import get_logger, log_command
+
+logger = get_logger(__name__)
 
 
 class AssessmentEngine:
@@ -117,5 +120,7 @@ class AssessmentEngine:
 
 
 def _git(root: Path, *args: str) -> str | None:
-    result = subprocess.run(["git", *args], cwd=root, text=True, capture_output=True, check=False)
+    command = ["git", *args]
+    log_command(logger, command, cwd=root)
+    result = subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
     return result.stdout.strip() if result.returncode == 0 else None

@@ -34,6 +34,7 @@ from refinery_ai.context_graph import ContextGraphBuilder, ContextGraphQuery
 from refinery_ai.discovery import IGNORED_DIRECTORIES, maven_details, select_build_files
 from refinery_ai.infrastructure import DatabaseProvider, KafkaProvider, RedisProvider
 from refinery_ai.knowledge import GraphifyProvider, KnowledgeGraphProvider
+from refinery_ai.logging import get_logger, log_command
 from refinery_ai.models import (
     ContextGraphInfo,
     DiscoverySnapshot,
@@ -44,6 +45,8 @@ from refinery_ai.openrewrite import OpenRewriteAdapter
 from refinery_ai.specialists import BuildRuntimeSpecialistResult
 from refinery_ai.spring import SpringProvider
 from refinery_ai.verification import verification_command
+
+logger = get_logger(__name__)
 
 _EXIT_CODE = re.compile(r"\n\[exit code: (\d+)\]\Z")
 _SAFE_GIT_SUBCOMMANDS = frozenset({"branch", "diff", "ls-files", "rev-parse", "show", "status"})
@@ -473,6 +476,7 @@ class HarnessRepositoryEnvironment:
             raise HarnessPolicyError("Command repository does not match Harness root")
         self.policy.authorize(command)
         started = time.monotonic()
+        log_command(logger, command, cwd=repository)
 
         async def run_command() -> str:
             return await self.shell.get_toolset().run_command(

@@ -15,7 +15,10 @@ from refinery_ai.inspectors.sonarqube.models import (
     SonarQubeUnavailable,
     SonarScannerContext,
 )
+from refinery_ai.logging import get_logger, log_command
 from refinery_ai.models import BuildSystem, DiscoverySnapshot
+
+logger = get_logger(__name__)
 
 RunCommand = Callable[..., subprocess.CompletedProcess[str]]
 _TASK_ID = re.compile(r"^ceTaskId=(.+)$", re.MULTILINE)
@@ -62,6 +65,7 @@ class ScannerRunner:
             }
             if java_home := os.environ.get("JAVA_HOME"):
                 environment["JAVA_HOME"] = java_home
+            log_command(logger, command, cwd=context.repository)
             try:
                 result = self.run(
                     command,

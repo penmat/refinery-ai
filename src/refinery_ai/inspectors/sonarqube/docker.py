@@ -13,6 +13,9 @@ from refinery_ai.inspectors.sonarqube.models import (
     SonarQubeUnavailable,
     SonarServer,
 )
+from refinery_ai.logging import get_logger, log_command
+
+logger = get_logger(__name__)
 
 RunCommand = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -141,6 +144,7 @@ class SonarQubeContainer:
         return result.stdout.strip() or None if result.returncode == 0 else None
 
     def _run(self, command: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+        log_command(logger, command)
         try:
             return self.run(
                 command,

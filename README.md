@@ -61,6 +61,7 @@ The factory—not an unconstrained model—owns control flow, repository mutatio
 - Delegates build/runtime investigation to one bounded read-only Harness specialist.
 - Stops repeated failures and enforces repair-attempt budgets.
 - Persists JSON and Markdown run records in `.refinery/runs/`.
+- Logs commands, inspectors, context providers, and external service calls to stderr as they run.
 - Produces versioned modernization assessments and uses a temporary local SonarQube Community
   Build by default for maintainability, risk, and coverage evidence.
 - Resolves the effective Maven or Gradle runtime graph, normalizes Maven Package URLs, and checks
