@@ -135,8 +135,8 @@ The summary command combines the context graph with live discovery, bounded fold
 the deterministic modernization assessment. Like `assess`, it uses temporary local SonarQube and
 resolved dependency analysis by default; pass `--no-sonarqube` and/or `--no-dependencies` to opt
 out. It persists the report in the target project at `.refinery/summary.md` (or
-`.refinery/summary.json` with `--json`) and warns when repository inputs no longer match the graph
-fingerprint. Use `--output` to override the report location.
+`.refinery/summary.json` for JSON output), even when `--output` writes another copy elsewhere. It
+warns when repository inputs no longer match the graph fingerprint.
 
 Assess modernization health. SonarQube is optional but enabled by default; Refinery starts a
 loopback-only temporary container, imports its evidence, and removes it afterward:
@@ -145,6 +145,20 @@ loopback-only temporary container, imports its evidence, and removes it afterwar
 uv run refinery assess /path/to/java-project --name baseline
 uv run refinery assess /path/to/java-project --compare baseline
 ```
+
+The rendered assessment output is retained as `.refinery/assessment.md` or
+`.refinery/assessment.json`. Historical copies are stored alongside the immutable assessment data
+as `.refinery/assessments/<assessment-id>.report.*`; comparison runs use `.comparison.*`.
+
+Chat with the configured LLM using the retained Markdown reports and all read-only repository
+evidence tools. Type `exit` or `quit` to end the session:
+
+```bash
+uv run refinery chat /path/to/java-project
+```
+
+The default provider is local Ollama with `gemma4`; configure it with
+`REFINERY_LITELLM_MODEL` and `REFINERY_LITELLM_API_BASE`.
 
 The first run downloads the pinned SonarQube image if it is not already cached. If Docker or the
 scan is unavailable, the lightweight assessment still completes and records the SonarQube
@@ -214,7 +228,7 @@ Settings use the `REFINERY_` prefix and may be placed in `.env`. See `.env.examp
 | Setting | Default | Purpose |
 |---|---:|---|
 | `REFINERY_MODEL` | `openai:gpt-5-mini` | Pydantic AI model identifier |
-| `REFINERY_LITELLM_MODEL` | `ollama_chat/llama3.1:8b` | LiteLLM provider and model identifier |
+| `REFINERY_LITELLM_MODEL` | `ollama_chat/gemma4` | LiteLLM provider and model identifier |
 | `REFINERY_LITELLM_API_BASE` | `http://localhost:11434` | LiteLLM provider API base URL |
 | `REFINERY_MAX_REPAIR_ATTEMPTS` | `3` | Repair-loop attempt limit |
 | `REFINERY_COMMAND_TIMEOUT_SECONDS` | `900` | Build command timeout |

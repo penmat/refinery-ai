@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="REFINERY_", env_file=".env", extra="ignore")
 
     model: str = "openai:gpt-5-mini"
-    litellm_model: str = "ollama_chat/llama3.1:8b"
+    litellm_model: str = "ollama_chat/gemma4"
     litellm_api_base: str = "http://localhost:11434"
     state_directory: Path = Path(".refinery")
     max_repair_attempts: int = 3

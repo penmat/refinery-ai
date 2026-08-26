@@ -155,6 +155,28 @@ def test_summary_cli_persists_markdown_in_target_repository(tmp_path: Path) -> N
     assert result.stdout.startswith("# Project Architecture Summary")
 
 
+def test_summary_cli_keeps_refinery_copy_with_explicit_output(tmp_path: Path) -> None:
+    repository = summary_repository(tmp_path)
+    output = tmp_path / "published" / "architecture.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "summary",
+            str(repository),
+            "--output",
+            str(output),
+            "--no-sonarqube",
+            "--no-dependencies",
+        ],
+    )
+
+    assert result.exit_code == 0
+    retained = repository / ".refinery/summary.json"
+    assert retained.read_text() == output.read_text()
+    assert json.loads(retained.read_text())["overview"]["name"] == "application"
+
+
 def test_summary_markdown_includes_dependency_results(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

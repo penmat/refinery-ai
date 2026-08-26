@@ -114,3 +114,31 @@ def test_assess_cli_persists_and_compares_by_name(tmp_path: Path) -> None:
     assert "Modernization Score" in baseline.stdout
     assert comparison.exit_code == 0
     assert "Compatibility: compatible" in comparison.stdout
+    latest = repository / ".refinery/assessment.md"
+    assert latest.read_text() == comparison.stdout
+    comparison_reports = list(
+        (repository / ".refinery/assessments").glob("*.comparison.md")
+    )
+    assert len(comparison_reports) == 1
+    assert comparison_reports[0].read_text() == comparison.stdout
+
+
+def test_assess_cli_retains_text_and_json_stdout(tmp_path: Path) -> None:
+    repository = _repository(tmp_path)
+    runner = CliRunner()
+
+    text_result = runner.invoke(
+        app, ["assess", str(repository), "--no-sonarqube", "--no-dependencies"]
+    )
+    json_result = runner.invoke(
+        app,
+        ["assess", str(repository), "--json", "--no-sonarqube", "--no-dependencies"],
+    )
+
+    assert text_result.exit_code == 0
+    assert json_result.exit_code == 0
+    assert (repository / ".refinery/assessment.md").read_text() == text_result.stdout
+    assert (repository / ".refinery/assessment.json").read_text() == json_result.stdout
+    assessment_id = json.loads(json_result.stdout)["assessment_id"]
+    historical = repository / f".refinery/assessments/{assessment_id}.report.json"
+    assert historical.read_text() == json_result.stdout
