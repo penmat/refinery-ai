@@ -103,10 +103,10 @@ uv run pytest
 
 ## Usage
 
-Inspect a Java repository without changing it:
+Discover, assess, and summarize a Java repository in one pass:
 
 ```bash
-uv run refinery discover /path/to/java-project
+uv run refinery analyze /path/to/java-project
 ```
 
 Build and query its repository context graph:
@@ -117,33 +117,25 @@ uv run refinery graph \
   --repository /path/to/java-project
 ```
 
-Summarize project architecture and modernization posture from an existing context graph:
+Emit JSON or write another copy of the summary:
 
 ```bash
-uv run refinery summary /path/to/java-project
+uv run refinery analyze /path/to/java-project --json
+uv run refinery analyze /path/to/java-project --output architecture-summary.md
 ```
 
-Rebuild the graph first, emit JSON, or write a Markdown report:
-
-```bash
-uv run refinery summary /path/to/java-project --refresh
-uv run refinery summary /path/to/java-project --json
-uv run refinery summary /path/to/java-project --output architecture-summary.md
-```
-
-The summary command combines the context graph with live discovery, bounded folder structure, and
-the deterministic modernization assessment. Like `assess`, it uses temporary local SonarQube and
-resolved dependency analysis by default; pass `--no-sonarqube` and/or `--no-dependencies` to opt
-out. It persists the report in the target project at `.refinery/summary.md` (or
-`.refinery/summary.json` for JSON output), even when `--output` writes another copy elsewhere. It
-warns when repository inputs no longer match the graph fingerprint.
+The analyze command combines discovery, the context graph, bounded folder structure, and the
+deterministic modernization assessment. It uses temporary local SonarQube and resolved dependency
+analysis by default; pass `--no-sonarqube` and/or `--no-dependencies` to opt out. It persists both
+`.refinery/assessment.md` and `.refinery/summary.md` (or JSON equivalents with `--json`) and keeps
+immutable assessment history under `.refinery/assessments/`.
 
 Assess modernization health. SonarQube is optional but enabled by default; Refinery starts a
 loopback-only temporary container, imports its evidence, and removes it afterward:
 
 ```bash
-uv run refinery assess /path/to/java-project --name baseline
-uv run refinery assess /path/to/java-project --compare baseline
+uv run refinery analyze /path/to/java-project --name baseline
+uv run refinery analyze /path/to/java-project --compare baseline
 ```
 
 The rendered assessment output is retained as `.refinery/assessment.md` or
@@ -157,15 +149,34 @@ evidence tools. Type `exit` or `quit` to end the session:
 uv run refinery chat /path/to/java-project
 ```
 
-The default provider is local Ollama with `gemma4`; configure it with
+The default provider is local Ollama with `gemma4:latest`; configure it with
 `REFINERY_LITELLM_MODEL` and `REFINERY_LITELLM_API_BASE`.
+
+Expose the same bounded, read-only evidence catalog to any MCP client over stdio:
+
+```bash
+uv run refinery mcp /path/to/java-project
+```
+
+Configure the client to launch that command. Each MCP tool includes a purpose description and,
+where applicable, descriptions for its arguments so an LLM can choose and call it accurately.
+
+For clients connecting over HTTP, launch the Streamable HTTP transport instead. It binds to
+loopback by default and serves MCP at `http://127.0.0.1:8000/mcp`:
+
+```bash
+uv run refinery mcp /path/to/java-project --transport http
+```
+
+Use `--host` and `--port` to change the bind address. Binding to `0.0.0.0` exposes the server to
+other machines reachable on the network and should only be done in a trusted environment.
 
 The first run downloads the pinned SonarQube image if it is not already cached. If Docker or the
 scan is unavailable, the lightweight assessment still completes and records the SonarQube
 diagnostic. Disable all Docker activity explicitly with:
 
 ```bash
-uv run refinery assess /path/to/java-project --no-sonarqube
+uv run refinery analyze /path/to/java-project --no-sonarqube
 ```
 
 Dependency analysis is also optional but enabled by default. It asks Maven or Gradle for the
@@ -174,7 +185,7 @@ Maven Package URL, and queries the OSV batch API. A build-resolution or OSV fail
 leaves Dependency Health unassessed. Disable it with:
 
 ```bash
-uv run refinery assess /path/to/java-project --no-dependencies
+uv run refinery analyze /path/to/java-project --no-dependencies
 ```
 
 Human-readable assessment and summary reports show aggregate OSV counts only. Complete structured
@@ -228,7 +239,7 @@ Settings use the `REFINERY_` prefix and may be placed in `.env`. See `.env.examp
 | Setting | Default | Purpose |
 |---|---:|---|
 | `REFINERY_MODEL` | `openai:gpt-5-mini` | Pydantic AI model identifier |
-| `REFINERY_LITELLM_MODEL` | `ollama_chat/gemma4` | LiteLLM provider and model identifier |
+| `REFINERY_LITELLM_MODEL` | `ollama_chat/gemma4:latest` | LiteLLM provider and model identifier |
 | `REFINERY_LITELLM_API_BASE` | `http://localhost:11434` | LiteLLM provider API base URL |
 | `REFINERY_MAX_REPAIR_ATTEMPTS` | `3` | Repair-loop attempt limit |
 | `REFINERY_COMMAND_TIMEOUT_SECONDS` | `900` | Build command timeout |

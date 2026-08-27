@@ -7,6 +7,7 @@ from pathlib import Path
 
 from refinery_ai.assessment.dependency_artifacts import write_dependency_artifact
 from refinery_ai.assessment.engine import AssessmentEngine
+from refinery_ai.assessment.models import Assessment
 from refinery_ai.config import Settings
 from refinery_ai.context_graph.fingerprint import repository_fingerprint
 from refinery_ai.context_graph.models import ContextEdge, ContextGraph, ContextNode
@@ -50,11 +51,13 @@ class ProjectSummaryService:
         sonarqube_enabled: bool = False,
         keep_sonarqube: bool = False,
         settings: Settings | None = None,
+        snapshot: DiscoverySnapshot | None = None,
+        assessment: Assessment | None = None,
     ) -> ProjectSummary:
         root = repository.expanduser().resolve()
         if not root.is_dir():
             raise SummaryError(f"Repository does not exist: {root}")
-        snapshot = discover(root)
+        snapshot = snapshot or discover(root)
         selected_graph = (
             graph_path.expanduser().resolve() if graph_path else root / self.store.relative_path
         )
@@ -64,21 +67,22 @@ class ProjectSummaryService:
             selected_graph = environment.build_context(root).graph_path
         if not selected_graph.is_file():
             raise SummaryError(
-                f"No context graph found at {selected_graph}. Run `refinery summary {root} "
-                "--refresh` to build it."
+                f"No context graph found at {selected_graph}. Run `refinery analyze {root}` "
+                "to build it."
             )
         graph = self.store.load(selected_graph)
         if graph.repository.resolve() != root:
             raise SummaryError(
                 f"Context graph belongs to {graph.repository}, not requested repository {root}"
             )
-        assessment = AssessmentEngine(
-            dependency_analysis_enabled=dependency_analysis_enabled,
-            sonarqube_enabled=sonarqube_enabled,
-            keep_sonarqube=keep_sonarqube,
-            settings=settings,
-        ).assess(root)
-        write_dependency_artifact(assessment)
+        if assessment is None:
+            assessment = AssessmentEngine(
+                dependency_analysis_enabled=dependency_analysis_enabled,
+                sonarqube_enabled=sonarqube_enabled,
+                keep_sonarqube=keep_sonarqube,
+                settings=settings,
+            ).assess(root)
+            write_dependency_artifact(assessment)
         nodes = self._included_nodes(graph, include_tests)
         node_ids = {node.id for node in nodes}
         edges = [edge for edge in graph.edges if edge.source in node_ids or edge.target in node_ids]
@@ -288,7 +292,7 @@ class ProjectSummaryService:
                 SummaryObservation(
                     severity="warning",
                     category="evidence",
-                    message="The context graph may be stale; run summary with --refresh.",
+                    message="The context graph may be stale; run analyze again.",
                 )
             )
         if java_version and java_version.isdigit() and int(java_version) < 17:

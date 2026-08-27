@@ -90,6 +90,16 @@ def summary_repository(tmp_path: Path) -> Path:
     return repository
 
 
+def test_analyze_is_the_single_analysis_command() -> None:
+    result = CliRunner().invoke(app, ["--help"])
+
+    assert result.exit_code == 0
+    assert "analyze" in result.stdout
+    assert "discover" not in result.stdout
+    assert "summary" not in result.stdout
+    assert "assess " not in result.stdout
+
+
 def test_summary_combines_graph_discovery_structure_and_assessment(tmp_path: Path) -> None:
     repository = summary_repository(tmp_path)
 
@@ -124,7 +134,7 @@ def test_summary_detects_stale_and_wrong_graphs(tmp_path: Path) -> None:
 
 
 def test_summary_missing_graph_is_actionable(tmp_path: Path) -> None:
-    with pytest.raises(SummaryError, match="--refresh"):
+    with pytest.raises(SummaryError, match="refinery analyze"):
         ProjectSummaryService().summarize(tmp_path)
 
 
@@ -133,7 +143,7 @@ def test_summary_cli_emits_json(tmp_path: Path) -> None:
 
     result = CliRunner().invoke(
         app,
-        ["summary", str(repository), "--json", "--no-sonarqube", "--no-dependencies"],
+        ["analyze", str(repository), "--json", "--no-sonarqube", "--no-dependencies"],
     )
 
     assert result.exit_code == 0
@@ -146,7 +156,7 @@ def test_summary_cli_persists_markdown_in_target_repository(tmp_path: Path) -> N
     repository = summary_repository(tmp_path)
 
     result = CliRunner().invoke(
-        app, ["summary", str(repository), "--no-sonarqube", "--no-dependencies"]
+        app, ["analyze", str(repository), "--no-sonarqube", "--no-dependencies"]
     )
 
     assert result.exit_code == 0
@@ -162,7 +172,7 @@ def test_summary_cli_keeps_refinery_copy_with_explicit_output(tmp_path: Path) ->
     result = CliRunner().invoke(
         app,
         [
-            "summary",
+            "analyze",
             str(repository),
             "--output",
             str(output),
@@ -214,7 +224,7 @@ def test_summary_markdown_includes_dependency_results(
 
     monkeypatch.setattr(DependencyAnalyzer, "analyze", completed)
 
-    result = CliRunner().invoke(app, ["summary", str(repository), "--no-sonarqube"])
+    result = CliRunner().invoke(app, ["analyze", str(repository), "--no-sonarqube"])
 
     assert result.exit_code == 0
     assert "Dependency Health: 90/100" in result.stdout
@@ -250,8 +260,8 @@ def test_summary_cli_defaults_sonarqube_on_and_allows_opt_out(
     monkeypatch.setattr(SonarQubeAnalyzer, "analyze", unavailable)
     runner = CliRunner()
 
-    default = runner.invoke(app, ["summary", str(repository)])
-    disabled = runner.invoke(app, ["summary", str(repository), "--no-sonarqube"])
+    default = runner.invoke(app, ["analyze", str(repository)])
+    disabled = runner.invoke(app, ["analyze", str(repository), "--no-sonarqube"])
 
     assert default.exit_code == 0
     assert disabled.exit_code == 0

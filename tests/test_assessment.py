@@ -90,7 +90,7 @@ def test_assess_cli_persists_and_compares_by_name(tmp_path: Path) -> None:
     baseline = runner.invoke(
         app,
         [
-            "assess",
+            "analyze",
             str(repository),
             "--name",
             "baseline",
@@ -101,7 +101,7 @@ def test_assess_cli_persists_and_compares_by_name(tmp_path: Path) -> None:
     comparison = runner.invoke(
         app,
         [
-            "assess",
+            "analyze",
             str(repository),
             "--compare",
             "baseline",
@@ -111,16 +111,13 @@ def test_assess_cli_persists_and_compares_by_name(tmp_path: Path) -> None:
     )
 
     assert baseline.exit_code == 0
-    assert "Modernization Score" in baseline.stdout
+    assert "Modernization posture" in baseline.stdout
     assert comparison.exit_code == 0
-    assert "Compatibility: compatible" in comparison.stdout
     latest = repository / ".refinery/assessment.md"
-    assert latest.read_text() == comparison.stdout
-    comparison_reports = list(
-        (repository / ".refinery/assessments").glob("*.comparison.md")
-    )
+    assert "Compatibility: compatible" in latest.read_text()
+    comparison_reports = list((repository / ".refinery/assessments").glob("*.comparison.md"))
     assert len(comparison_reports) == 1
-    assert comparison_reports[0].read_text() == comparison.stdout
+    assert comparison_reports[0].read_text() == latest.read_text()
 
 
 def test_assess_cli_retains_text_and_json_stdout(tmp_path: Path) -> None:
@@ -128,17 +125,18 @@ def test_assess_cli_retains_text_and_json_stdout(tmp_path: Path) -> None:
     runner = CliRunner()
 
     text_result = runner.invoke(
-        app, ["assess", str(repository), "--no-sonarqube", "--no-dependencies"]
+        app, ["analyze", str(repository), "--no-sonarqube", "--no-dependencies"]
     )
     json_result = runner.invoke(
         app,
-        ["assess", str(repository), "--json", "--no-sonarqube", "--no-dependencies"],
+        ["analyze", str(repository), "--json", "--no-sonarqube", "--no-dependencies"],
     )
 
     assert text_result.exit_code == 0
     assert json_result.exit_code == 0
-    assert (repository / ".refinery/assessment.md").read_text() == text_result.stdout
-    assert (repository / ".refinery/assessment.json").read_text() == json_result.stdout
-    assessment_id = json.loads(json_result.stdout)["assessment_id"]
+    assert (repository / ".refinery/summary.md").read_text() == text_result.stdout
+    assert (repository / ".refinery/summary.json").read_text() == json_result.stdout
+    assessment = json.loads((repository / ".refinery/assessment.json").read_text())
+    assessment_id = assessment["assessment_id"]
     historical = repository / f".refinery/assessments/{assessment_id}.report.json"
-    assert historical.read_text() == json_result.stdout
+    assert json.loads(historical.read_text()) == assessment

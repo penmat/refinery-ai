@@ -238,9 +238,15 @@ class RepositoryEvidenceTools:
 
     def get_inspector_result(
         self,
-        inspector: str,
-        include_findings: bool = False,
-        finding_limit: int = 20,
+        inspector: Annotated[
+            str, Field(description="Exact inspector name returned by get_repository_overview")
+        ],
+        include_findings: Annotated[
+            bool, Field(description="Include individual findings in addition to metrics")
+        ] = False,
+        finding_limit: Annotated[
+            int, Field(description="Maximum findings to include; values above 100 are capped")
+        ] = 20,
     ) -> JsonObject:
         """Return one persisted inspector result with optionally bounded findings."""
 
@@ -273,12 +279,22 @@ class RepositoryEvidenceTools:
 
     def search_findings(
         self,
-        query: str = "",
-        inspector: str | None = None,
-        category: str | None = None,
-        severity: str | None = None,
-        path: str | None = None,
-        limit: int = 20,
+        query: Annotated[
+            str, Field(description="Text terms that must all occur in the serialized finding")
+        ] = "",
+        inspector: Annotated[str | None, Field(description="Optional exact inspector name")] = None,
+        category: Annotated[
+            str | None, Field(description="Optional exact finding category")
+        ] = None,
+        severity: Annotated[
+            str | None, Field(description="Optional exact finding severity")
+        ] = None,
+        path: Annotated[
+            str | None, Field(description="Optional case-insensitive substring of the file path")
+        ] = None,
+        limit: Annotated[
+            int, Field(description="Maximum findings to return; values above 100 are capped")
+        ] = 20,
     ) -> JsonObject:
         """Search persisted findings by text, inspector, category, severity, and path."""
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import typer
 
@@ -18,6 +18,7 @@ from refinery_ai.factory import ModernizationFactory
 from refinery_ai.harness import HarnessRepositoryEnvironment
 from refinery_ai.llm import run_tool_loop
 from refinery_ai.logging import configure_logging
+from refinery_ai.mcp import run_mcp_server
 from refinery_ai.models import ModernizationGoal, RunReport
 from refinery_ai.summary import ProjectSummaryService, SummaryError
 from refinery_ai.summary.reporting import summary_markdown
@@ -89,18 +90,8 @@ def version() -> None:
     typer.echo(__version__)
 
 
-@app.command("discover")
-def discover_command(
-    repository: Annotated[Path, typer.Argument(exists=True, file_okay=False)] = Path("."),
-) -> None:
-    """Discover a Java repository without changing it."""
-
-    environment = HarnessRepositoryEnvironment(repository)
-    typer.echo(json.dumps(environment.discover(repository).model_dump(mode="json"), indent=2))
-
-
-@app.command("assess")
-def assess_command(
+@app.command("analyze")
+def analyze_command(
     repository: Annotated[Path, typer.Argument(exists=True, file_okay=False)] = Path("."),
     name: Annotated[
         str | None, typer.Option("--name", help="Friendly name for this assessment")
@@ -132,10 +123,18 @@ def assess_command(
     keep_sonarqube: Annotated[
         bool, typer.Option("--keep-sonarqube", help="Keep the temporary server for diagnosis")
     ] = False,
+    output: Annotated[
+        Path | None, typer.Option("--output", "-o", help="Write another copy of the summary")
+    ] = None,
+    top: Annotated[int, typer.Option("--top", min=1, help="Prominent components to show")] = 10,
+    include_tests: Annotated[
+        bool, typer.Option("--include-tests", help="Include test graph components")
+    ] = False,
 ) -> None:
-    """Assess a Java repository using deterministic local evidence."""
+    """Discover, assess, and summarize a Java repository."""
 
-    store = AssessmentStore(repository)
+    root = repository.expanduser().resolve()
+    store = AssessmentStore(root)
     previous = store.load(compare_to) if compare_to else None
     settings = Settings()
     dependencies_enabled = (
@@ -152,12 +151,17 @@ def assess_command(
             f"Running temporary local SonarQube analysis with {settings.sonarqube_image}...",
             err=True,
         )
+    environment = HarnessRepositoryEnvironment(root)
+    snapshot = environment.discover(root)
+    graph_path = root / settings.state_directory / "context/context-graph.json"
+    if not graph_path.is_file():
+        graph_path = environment.build_context(root).graph_path
     current = AssessmentEngine(
         dependency_analysis_enabled=dependencies_enabled,
         sonarqube_enabled=enabled,
         keep_sonarqube=keep_sonarqube,
         settings=settings,
-    ).assess(repository, name=name)
+    ).assess(root, name=name)
     write_dependency_artifact(current)
     store.save(current)
     if previous:
@@ -181,7 +185,33 @@ def assess_command(
     _write_output(
         refinery / "assessments" / f"{current.assessment_id}.{report_label}{suffix}", retained
     )
-    typer.echo(rendered)
+    try:
+        summary = ProjectSummaryService().summarize(
+            root,
+            graph_path=graph_path,
+            include_tests=include_tests,
+            top=top,
+            snapshot=snapshot,
+            assessment=current,
+        )
+    except SummaryError as error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    summary_json = json_output or (output is not None and output.suffix.casefold() == ".json")
+    summary_rendered = (
+        json.dumps(summary.model_dump(mode="json"), indent=2)
+        if summary_json
+        else summary_markdown(summary, terminal=False)
+    )
+    summary_path = refinery / f"summary{'.json' if summary_json else '.md'}"
+    _write_output(summary_path, summary_rendered)
+    if output is not None:
+        output_path = output.expanduser().resolve()
+        if output_path != summary_path:
+            _write_output(output_path, summary_rendered)
+        typer.echo(f"Summary written to {output_path}")
+    else:
+        typer.echo(summary_rendered, nl=False)
 
 
 @assessment_app.command("show")
@@ -249,100 +279,6 @@ def graph(
 
 
 @app.command()
-def summary(
-    repository: Annotated[
-        Path, typer.Argument(exists=True, file_okay=False, help="Java repository to summarize")
-    ] = Path("."),
-    refresh: Annotated[
-        bool, typer.Option("--refresh", help="Rebuild the context graph before summarizing")
-    ] = False,
-    graph_path: Annotated[
-        Path | None, typer.Option("--graph", help="Read a specific context graph")
-    ] = None,
-    json_output: Annotated[
-        bool, typer.Option("--json", help="Print machine-readable JSON")
-    ] = False,
-    output: Annotated[
-        Path | None, typer.Option("--output", "-o", help="Write the summary to a file")
-    ] = None,
-    top: Annotated[int, typer.Option("--top", min=1, help="Prominent components to show")] = 10,
-    include_tests: Annotated[
-        bool, typer.Option("--include-tests", help="Include test graph components")
-    ] = False,
-    dependencies: Annotated[
-        bool | None,
-        typer.Option(
-            "--dependencies/--no-dependencies",
-            help="Resolve dependencies and check them with OSV",
-        ),
-    ] = None,
-    osv_verify_ssl: Annotated[
-        bool | None,
-        typer.Option(
-            "--osv-verify-ssl/--no-osv-verify-ssl",
-            help="Verify OSV TLS certificates",
-        ),
-    ] = None,
-    sonarqube: Annotated[
-        bool | None,
-        typer.Option("--sonarqube/--no-sonarqube", help="Run temporary local SonarQube analysis"),
-    ] = None,
-    keep_sonarqube: Annotated[
-        bool, typer.Option("--keep-sonarqube", help="Keep the temporary server for diagnosis")
-    ] = False,
-) -> None:
-    """Summarize project architecture and modernization posture."""
-
-    settings = Settings()
-    dependencies_enabled = (
-        settings.dependency_analysis_enabled if dependencies is None else dependencies
-    )
-    settings.osv_verify_ssl = settings.osv_verify_ssl if osv_verify_ssl is None else osv_verify_ssl
-    enabled = settings.sonarqube_enabled if sonarqube is None else sonarqube
-    if dependencies_enabled:
-        typer.echo("Resolving dependencies and checking OSV...", err=True)
-        if not settings.osv_verify_ssl:
-            typer.echo("Warning: OSV TLS certificate verification is disabled.", err=True)
-    if enabled:
-        typer.echo(
-            f"Running temporary local SonarQube analysis with {settings.sonarqube_image}...",
-            err=True,
-        )
-    try:
-        result = ProjectSummaryService().summarize(
-            repository,
-            graph_path=graph_path,
-            refresh=refresh,
-            include_tests=include_tests,
-            top=top,
-            dependency_analysis_enabled=dependencies_enabled,
-            sonarqube_enabled=enabled,
-            keep_sonarqube=keep_sonarqube,
-            settings=settings,
-        )
-    except SummaryError as error:
-        typer.echo(f"Error: {error}", err=True)
-        raise typer.Exit(code=1) from error
-    rendered = (
-        json.dumps(result.model_dump(mode="json"), indent=2)
-        if json_output or (output is not None and output.suffix.casefold() == ".json")
-        else summary_markdown(result, terminal=False)
-    )
-    suffix = ".json" if json_output or (output and output.suffix.casefold() == ".json") else ".md"
-    retained_path = (
-        repository.expanduser().resolve() / settings.state_directory / f"summary{suffix}"
-    )
-    _write_output(retained_path, rendered)
-    if output is not None:
-        output_path = output.expanduser().resolve()
-        if output_path != retained_path:
-            _write_output(output_path, rendered)
-        typer.echo(f"Summary written to {output_path}")
-    else:
-        typer.echo(rendered, nl=False)
-
-
-@app.command()
 def chat(
     repository: Annotated[
         Path, typer.Argument(exists=True, file_okay=False, help="Java repository to discuss")
@@ -387,6 +323,27 @@ def chat(
         answer = result.content or "I could not produce a textual answer."
         typer.echo(f"Refinery AI: {answer}")
         messages.append({"role": "assistant", "prompt": answer})
+
+
+@app.command()
+def mcp(
+    repository: Annotated[
+        Path, typer.Argument(exists=True, file_okay=False, help="Java repository to expose")
+    ] = Path("."),
+    transport: Annotated[
+        Literal["stdio", "http"],
+        typer.Option("--transport", help="MCP transport: stdio or Streamable HTTP"),
+    ] = "stdio",
+    host: Annotated[
+        str, typer.Option("--host", help="HTTP bind address; ignored for stdio")
+    ] = "127.0.0.1",
+    port: Annotated[
+        int, typer.Option("--port", min=1, max=65535, help="HTTP port; ignored for stdio")
+    ] = 8000,
+) -> None:
+    """Launch an MCP server exposing read-only repository evidence tools."""
+
+    run_mcp_server(repository.expanduser().resolve(), transport=transport, host=host, port=port)
 
 
 @app.command()

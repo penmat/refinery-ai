@@ -37,10 +37,11 @@ runtime wiring are not yet inferred.
 
 ## Architecture summaries
 
-`refinery summary REPOSITORY` reads the existing normalized graph and combines it with live
-discovery, folder structure, and deterministic assessment metrics. It reports architectural shape,
-interfaces, data usage, prominent components, modernization posture, and provider completeness.
-The command does not rebuild or write repository state unless `--refresh` or `--output` is supplied.
+`refinery analyze REPOSITORY` reads the existing normalized graph (or builds it when absent) and
+combines it with live discovery, folder structure, and deterministic assessment metrics. It reports
+architectural shape, interfaces, data usage, prominent components, modernization posture, and
+provider completeness.
+The command retains its assessment and summary artifacts under `.refinery/`.
 
 Use `--json` for the typed summary contract, `--output FILE` for a reusable report, and `--top N` to
 control the number of prominent components. A graph from another repository is rejected, while a

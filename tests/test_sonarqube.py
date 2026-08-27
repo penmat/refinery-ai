@@ -330,16 +330,16 @@ def test_cli_defaults_on_and_no_sonarqube_skips_it(
     monkeypatch.setattr(SonarQubeAnalyzer, "analyze", unavailable)
     runner = CliRunner()
 
-    default = runner.invoke(app, ["assess", str(repository)])
-    disabled = runner.invoke(app, ["assess", str(repository), "--no-sonarqube"])
-
+    default = runner.invoke(app, ["analyze", str(repository)])
     assert default.exit_code == 0
-    assert "SonarQube: unavailable" in default.stdout
+    assert "SonarQube: unavailable" in (repository / ".refinery/assessment.md").read_text()
+
+    disabled = runner.invoke(app, ["analyze", str(repository), "--no-sonarqube"])
     assert disabled.exit_code == 0
     assert calls == 1
 
     monkeypatch.setenv("REFINERY_SONARQUBE_ENABLED", "false")
-    configured_off = runner.invoke(app, ["assess", str(repository)])
+    configured_off = runner.invoke(app, ["analyze", str(repository)])
     assert configured_off.exit_code == 0
     assert calls == 1
 

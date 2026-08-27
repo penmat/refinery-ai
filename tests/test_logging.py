@@ -18,9 +18,12 @@ def test_safe_command_redacts_inline_and_following_secrets() -> None:
 
 
 def test_cli_logs_commands_and_inspectors_to_stderr(tmp_path: Path) -> None:
+    source = tmp_path / "src/main/java/example/App.java"
+    source.parent.mkdir(parents=True)
+    source.write_text("package example; class App {}")
     result = CliRunner().invoke(
         app,
-        ["assess", str(tmp_path), "--no-dependencies", "--no-sonarqube", "--json"],
+        ["analyze", str(tmp_path), "--no-dependencies", "--no-sonarqube", "--json"],
     )
 
     assert result.exit_code == 0
