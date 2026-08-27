@@ -88,6 +88,35 @@ class ModernizationPlan(BaseModel):
     steps: list[ModernizationStep] = Field(min_length=1)
 
 
+class RecipePriority(StrEnum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class ExecutionType(StrEnum):
+    OPENREWRITE = "openrewrite"
+
+
+class RecipeRecommendation(BaseModel):
+    """An evidence-backed recipe suggestion; it is not authorization to run it."""
+
+    execution_type: ExecutionType = ExecutionType.OPENREWRITE
+    recipe: str
+    reason: str
+    evidence: list[str] = Field(min_length=1)
+    expected_benefit: str
+    priority: RecipePriority
+    depends_on: list[str] = Field(default_factory=list)
+    confidence: float = Field(ge=0, le=1)
+
+
+class RecipePlan(BaseModel):
+    """Non-executing output from the catalog-aware planner."""
+
+    recommendations: list[RecipeRecommendation] = Field(default_factory=list)
+
+
 class PatchProposal(BaseModel):
     """A model-proposed unified diff; the factory decides whether to apply it."""
 
@@ -126,5 +155,5 @@ class RunReport(BaseModel):
     status: RunStatus
     snapshot: DiscoverySnapshot
     context_graph: ContextGraphInfo
-    plan: ModernizationPlan
+    plan: ModernizationPlan | RecipePlan
     steps: list[StepResult] = Field(default_factory=list)

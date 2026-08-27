@@ -1,6 +1,6 @@
 """Human-readable run reports."""
 
-from refinery_ai.models import RunReport
+from refinery_ai.models import ModernizationPlan, RunReport
 
 
 def to_markdown(report: RunReport) -> str:
@@ -9,7 +9,6 @@ def to_markdown(report: RunReport) -> str:
         "",
         f"**Status:** {report.status.value}",
         f"**Repository:** `{report.snapshot.repository}`",
-        f"**Goal:** {report.plan.goal.description}",
         f"**Context graph:** `{report.context_graph.graph_path}`",
         f"**Graph size:** {report.context_graph.node_count} nodes, "
         f"{report.context_graph.edge_count} edges",
@@ -19,6 +18,21 @@ def to_markdown(report: RunReport) -> str:
         "## Plan",
         "",
     ]
+    if not isinstance(report.plan, ModernizationPlan):
+        lines[-2] = "## Recipe recommendations"
+        for recommendation in report.plan.recommendations:
+            lines.extend(
+                [
+                    f"- **{recommendation.recipe}** — {recommendation.priority.value}; "
+                    f"confidence {recommendation.confidence:.0%}",
+                    f"  - {recommendation.reason}",
+                ]
+            )
+        if not report.plan.recommendations:
+            lines.append("No recipes had sufficient project evidence.")
+        lines.extend(["", "No recipes have been executed."])
+        return "\n".join(lines).rstrip() + "\n"
+    lines.insert(4, f"**Goal:** {report.plan.goal.description}")
     results = {result.step_id: result for result in report.steps}
     for step in report.plan.steps:
         result = results.get(step.id)

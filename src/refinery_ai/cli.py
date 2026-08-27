@@ -19,7 +19,7 @@ from refinery_ai.harness import HarnessRepositoryEnvironment
 from refinery_ai.llm import run_tool_loop
 from refinery_ai.logging import configure_logging
 from refinery_ai.mcp import run_mcp_server
-from refinery_ai.models import ModernizationGoal, RunReport
+from refinery_ai.models import ModernizationGoal, RecipePlan, RunReport
 from refinery_ai.summary import ProjectSummaryService, SummaryError
 from refinery_ai.summary.reporting import summary_markdown
 from refinery_ai.tools import RepositoryEvidenceTools
@@ -351,14 +351,34 @@ def plan(
     goal: Annotated[str, typer.Argument(help="Modernization goal")],
     repository: Annotated[Path, typer.Option("--repository", "-r")] = Path("."),
     target_java: Annotated[int | None, typer.Option("--target-java")] = None,
+    catalog_verify_ssl: Annotated[
+        bool | None,
+        typer.Option(
+            "--catalog-verify-ssl/--no-catalog-verify-ssl",
+            help="Verify the OpenRewrite catalog TLS certificate",
+        ),
+    ] = None,
 ) -> None:
-    """Build and persist a deterministic modernization plan."""
+    """Recommend applicable OpenRewrite recipes without executing them."""
 
-    _print(
-        ModernizationFactory().prepare(
-            repository, ModernizationGoal(description=goal, target_java=target_java)
-        )
+    settings = Settings()
+    settings.recipe_catalog_verify_ssl = (
+        settings.recipe_catalog_verify_ssl
+        if catalog_verify_ssl is None
+        else catalog_verify_ssl
     )
+    if not settings.recipe_catalog_verify_ssl:
+        typer.echo(
+            "Warning: OpenRewrite catalog TLS certificate verification is disabled.", err=True
+        )
+    report = ModernizationFactory(settings=settings).prepare(
+        repository,
+        ModernizationGoal(description=goal, target_java=target_java),
+        use_ai_planner=True,
+    )
+    if not isinstance(report.plan, RecipePlan):
+        raise RuntimeError("Planner did not return recipe recommendations")
+    typer.echo(json.dumps(report.plan.model_dump(mode="json"), indent=2))
 
 
 @app.command()

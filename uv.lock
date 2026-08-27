@@ -2065,6 +2065,7 @@ name = "refinery-ai"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "certifi" },
     { name = "graphifyy" },
     { name = "litellm" },
     { name = "mcp" },
@@ -2086,6 +2087,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "certifi", specifier = ">=2025.1.31" },
     { name = "graphifyy", specifier = ">=0.9.48,<1" },
     { name = "litellm", specifier = ">=1.80,<2" },
     { name = "mcp", specifier = ">=1.27,<2" },

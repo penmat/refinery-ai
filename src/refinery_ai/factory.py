@@ -6,11 +6,14 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
+from refinery_ai.agents import PlanningDependencies, create_planning_agent
 from refinery_ai.config import Settings
 from refinery_ai.context_graph.contracts import ContextGraphBuildService
 from refinery_ai.harness import AssessmentHarnessPolicy, HarnessRepositoryEnvironment
 from refinery_ai.models import (
     ModernizationGoal,
+    ModernizationPlan,
+    RecipePlan,
     RunReport,
     RunStatus,
     StepResult,
@@ -19,6 +22,8 @@ from refinery_ai.models import (
 )
 from refinery_ai.openrewrite import OpenRewriteAdapter
 from refinery_ai.planning import rule_based_plan, validate_plan
+from refinery_ai.planning_artifacts import load_planning_artifacts
+from refinery_ai.recipe_catalog import JavaMigrationCatalog, fetch_java_migration_catalog
 from refinery_ai.reporting import to_markdown
 from refinery_ai.repository import RepositoryEnvironment
 
@@ -32,11 +37,13 @@ class ModernizationFactory:
         rewrite: OpenRewriteAdapter | None = None,
         context_graph: ContextGraphBuildService | None = None,
         environment: RepositoryEnvironment | None = None,
+        recipe_catalog: JavaMigrationCatalog | None = None,
     ) -> None:
         self.settings = settings or Settings()
         self.environment = environment
         self.context_graph = context_graph
         self.rewrite = rewrite
+        self.recipe_catalog = recipe_catalog
 
     def _environment(self, repository: Path) -> RepositoryEnvironment:
         if self.environment is not None:
@@ -53,14 +60,55 @@ class ModernizationFactory:
             output_limit=self.settings.max_output_characters,
         )
 
-    def prepare(self, repository: Path, goal: ModernizationGoal) -> RunReport:
+    def prepare(
+        self, repository: Path, goal: ModernizationGoal, *, use_ai_planner: bool = False
+    ) -> RunReport:
         environment = self._environment(repository)
         snapshot = environment.discover(repository)
         state_dir = snapshot.repository / self.settings.state_directory
         state_dir.mkdir(parents=True, exist_ok=True)
         graph = environment.build_context(snapshot.repository)
-        plan = rule_based_plan(snapshot, goal)
-        validate_plan(plan)
+        plan: ModernizationPlan | RecipePlan
+        if use_ai_planner:
+            artifact_context = load_planning_artifacts(
+                snapshot.repository,
+                self.settings.state_directory,
+                self.settings.max_output_characters,
+            )
+            catalog = self.recipe_catalog or fetch_java_migration_catalog(
+                timeout=self.settings.recipe_catalog_timeout_seconds,
+                verify_ssl=self.settings.recipe_catalog_verify_ssl,
+            )
+            graph_context = environment.query_context(
+                graph.graph_path,
+                (
+                    f"{goal.description} Spring HTTP endpoint injection database Kafka Redis "
+                    "cache configuration dependency"
+                ),
+            )[: self.settings.max_output_characters]
+            planner = create_planning_agent(
+                self.settings.model,
+                ollama_base_url=self.settings.litellm_api_base,
+            )
+            result = planner.run_sync(
+                (
+                    "Recommend applicable Java migration recipes for this goal: "
+                    f"{goal.model_dump_json()}. Use only the supplied project artifacts and "
+                    "catalog. Explain evidence, benefit, dependencies/order, and confidence. "
+                    "This is planning only: do not execute anything."
+                ),
+                deps=PlanningDependencies(
+                    snapshot=snapshot,
+                    graph_summary=graph.summary(),
+                    graph_context=graph_context,
+                    artifact_context=artifact_context,
+                    recipe_catalog=catalog.planning_context(),
+                ),
+            )
+            plan = result.output
+        else:
+            plan = rule_based_plan(snapshot, goal)
+            validate_plan(plan)
         report = RunReport(
             run_id=uuid4().hex,
             status=RunStatus.PLANNED,
@@ -94,6 +142,8 @@ class ModernizationFactory:
 
         report.status = RunStatus.RUNNING
         build_command = environment.verification_command(report.snapshot)
+        if not isinstance(report.plan, ModernizationPlan):
+            raise ValueError("Recipe recommendation plans cannot be executed")
         for step in report.plan.steps:
             if step.strategy is StepStrategy.COMMAND:
                 if build_command is None:

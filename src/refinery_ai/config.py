@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="REFINERY_", env_file=".env", extra="ignore")
 
-    model: str = "openai:gpt-5-mini"
+    model: str = "ollama:gemma4:latest"
     litellm_model: str = "ollama_chat/gemma4:latest"
     litellm_api_base: str = "http://localhost:11434"
     state_directory: Path = Path(".refinery")
@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     graphify_timeout_seconds: int = 900
     allow_dirty_worktree: bool = False
     max_output_characters: int = 20_000
+    recipe_catalog_timeout_seconds: int = 15
+    recipe_catalog_verify_ssl: bool = True
     dependency_analysis_enabled: bool = True
     dependency_resolution_timeout_seconds: int = 900
     maven_dependency_plugin_version: str = "3.11.0"
