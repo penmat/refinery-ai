@@ -11,6 +11,7 @@ from refinery_ai.config import Settings
 from refinery_ai.context_graph.contracts import ContextGraphBuildService
 from refinery_ai.harness import AssessmentHarnessPolicy, HarnessRepositoryEnvironment
 from refinery_ai.models import (
+    DiscoverySnapshot,
     ModernizationGoal,
     ModernizationPlan,
     RecipePlan,
@@ -24,8 +25,44 @@ from refinery_ai.openrewrite import OpenRewriteAdapter
 from refinery_ai.planning import rule_based_plan, validate_plan
 from refinery_ai.planning_artifacts import load_planning_artifacts
 from refinery_ai.recipe_catalog import JavaMigrationCatalog, fetch_java_migration_catalog
+from refinery_ai.recipe_sources import RecipeSource, fetch_recipe_sources
 from refinery_ai.reporting import to_markdown
 from refinery_ai.repository import RepositoryEnvironment
+
+
+def _planning_evidence_facts(
+    snapshot: DiscoverySnapshot, goal: ModernizationGoal, artifact_context: str
+) -> list[str]:
+    """Create stable project facts that the planner can quote exactly."""
+
+    facts = [
+        f"discovery.build_system={snapshot.build_system.value}",
+        f"discovery.java_version={snapshot.java_version or 'unknown'}",
+    ]
+    if goal.target_java is not None:
+        facts.append(f"goal.target_java={goal.target_java}")
+    facts.extend(f"discovery.framework={framework}" for framework in snapshot.frameworks)
+    facts.extend(
+        "discovery.dependency="
+        f"{dependency.group}:{dependency.artifact}:{dependency.version or 'unspecified'}"
+        for dependency in snapshot.dependencies
+    )
+    noteworthy_prefixes = (
+        "Java:",
+        "Build:",
+        "Frameworks:",
+        "- [warning]",
+        "- [error]",
+        "Resolved dependencies:",
+        "Vulnerable dependencies:",
+        "OSV findings:",
+    )
+    facts.extend(
+        line.strip()
+        for line in artifact_context.splitlines()
+        if line.strip().startswith(noteworthy_prefixes)
+    )
+    return list(dict.fromkeys(facts))
 
 
 class ModernizationFactory:
@@ -38,12 +75,14 @@ class ModernizationFactory:
         context_graph: ContextGraphBuildService | None = None,
         environment: RepositoryEnvironment | None = None,
         recipe_catalog: JavaMigrationCatalog | None = None,
+        recipe_sources: list[RecipeSource] | None = None,
     ) -> None:
         self.settings = settings or Settings()
         self.environment = environment
         self.context_graph = context_graph
         self.rewrite = rewrite
         self.recipe_catalog = recipe_catalog
+        self.recipe_sources = recipe_sources
 
     def _environment(self, repository: Path) -> RepositoryEnvironment:
         if self.environment is not None:
@@ -79,16 +118,40 @@ class ModernizationFactory:
                 timeout=self.settings.recipe_catalog_timeout_seconds,
                 verify_ssl=self.settings.recipe_catalog_verify_ssl,
             )
+            recipe_sources = (
+                self.recipe_sources
+                if self.recipe_sources is not None
+                else fetch_recipe_sources(
+                    timeout=self.settings.recipe_catalog_timeout_seconds,
+                    verify_ssl=self.settings.recipe_catalog_verify_ssl,
+                )
+            )
             graph_context = environment.query_context(
                 graph.graph_path,
                 (
-                    f"{goal.description} Spring HTTP endpoint injection database Kafka Redis "
-                    "cache configuration dependency"
+                    f"{goal.description} Java version source target release compiler build "
+                    "dependencies imports deprecated APIs Guava OpenJPA Cobertura Scala Jakarta"
                 ),
             )[: self.settings.max_output_characters]
+            evidence_facts = _planning_evidence_facts(snapshot, goal, artifact_context)
+            evidence_corpus = "\n".join(
+                (
+                    "\n".join(evidence_facts),
+                    goal.model_dump_json(indent=2),
+                    snapshot.model_dump_json(indent=2),
+                    graph.summary(),
+                    graph_context,
+                    artifact_context,
+                )
+            )
             planner = create_planning_agent(
                 self.settings.model,
                 ollama_base_url=self.settings.litellm_api_base,
+                openai_api_key=(
+                    self.settings.openai_api_key.get_secret_value()
+                    if self.settings.openai_api_key
+                    else None
+                ),
             )
             result = planner.run_sync(
                 (
@@ -102,7 +165,17 @@ class ModernizationFactory:
                     graph_summary=graph.summary(),
                     graph_context=graph_context,
                     artifact_context=artifact_context,
-                    recipe_catalog=catalog.planning_context(),
+                    evidence_facts=evidence_facts,
+                    recipe_catalog=(
+                        f"Catalog index: {catalog.source}\n"
+                        "Declarative recipe source array:\n"
+                        + json.dumps(
+                            [source.model_dump(mode="json") for source in recipe_sources],
+                            indent=2,
+                        )
+                    ),
+                    allowed_recipes=frozenset(source.recipe for source in recipe_sources),
+                    evidence_corpus=evidence_corpus,
                 ),
             )
             plan = result.output

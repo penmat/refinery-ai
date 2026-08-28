@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from refinery_ai.discovery import discover
+from refinery_ai.discovery import discover, resolve_parent_java_version
 from refinery_ai.models import BuildSystem
 
 
@@ -30,6 +30,28 @@ def test_discovers_maven_repository(tmp_path: Path) -> None:
 def test_discovers_gradle_repository(tmp_path: Path) -> None:
     (tmp_path / "build.gradle.kts").write_text("plugins { java }")
     assert discover(tmp_path).build_system is BuildSystem.GRADLE
+
+
+def test_resolves_java_version_from_maven_central_parent(tmp_path: Path) -> None:
+    child = """<project><modelVersion>4.0.0</modelVersion><parent>
+      <groupId>example.parents</groupId>
+      <artifactId>application-parent</artifactId><version>1.2.3</version>
+      <relativePath/>
+    </parent></project>"""
+    parent = """<project><modelVersion>4.0.0</modelVersion>
+      <properties><java.version>1.8</java.version></properties></project>"""
+    calls: list[tuple[str, str, str]] = []
+
+    def fetch(group: str, artifact: str, version: str) -> str:
+        calls.append((group, artifact, version))
+        return parent
+
+    version = resolve_parent_java_version(
+        tmp_path / "pom.xml", child, fetch_parent=fetch
+    )
+
+    assert version == "8"
+    assert calls == [("example.parents", "application-parent", "1.2.3")]
 
 
 def test_root_gradle_build_wins_over_nested_maven_examples(tmp_path: Path) -> None:

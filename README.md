@@ -215,15 +215,21 @@ Run the catalog-aware planner, persist its audit report, and print its recipe re
 
 ```bash
 uv run refinery plan \
-  "Upgrade this application to Java 17" \
-  --repository /path/to/java-project \
+  /path/to/java-project \
+  --goal "Upgrade this application to Java 17" \
   --target-java 17
 ```
+
+The earlier goal-first form remains supported with `--repository /path/to/java-project`.
 
 The catalog connection verifies TLS using the bundled CA roots. In a development environment
 with TLS interception, verification can be explicitly disabled for this request with
 `--no-catalog-verify-ssl` (or `REFINERY_RECIPE_CATALOG_VERIFY_SSL=false`). The command prints a
 warning whenever this protection is disabled.
+
+Planner recipe definitions are loaded from the declarative YAML catalogs in both
+`openrewrite/rewrite-migrate-java` and `openrewrite/rewrite-spring`. Each definition retains its
+source repository and file path in the context supplied to the planner.
 
 Run approved commands. In v0.1 this establishes a build baseline, performs an OpenRewrite dry run, and then stops for review:
 
@@ -243,9 +249,10 @@ Settings use the `REFINERY_` prefix and may be placed in `.env`. See `.env.examp
 
 | Setting | Default | Purpose |
 |---|---:|---|
-| `REFINERY_MODEL` | `ollama:gemma4:latest` | Planner model identifier; set an OpenAI model and `OPENAI_API_KEY` to use OpenAI |
-| `REFINERY_LITELLM_MODEL` | `ollama_chat/gemma4:latest` | LiteLLM provider and model identifier |
-| `REFINERY_LITELLM_API_BASE` | `http://localhost:11434` | Local model API base URL used by LiteLLM and the planner |
+| `OPENAI_API_KEY` | none | OpenAI API key loaded from the environment or `.env` |
+| `REFINERY_MODEL` | `openai:gpt-5.6-terra` | Pydantic AI planner model identifier |
+| `REFINERY_LITELLM_MODEL` | `openai/gpt-5.6-terra` | LiteLLM provider and model identifier |
+| `REFINERY_LITELLM_API_BASE` | none | Optional provider base URL; set to `http://localhost:11434` for Ollama |
 | `REFINERY_MAX_REPAIR_ATTEMPTS` | `3` | Repair-loop attempt limit |
 | `REFINERY_COMMAND_TIMEOUT_SECONDS` | `900` | Build command timeout |
 | `REFINERY_GRAPHIFY_TIMEOUT_SECONDS` | `900` | Graphify extraction timeout |

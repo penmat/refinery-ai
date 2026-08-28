@@ -71,6 +71,29 @@ def test_run_tool_loop_executes_tools_until_final_answer() -> None:
     }
 
 
+def test_run_tool_loop_passes_openai_key_without_an_api_base() -> None:
+    requests: list[dict[str, Any]] = []
+
+    def fake_completion(**kwargs: Any) -> Any:
+        requests.append(kwargs)
+        return response(content="Done")
+
+    result = run_tool_loop(
+        [{"role": "user", "prompt": "Plan it"}],
+        settings=Settings(
+            OPENAI_API_KEY="test-key",
+            litellm_model="openai/gpt-5.6-terra",
+            litellm_api_base=None,
+        ),
+        completion_fn=fake_completion,
+    )
+
+    assert result.content == "Done"
+    assert requests[0]["model"] == "openai/gpt-5.6-terra"
+    assert requests[0]["api_key"] == "test-key"
+    assert "api_base" not in requests[0]
+
+
 def test_run_tool_loop_reports_tool_errors_to_model() -> None:
     def fail() -> None:
         raise RuntimeError("broken")

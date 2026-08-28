@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import re
+import ssl
 import subprocess
 import xml.etree.ElementTree as ET
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
+from typing import cast
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 from refinery_ai.logging import get_logger, log_command
 from refinery_ai.models import BuildSystem, Dependency, DiscoverySnapshot, Module
@@ -14,6 +18,8 @@ from refinery_ai.models import BuildSystem, Dependency, DiscoverySnapshot, Modul
 logger = get_logger(__name__)
 
 IGNORED_DIRECTORIES = {".git", ".gradle", ".idea", ".refinery", "build", "target"}
+MAVEN_CENTRAL_URL = "https://repo.maven.apache.org/maven2"
+_COORDINATE = re.compile(r"^[A-Za-z0-9_.+\-]+$")
 
 
 def _git(root: Path, *args: str) -> str | None:
@@ -46,10 +52,22 @@ def maven_details(content: str) -> tuple[list[Dependency], str | None]:
     values = {
         child.tag.rsplit("}", 1)[-1]: child.text.strip() for child in property_nodes if child.text
     }
+    property_reference = re.compile(r"^\$\{([^}]+)}$")
+
+    def resolved(value: str | None) -> str | None:
+        seen: set[str] = set()
+        while value and (match := property_reference.fullmatch(value)):
+            name = match.group(1)
+            if name in seen:
+                return None
+            seen.add(name)
+            value = values.get(name)
+        return value
+
     java_version = (
-        values.get("maven.compiler.release")
-        or values.get("maven.compiler.target")
-        or values.get("java.version")
+        resolved(values.get("maven.compiler.release"))
+        or resolved(values.get("maven.compiler.target"))
+        or resolved(values.get("java.version"))
     )
     dependencies: list[Dependency] = []
     for item in root.findall(f".//{prefix}dependencies/{prefix}dependency"):
@@ -67,9 +85,103 @@ def maven_details(content: str) -> tuple[list[Dependency], str | None]:
     return dependencies, java_version
 
 
+def _parent_coordinates(content: str) -> tuple[str, str, str, str | None] | None:
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError:
+        return None
+    namespace = root.tag[1:].split("}", 1)[0] if root.tag.startswith("{") else ""
+    prefix = f"{{{namespace}}}" if namespace else ""
+    parent = root.find(f"{prefix}parent")
+    if parent is None:
+        return None
+    group = _xml_text(parent, prefix, "groupId")
+    artifact = _xml_text(parent, prefix, "artifactId")
+    version = _xml_text(parent, prefix, "version")
+    relative = parent.find(f"{prefix}relativePath")
+    relative_path = None if relative is None else (relative.text or "").strip()
+    if not group or not artifact or not version:
+        return None
+    if not all(_COORDINATE.fullmatch(value) for value in (group, artifact, version)):
+        return None
+    return group, artifact, version, relative_path
+
+
+def _maven_central_pom(group: str, artifact: str, version: str, timeout: float = 10) -> str:
+    group_path = "/".join(quote(part, safe="") for part in group.split("."))
+    filename = f"{quote(artifact, safe='')}-{quote(version, safe='')}.pom"
+    url = (
+        f"{MAVEN_CENTRAL_URL}/{group_path}/{quote(artifact, safe='')}/"
+        f"{quote(version, safe='')}/{filename}"
+    )
+    request = Request(url, headers={"User-Agent": "refinery-ai/0.1"})
+    try:
+        import certifi
+    except ImportError:
+        context = ssl.create_default_context()
+    else:
+        context = ssl.create_default_context(cafile=certifi.where())
+    with urlopen(request, timeout=timeout, context=context) as response:
+        return cast(bytes, response.read()).decode("utf-8")
+
+
+def resolve_parent_java_version(
+    pom_path: Path,
+    content: str,
+    *,
+    fetch_parent: Callable[[str, str, str], str] = _maven_central_pom,
+    max_depth: int = 5,
+) -> str | None:
+    """Resolve a missing Java level through local or Maven Central parent POMs."""
+
+    current_path = pom_path
+    current_content = content
+    visited: set[tuple[str, str, str]] = set()
+    for _ in range(max_depth):
+        _, java_version = maven_details(current_content)
+        if java_version:
+            return "8" if java_version == "1.8" else java_version
+        parent = _parent_coordinates(current_content)
+        if parent is None:
+            return None
+        group, artifact, version, relative_path = parent
+        coordinates = (group, artifact, version)
+        if coordinates in visited:
+            return None
+        visited.add(coordinates)
+
+        local_path = None
+        if relative_path != "":
+            local_path = (current_path.parent / (relative_path or "../pom.xml")).resolve()
+        try:
+            if local_path is not None and local_path.is_file():
+                current_path = local_path
+                current_content = local_path.read_text()
+                continue
+            cached = (
+                Path.home()
+                / ".m2/repository"
+                / Path(*group.split("."))
+                / artifact
+                / version
+                / f"{artifact}-{version}.pom"
+            )
+            if cached.is_file():
+                current_path = cached
+                current_content = cached.read_text()
+                continue
+            current_content = fetch_parent(group, artifact, version)
+            current_path = Path(f"{artifact}-{version}.pom")
+        except (OSError, UnicodeError):
+            return None
+    return None
+
+
 def _maven_details(path: Path) -> tuple[list[Dependency], str | None]:
     try:
-        return maven_details(path.read_text())
+        content = path.read_text()
+        dependencies, version = maven_details(content)
+        return dependencies, version or resolve_parent_java_version(path, content)
     except OSError:
         return [], None
 

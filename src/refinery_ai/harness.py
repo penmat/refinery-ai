@@ -41,7 +41,12 @@ from refinery_ai.context_graph.providers import (
     SpringProvider,
 )
 from refinery_ai.context_graph.query import ContextGraphQuery
-from refinery_ai.discovery import IGNORED_DIRECTORIES, maven_details, select_build_files
+from refinery_ai.discovery import (
+    IGNORED_DIRECTORIES,
+    maven_details,
+    resolve_parent_java_version,
+    select_build_files,
+)
 from refinery_ai.logging import get_logger, log_command
 from refinery_ai.models import (
     DiscoverySnapshot,
@@ -403,7 +408,10 @@ class HarnessRepositoryEnvironment:
                 )
             )
             if build_file.name == "pom.xml":
-                found_dependencies, found_version = maven_details(evidence[str(build_file)])
+                pom_content = evidence[str(build_file)]
+                found_dependencies, found_version = maven_details(pom_content)
+                if found_version is None:
+                    found_version = resolve_parent_java_version(root / build_file, pom_content)
                 dependencies.extend(found_dependencies)
                 java_version = java_version or found_version
 

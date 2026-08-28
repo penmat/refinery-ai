@@ -348,9 +348,15 @@ def mcp(
 
 @app.command()
 def plan(
-    goal: Annotated[str, typer.Argument(help="Modernization goal")],
+    subject: Annotated[
+        str, typer.Argument(help="Java repository path, or a modernization goal")
+    ],
     repository: Annotated[Path, typer.Option("--repository", "-r")] = Path("."),
     target_java: Annotated[int | None, typer.Option("--target-java")] = None,
+    goal: Annotated[
+        str | None,
+        typer.Option("--goal", help="Modernization goal when the repository is positional"),
+    ] = None,
     catalog_verify_ssl: Annotated[
         bool | None,
         typer.Option(
@@ -361,6 +367,12 @@ def plan(
 ) -> None:
     """Recommend applicable OpenRewrite recipes without executing them."""
 
+    positional_repository = Path(subject).expanduser()
+    if repository == Path(".") and positional_repository.is_dir():
+        repository = positional_repository
+        goal_description = goal or "Recommend applicable Java migration recipes"
+    else:
+        goal_description = goal or subject
     settings = Settings()
     settings.recipe_catalog_verify_ssl = (
         settings.recipe_catalog_verify_ssl
@@ -373,7 +385,7 @@ def plan(
         )
     report = ModernizationFactory(settings=settings).prepare(
         repository,
-        ModernizationGoal(description=goal, target_java=target_java),
+        ModernizationGoal(description=goal_description, target_java=target_java),
         use_ai_planner=True,
     )
     if not isinstance(report.plan, RecipePlan):

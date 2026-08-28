@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,9 +11,10 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="REFINERY_", env_file=".env", extra="ignore")
 
-    model: str = "ollama:gemma4:latest"
-    litellm_model: str = "ollama_chat/gemma4:latest"
-    litellm_api_base: str = "http://localhost:11434"
+    model: str = "openai:gpt-5.6-terra"
+    litellm_model: str = "openai/gpt-5.6-terra"
+    litellm_api_base: str | None = None
+    openai_api_key: SecretStr | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     state_directory: Path = Path(".refinery")
     max_repair_attempts: int = 3
     command_timeout_seconds: int = 900

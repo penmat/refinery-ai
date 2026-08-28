@@ -148,9 +148,12 @@ def run_tool_loop(
     for turn in range(1, max_turns + 1):
         request: dict[str, Any] = {
             "model": config.litellm_model,
-            "api_base": config.litellm_api_base,
             "messages": list(history),
         }
+        if config.litellm_api_base:
+            request["api_base"] = config.litellm_api_base
+        if config.openai_api_key and config.litellm_model.startswith("openai/"):
+            request["api_key"] = config.openai_api_key.get_secret_value()
         if definitions:
             request["tools"] = definitions
         last_response = completion_fn(**request)

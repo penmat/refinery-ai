@@ -5,13 +5,20 @@ from typing import Any, cast
 
 from typer.testing import CliRunner
 
-from refinery_ai.agents import create_planning_agent
+from refinery_ai.agents import create_planning_agent, grounded_recipe_plan
 from refinery_ai.cli import app
 from refinery_ai.config import Settings
 from refinery_ai.context_graph.models import ContextGraphInfo
-from refinery_ai.factory import ModernizationFactory
-from refinery_ai.models import ModernizationGoal, RecipePlan, RecipeRecommendation, RunStatus
+from refinery_ai.factory import ModernizationFactory, _planning_evidence_facts
+from refinery_ai.models import (
+    DiscoverySnapshot,
+    ModernizationGoal,
+    RecipePlan,
+    RecipeRecommendation,
+    RunStatus,
+)
 from refinery_ai.recipe_catalog import JavaMigrationCatalog, RecipeCatalogEntry
+from refinery_ai.recipe_sources import RecipeSource
 
 
 class FakeContextGraph:
@@ -51,10 +58,19 @@ CATALOG = JavaMigrationCatalog(
         )
     ]
 )
+RECIPE_SOURCES = [
+    RecipeSource(
+        recipe="org.openrewrite.java.migrate.UpgradeToJava17",
+        display_name="Migrate to Java 17",
+        description="Apply changes commonly needed when migrating to Java 17.",
+        repository="openrewrite/rewrite-migrate-java",
+        file_path="src/main/resources/META-INF/rewrite/java-version-17.yml",
+    )
+]
 
 
-def test_planner_defaults_to_the_local_ollama_model() -> None:
-    assert Settings().model == "ollama:gemma4:latest"
+def test_planner_defaults_to_openai_terra() -> None:
+    assert Settings().model == "openai:gpt-5.6-terra"
 
 
 def test_planner_uses_the_configured_ollama_api_base() -> None:
@@ -65,10 +81,62 @@ def test_planner_uses_the_configured_ollama_api_base() -> None:
     assert str(cast(Any, planner.model).base_url) == "http://ollama.test:11434/v1/"
 
 
+def test_planner_filters_ungrounded_recommendations_instead_of_failing() -> None:
+    valid = RecipeRecommendation(
+        recipe="org.openrewrite.java.migrate.UpgradeToJava17",
+        reason="The project targets Java 8.",
+        evidence=['"java_version": "8"'],
+        expected_benefit="Upgrade the Java baseline.",
+        priority="high",
+        confidence=0.98,
+    )
+    catalog_evidence = valid.model_copy(
+        update={
+            "recipe": "org.openrewrite.java.migrate.guava.PreferCharCompare",
+            "evidence": ["File: src/main/resources/META-INF/rewrite/no-guava.yml"],
+        }
+    )
+    unknown = valid.model_copy(update={"recipe": "org.example.NotARecipe"})
+
+    result = grounded_recipe_plan(
+        RecipePlan(recommendations=[valid, catalog_evidence, unknown]),
+        frozenset(
+            {
+                valid.recipe,
+                "org.openrewrite.java.migrate.guava.PreferCharCompare",
+            }
+        ),
+        'Discovery: {"java_version": "8"}',
+    )
+
+    assert result.recommendations == [valid]
+
+
+def test_planning_evidence_facts_include_goal_and_retained_warnings(tmp_path: Path) -> None:
+    snapshot = DiscoverySnapshot(
+        repository=tmp_path,
+        build_system="maven",
+        frameworks=["Spring"],
+    )
+
+    facts = _planning_evidence_facts(
+        snapshot,
+        ModernizationGoal(description="Upgrade Java", target_java=17),
+        "# Summary\n- [warning] Legacy javax imports remain.\n",
+    )
+
+    assert "discovery.java_version=unknown" in facts
+    assert "goal.target_java=17" in facts
+    assert "discovery.framework=Spring" in facts
+    assert "- [warning] Legacy javax imports remain." in facts
+
+
 def test_prepare_persists_reports(tmp_path: Path) -> None:
     (tmp_path / "pom.xml").write_text("<project><modelVersion>4.0.0</modelVersion></project>")
     report = ModernizationFactory(
-        context_graph=FakeContextGraph(), recipe_catalog=CATALOG
+        context_graph=FakeContextGraph(),
+        recipe_catalog=CATALOG,
+        recipe_sources=RECIPE_SOURCES,
     ).prepare(
         tmp_path, ModernizationGoal(description="Upgrade Java", target_java=17)
     )
@@ -90,7 +158,9 @@ def test_ai_prepare_supplies_graph_and_assessment_context(
     )
 
     report = ModernizationFactory(
-        context_graph=FakeContextGraph(), recipe_catalog=CATALOG
+        context_graph=FakeContextGraph(),
+        recipe_catalog=CATALOG,
+        recipe_sources=RECIPE_SOURCES,
     ).prepare(
         tmp_path,
         ModernizationGoal(description="Upgrade Java", target_java=17),
@@ -100,9 +170,15 @@ def test_ai_prepare_supplies_graph_and_assessment_context(
     assert report.status is RunStatus.PLANNED
     assert planner.deps is not None
     assert "Context graph with 0 nodes" in planner.deps.graph_summary
-    assert '"question": "Upgrade Java Spring HTTP endpoint' in planner.deps.graph_context
+    assert '"question": "Upgrade Java Java version source target' in planner.deps.graph_context
     assert planner.deps.artifact_context == "No persisted project artifacts are available."
-    assert "Migrate to Java 17" in planner.deps.recipe_catalog
+    assert "org.openrewrite.java.migrate.UpgradeToJava17" in planner.deps.recipe_catalog
+    assert planner.deps.allowed_recipes == {
+        "org.openrewrite.java.migrate.UpgradeToJava17"
+    }
+    assert '"target_java": 17' in planner.deps.evidence_corpus
+    assert "goal.target_java=17" in planner.deps.evidence_facts
+    assert "No persisted project artifacts are available." in planner.deps.evidence_corpus
 
 
 def test_apply_stops_on_unknown_build_system(tmp_path: Path) -> None:
@@ -155,4 +231,33 @@ def test_plan_command_runs_ai_planner_and_prints_its_output(
     }
     assert calls == [
         (tmp_path, ModernizationGoal(description="Upgrade Java", target_java=21), True)
+    ]
+
+
+def test_plan_command_accepts_repository_as_the_positional_argument(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    calls: list[tuple[Path, ModernizationGoal, bool]] = []
+
+    def fake_prepare(
+        self: ModernizationFactory,
+        repository: Path,
+        goal: ModernizationGoal,
+        *,
+        use_ai_planner: bool = False,
+    ) -> SimpleNamespace:
+        calls.append((repository, goal, use_ai_planner))
+        return SimpleNamespace(plan=RecipePlan())
+
+    monkeypatch.setattr(ModernizationFactory, "prepare", fake_prepare)
+    result = CliRunner().invoke(app, ["plan", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {"recommendations": []}
+    assert calls == [
+        (
+            tmp_path,
+            ModernizationGoal(description="Recommend applicable Java migration recipes"),
+            True,
+        )
     ]

@@ -114,7 +114,7 @@ class RecipeRecommendation(BaseModel):
 class RecipePlan(BaseModel):
     """Non-executing output from the catalog-aware planner."""
 
-    recommendations: list[RecipeRecommendation] = Field(default_factory=list)
+    recommendations: list[RecipeRecommendation] = Field(default_factory=list, max_length=10)
 
 
 class PatchProposal(BaseModel):
