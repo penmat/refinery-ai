@@ -103,6 +103,7 @@ class RecipeRecommendation(BaseModel):
 
     execution_type: ExecutionType = ExecutionType.OPENREWRITE
     recipe: str
+    recipe_artifact: str | None = None
     reason: str
     evidence: list[str] = Field(min_length=1)
     expected_benefit: str
@@ -115,6 +116,14 @@ class RecipePlan(BaseModel):
     """Non-executing output from the catalog-aware planner."""
 
     recommendations: list[RecipeRecommendation] = Field(default_factory=list, max_length=10)
+
+
+class PersistedMigrationPlan(BaseModel):
+    """Planner-to-migration-agent handoff stored in the target repository."""
+
+    plan_id: str
+    snapshot: DiscoverySnapshot
+    steps: list[RecipeRecommendation] = Field(default_factory=list)
 
 
 class PatchProposal(BaseModel):
@@ -146,8 +155,17 @@ class StepResult(BaseModel):
     step_id: str
     status: RunStatus
     message: str
+    execution: VerificationResult | None = None
     verification: VerificationResult | None = None
     attempts: int = 0
+
+
+class MigrationRun(BaseModel):
+    """Results from dispatching the steps in one persisted migration plan."""
+
+    plan_id: str
+    status: RunStatus
+    steps: list[StepResult] = Field(default_factory=list)
 
 
 class RunReport(BaseModel):

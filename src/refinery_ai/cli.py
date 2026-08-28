@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 
 import typer
 
+from refinery_ai.agents.migration import MigrationAgent
 from refinery_ai.assessment.comparison import compare
 from refinery_ai.assessment.dependency_artifacts import write_dependency_artifact
 from refinery_ai.assessment.engine import AssessmentEngine
@@ -20,6 +21,7 @@ from refinery_ai.llm import run_tool_loop
 from refinery_ai.logging import configure_logging
 from refinery_ai.mcp import run_mcp_server
 from refinery_ai.models import ModernizationGoal, RecipePlan, RunReport
+from refinery_ai.planning_artifacts import MigrationPlanStore
 from refinery_ai.summary import ProjectSummaryService, SummaryError
 from refinery_ai.summary.reporting import summary_markdown
 from refinery_ai.tools import RepositoryEvidenceTools
@@ -391,6 +393,31 @@ def plan(
     if not isinstance(report.plan, RecipePlan):
         raise RuntimeError("Planner did not return recipe recommendations")
     typer.echo(json.dumps(report.plan.model_dump(mode="json"), indent=2))
+
+
+@app.command()
+def migrate(
+    repository: Annotated[
+        Path, typer.Argument(exists=True, file_okay=False, help="Java repository to migrate")
+    ] = Path("."),
+    plan_id: Annotated[
+        str | None, typer.Option("--plan-id", help="Persisted plan ID; defaults to latest")
+    ] = None,
+    apply: Annotated[
+        bool,
+        typer.Option("--apply", help="Apply recipes; otherwise run OpenRewrite previews"),
+    ] = False,
+) -> None:
+    """Execute a persisted planner handoff through type-specific migration runners."""
+
+    settings = Settings()
+    root = repository.expanduser().resolve()
+    result = MigrationAgent(
+        MigrationPlanStore(root, settings.state_directory),
+        timeout=settings.command_timeout_seconds,
+        output_limit=settings.max_output_characters,
+    ).run(plan_id, apply=apply)
+    typer.echo(json.dumps(result.model_dump(mode="json"), indent=2))
 
 
 @app.command()

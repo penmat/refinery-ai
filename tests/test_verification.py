@@ -1,6 +1,16 @@
 from pathlib import Path
 
-from refinery_ai.verification import verify
+from refinery_ai.verification import MACOS_JAVA_HOME_PROBE_WARNING, _clean_stderr, verify
+
+
+def test_successful_command_omits_benign_macos_java_home_probe_warning() -> None:
+    assert _clean_stderr(MACOS_JAVA_HOME_PROBE_WARNING, 0, 20_000) == ""
+
+
+def test_failed_command_preserves_macos_java_home_probe_warning() -> None:
+    assert _clean_stderr(MACOS_JAVA_HOME_PROBE_WARNING, 1, 20_000) == (
+        MACOS_JAVA_HOME_PROBE_WARNING
+    )
 
 
 def test_verification_reports_success(tmp_path: Path) -> None:

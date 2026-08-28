@@ -147,6 +147,37 @@ def test_prepare_persists_reports(tmp_path: Path) -> None:
     assert (tmp_path / f".refinery/runs/{report.run_id}.md").exists()
 
 
+def test_ai_prepare_persists_migration_plan_handoff(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "pom.xml").write_text("<project><modelVersion>4.0.0</modelVersion></project>")
+    recommendation = RecipeRecommendation(
+        recipe="org.openrewrite.java.migrate.UpgradeToJava17",
+        reason="Upgrade the Java baseline.",
+        evidence=["goal.target_java=17"],
+        expected_benefit="Java 17 support.",
+        priority="high",
+        confidence=0.9,
+    )
+    planner = FakePlanner()
+    planner.run_sync = lambda prompt, *, deps: SimpleNamespace(  # type: ignore[method-assign]
+        output=RecipePlan(recommendations=[recommendation])
+    )
+    monkeypatch.setattr(
+        "refinery_ai.factory.create_planning_agent", lambda model, **kwargs: planner
+    )
+
+    report = ModernizationFactory(
+        context_graph=FakeContextGraph(), recipe_catalog=CATALOG, recipe_sources=RECIPE_SOURCES
+    ).prepare(
+        tmp_path,
+        ModernizationGoal(description="Upgrade Java", target_java=17),
+        use_ai_planner=True,
+    )
+
+    persisted = json.loads((tmp_path / f".refinery/plans/{report.run_id}.json").read_text())
+    assert persisted["plan_id"] == report.run_id
+    assert persisted["steps"] == [recommendation.model_dump(mode="json")]
+
+
 def test_ai_prepare_supplies_graph_and_assessment_context(
     tmp_path: Path, monkeypatch
 ) -> None:

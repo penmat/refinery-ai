@@ -1,0 +1,36 @@
+"""OpenRewrite migration implementation."""
+
+from refinery_ai.models import DiscoverySnapshot, RecipeRecommendation, VerificationResult
+from refinery_ai.openrewrite import OpenRewriteAdapter
+
+
+class OpenRewriteMigrationRunner:
+    """Execute the recipe selected by one persisted OpenRewrite step."""
+
+    def run(
+        self,
+        snapshot: DiscoverySnapshot,
+        step: RecipeRecommendation,
+        *,
+        apply: bool,
+        timeout: int,
+    ) -> VerificationResult:
+        adapter = OpenRewriteAdapter(allowed_recipes=frozenset({step.recipe}))
+        return adapter.run(
+            snapshot,
+            step.recipe,
+            apply=apply,
+            timeout=timeout,
+            recipe_artifact=step.recipe_artifact or _infer_recipe_artifact(step.recipe),
+        )
+
+
+def _infer_recipe_artifact(recipe: str) -> str:
+    """Support plans created before artifact coordinates were persisted."""
+
+    spring_namespaces = (
+        "org.openrewrite.java.spring.",
+        "org.openrewrite.java.springdoc.",
+    )
+    artifact = "rewrite-spring" if recipe.startswith(spring_namespaces) else "rewrite-migrate-java"
+    return f"org.openrewrite.recipe:{artifact}:RELEASE"

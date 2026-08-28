@@ -13,10 +13,23 @@ from refinery_ai.models import BuildSystem, DiscoverySnapshot, VerificationResul
 logger = get_logger(__name__)
 
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+MACOS_JAVA_HOME_PROBE_WARNING = (
+    "The operation couldn\u2019t be completed. Unable to locate a Java Runtime.\n"
+    "Please visit http://www.java.com for information on installing Java.\n"
+)
 
 
 def _clean_output(value: str, limit: int) -> str:
     return ANSI_ESCAPE.sub("", value)[-limit:]
+
+
+def _clean_stderr(value: str, exit_code: int, limit: int) -> str:
+    """Remove a misleading macOS java_home probe warning after a successful command."""
+
+    cleaned = ANSI_ESCAPE.sub("", value)
+    if exit_code == 0:
+        cleaned = cleaned.replace(MACOS_JAVA_HOME_PROBE_WARNING, "")
+    return cleaned[-limit:]
 
 
 def verification_command(snapshot: DiscoverySnapshot) -> list[str] | None:
@@ -47,7 +60,7 @@ def verify(
             command=command,
             exit_code=result.returncode,
             stdout=_clean_output(result.stdout, output_limit),
-            stderr=_clean_output(result.stderr, output_limit),
+            stderr=_clean_stderr(result.stderr, result.returncode, output_limit),
             duration_seconds=time.monotonic() - started,
         )
     except FileNotFoundError as error:

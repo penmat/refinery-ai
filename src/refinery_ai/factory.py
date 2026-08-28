@@ -23,7 +23,7 @@ from refinery_ai.models import (
 )
 from refinery_ai.openrewrite import OpenRewriteAdapter
 from refinery_ai.planning import rule_based_plan, validate_plan
-from refinery_ai.planning_artifacts import load_planning_artifacts
+from refinery_ai.planning_artifacts import MigrationPlanStore, load_planning_artifacts
 from refinery_ai.recipe_catalog import JavaMigrationCatalog, fetch_java_migration_catalog
 from refinery_ai.recipe_sources import RecipeSource, fetch_recipe_sources
 from refinery_ai.reporting import to_markdown
@@ -175,6 +175,13 @@ class ModernizationFactory:
                         )
                     ),
                     allowed_recipes=frozenset(source.recipe for source in recipe_sources),
+                    recipe_artifacts={
+                        source.recipe: (
+                            "org.openrewrite.recipe:"
+                            f"{source.repository.rsplit('/', maxsplit=1)[-1]}:RELEASE"
+                        )
+                        for source in recipe_sources
+                    },
                     evidence_corpus=evidence_corpus,
                 ),
             )
@@ -302,3 +309,6 @@ class ModernizationFactory:
             json.dumps(report.model_dump(mode="json"), indent=2) + "\n"
         )
         stem.with_suffix(".md").write_text(to_markdown(report))
+        MigrationPlanStore(
+            report.snapshot.repository, self.settings.state_directory
+        ).save(report)

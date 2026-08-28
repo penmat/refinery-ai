@@ -1,8 +1,44 @@
-"""Load retained project evidence for recipe planning."""
+"""Load evidence and persist planner-to-migration-agent handoffs."""
 
 from __future__ import annotations
 
 from pathlib import Path
+
+from refinery_ai.models import PersistedMigrationPlan, RecipePlan, RunReport
+
+
+class MigrationPlanStore:
+    """Store immutable migration plans beneath the repository state directory."""
+
+    def __init__(self, repository: Path, state_directory: Path = Path(".refinery")) -> None:
+        self.root = repository.expanduser().resolve() / state_directory / "plans"
+
+    def save(self, report: RunReport) -> Path | None:
+        if not isinstance(report.plan, RecipePlan):
+            return None
+        artifact = PersistedMigrationPlan(
+            plan_id=report.run_id,
+            snapshot=report.snapshot,
+            steps=report.plan.recommendations,
+        )
+        self.root.mkdir(parents=True, exist_ok=True)
+        path = self.root / f"{report.run_id}.json"
+        path.write_text(artifact.model_dump_json(indent=2) + "\n")
+        return path
+
+    def load(self, plan_id: str | None = None) -> PersistedMigrationPlan:
+        if plan_id is not None and (not plan_id.isalnum() or len(plan_id) > 128):
+            raise ValueError("Invalid migration plan ID")
+        if plan_id is None:
+            candidates = sorted(
+                self.root.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True
+            )
+            if not candidates:
+                raise FileNotFoundError("No persisted migration plans are available")
+            path = candidates[0]
+        else:
+            path = self.root / f"{plan_id}.json"
+        return PersistedMigrationPlan.model_validate_json(path.read_text())
 
 
 def load_planning_artifacts(repository: Path, state_directory: Path, limit: int) -> str:

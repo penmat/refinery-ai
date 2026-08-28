@@ -13,7 +13,10 @@ from refinery_ai.models import DiscoverySnapshot, RecipePlan
 
 
 def grounded_recipe_plan(
-    output: RecipePlan, allowed_recipes: frozenset[str], evidence_corpus: str
+    output: RecipePlan,
+    allowed_recipes: frozenset[str],
+    evidence_corpus: str,
+    recipe_artifacts: dict[str, str] | None = None,
 ) -> RecipePlan:
     """Remove recommendations that are not backed by supplied project evidence."""
 
@@ -29,7 +32,12 @@ def grounded_recipe_plan(
             for evidence in recommendation.evidence
         ):
             continue
-        recommendations.append(recommendation)
+        artifact = (recipe_artifacts or {}).get(recommendation.recipe)
+        recommendations.append(
+            recommendation.model_copy(update={"recipe_artifact": artifact})
+            if artifact
+            else recommendation
+        )
     return RecipePlan(recommendations=recommendations)
 
 
@@ -41,6 +49,7 @@ class PlanningDependencies:
     artifact_context: str = "No persisted project artifacts are available."
     recipe_catalog: str = ""
     allowed_recipes: frozenset[str] = frozenset()
+    recipe_artifacts: dict[str, str] = field(default_factory=dict)
     evidence_corpus: str = ""
     evidence_facts: list[str] = field(default_factory=list)
 
@@ -118,6 +127,7 @@ def create_planning_agent(
             output,
             ctx.deps.allowed_recipes,
             ctx.deps.evidence_corpus,
+            ctx.deps.recipe_artifacts,
         )
 
     return agent

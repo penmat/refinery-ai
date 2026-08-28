@@ -231,6 +231,19 @@ Planner recipe definitions are loaded from the declarative YAML catalogs in both
 `openrewrite/rewrite-migrate-java` and `openrewrite/rewrite-spring`. Each definition retains its
 source repository and file path in the context supplied to the planner.
 
+The planner also writes a migration-agent handoff to `.refinery/plans/<run-id>.json`. Run the
+latest persisted plan as an OpenRewrite preview, or explicitly apply it:
+
+```bash
+uv run refinery migrate /path/to/java-project
+uv run refinery migrate /path/to/java-project --plan-id <run-id> --apply
+```
+
+Migration implementations live under `refinery_ai/migrations`; the dispatcher selects one from
+each step's `execution_type`. OpenRewrite is the only registered type for now. In apply mode,
+recipes run serially and each is followed by the repository's build verification command. The
+plan stops at the first failing build so the responsible recipe is unambiguous.
+
 Run approved commands. In v0.1 this establishes a build baseline, performs an OpenRewrite dry run, and then stops for review:
 
 ```bash

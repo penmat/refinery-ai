@@ -9,7 +9,7 @@ from refinery_ai.verification import verify
 
 
 class OpenRewriteAdapter:
-    """Construct and run allowlisted OpenRewrite dry-run commands."""
+    """Construct and run allowlisted OpenRewrite commands."""
 
     MAVEN_PLUGIN = "org.openrewrite.maven:rewrite-maven-plugin:6.46.1:dryRun"
     JAVA_RECIPE_ARTIFACT = "org.openrewrite.recipe:rewrite-migrate-java:RELEASE"
@@ -32,20 +32,49 @@ class OpenRewriteAdapter:
         command = self._command(snapshot, recipe)
         return verify(snapshot.repository, command, timeout=timeout)
 
+    def run(
+        self,
+        snapshot: DiscoverySnapshot,
+        recipe: str,
+        *,
+        apply: bool = False,
+        timeout: int = 900,
+        recipe_artifact: str | None = None,
+    ) -> VerificationResult:
+        """Run a recipe in preview mode unless applying was explicitly requested."""
+
+        if recipe not in self.allowed_recipes:
+            raise ValueError(f"Recipe is not allowlisted: {recipe}")
+        command = self._command(
+            snapshot, recipe, apply=apply, recipe_artifact=recipe_artifact
+        )
+        return verify(snapshot.repository, command, timeout=timeout)
+
     @staticmethod
-    def _command(snapshot: DiscoverySnapshot, recipe: str) -> list[str]:
+    def _command(
+        snapshot: DiscoverySnapshot,
+        recipe: str,
+        *,
+        apply: bool = False,
+        recipe_artifact: str | None = None,
+    ) -> list[str]:
         root: Path = snapshot.repository
         if snapshot.build_system is BuildSystem.MAVEN:
             executable = "./mvnw" if (root / "mvnw").exists() else "mvn"
+            goal = OpenRewriteAdapter.MAVEN_PLUGIN
+            if apply:
+                goal = goal.removesuffix(":dryRun") + ":run"
             return [
                 executable,
                 "-U",
-                OpenRewriteAdapter.MAVEN_PLUGIN,
-                (f"-Drewrite.recipeArtifactCoordinates={OpenRewriteAdapter.JAVA_RECIPE_ARTIFACT}"),
+                goal,
+                "-Drewrite.recipeArtifactCoordinates="
+                f"{recipe_artifact or OpenRewriteAdapter.JAVA_RECIPE_ARTIFACT}",
                 f"-Drewrite.activeRecipes={recipe}",
                 "-Drewrite.exportDatatables=true",
             ]
         if snapshot.build_system is BuildSystem.GRADLE:
             executable = "./gradlew" if (root / "gradlew").exists() else "gradle"
-            return [executable, "rewriteDryRun", f"-Drewrite.activeRecipe={recipe}"]
+            task = "rewriteRun" if apply else "rewriteDryRun"
+            return [executable, task, f"-Drewrite.activeRecipe={recipe}"]
         raise ValueError("OpenRewrite requires a Maven or Gradle repository")
