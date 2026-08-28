@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from refinery_ai.agents.migration import MigrationAgent
+from refinery_ai.agents.migration import MigrationAgent, migration_display_name
 from refinery_ai.migrations.openrewrite import _infer_recipe_artifact
 from refinery_ai.models import (
     BuildSystem,
@@ -42,6 +42,7 @@ def test_migration_agent_loads_latest_plan_and_dispatches_by_type(tmp_path: Path
     (store.root / "plan1.json").write_text(plan.model_dump_json())
     runner = RecordingRunner()
     builds: list[list[str]] = []
+    progress: list[str] = []
 
     def build_verifier(repository, command, **kwargs):
         builds.append(command)
@@ -52,6 +53,7 @@ def test_migration_agent_loads_latest_plan_and_dispatches_by_type(tmp_path: Path
         runners={ExecutionType.OPENREWRITE: runner},
         timeout=42,
         build_verifier=build_verifier,
+        progress=progress.append,
     ).run(apply=True)
 
     assert result.status is RunStatus.COMPLETED
@@ -59,6 +61,12 @@ def test_migration_agent_loads_latest_plan_and_dispatches_by_type(tmp_path: Path
     assert builds == [["mvn", "test"]]
     assert result.steps[0].execution is not None
     assert result.steps[0].verification is not None
+    assert progress == [
+        "Reading plan plan1 ... about to run 1 migration.",
+        "Running Migration 1/1: Upgrade to Java 17",
+        "Verifying Migration 1/1: Upgrade to Java 17",
+        "Migration 1/1 completed: Upgrade to Java 17",
+    ]
 
 
 def test_migration_agent_stops_at_recipe_with_failing_post_build(tmp_path: Path) -> None:
@@ -104,4 +112,11 @@ def test_migration_agent_stops_at_recipe_with_failing_post_build(tmp_path: Path)
 def test_old_spring_plan_infers_rewrite_spring_artifact() -> None:
     assert _infer_recipe_artifact("org.openrewrite.java.springdoc.SpringFoxToSpringDoc") == (
         "org.openrewrite.recipe:rewrite-spring:RELEASE"
+    )
+
+
+def test_migration_display_name_formats_java_and_camel_case_recipes() -> None:
+    assert migration_display_name("org.openrewrite.Java8toJava11") == "Java 8 → Java 11"
+    assert migration_display_name("org.openrewrite.SpringFoxToSpringDoc") == (
+        "Spring Fox → Spring Doc"
     )

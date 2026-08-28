@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -18,9 +20,9 @@ from refinery_ai.config import Settings
 from refinery_ai.factory import ModernizationFactory
 from refinery_ai.harness import HarnessRepositoryEnvironment
 from refinery_ai.llm import run_tool_loop
-from refinery_ai.logging import configure_logging
+from refinery_ai.logging import configure_logging, get_logger
 from refinery_ai.mcp import run_mcp_server
-from refinery_ai.models import ModernizationGoal, RecipePlan, RunReport
+from refinery_ai.models import ModernizationGoal, RecipePlan, RunReport, RunStatus
 from refinery_ai.planning_artifacts import MigrationPlanStore
 from refinery_ai.summary import ProjectSummaryService, SummaryError
 from refinery_ai.summary.reporting import summary_markdown
@@ -407,17 +409,37 @@ def migrate(
         bool,
         typer.Option("--apply", help="Apply recipes; otherwise run OpenRewrite previews"),
     ] = False,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Print the complete machine-readable result")
+    ] = False,
 ) -> None:
     """Execute a persisted planner handoff through type-specific migration runners."""
 
     settings = Settings()
     root = repository.expanduser().resolve()
+    log_path = (
+        root
+        / settings.state_directory
+        / "logs"
+        / f"migrate-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.log"
+    )
+    configure_logging(logging.DEBUG, console_level=logging.WARNING, log_file=log_path)
     result = MigrationAgent(
         MigrationPlanStore(root, settings.state_directory),
         timeout=settings.command_timeout_seconds,
         output_limit=settings.max_output_characters,
+        progress=None if json_output else typer.echo,
     ).run(plan_id, apply=apply)
-    typer.echo(json.dumps(result.model_dump(mode="json"), indent=2))
+    get_logger(__name__).debug(
+        "Migration result:\n%s", json.dumps(result.model_dump(mode="json"), indent=2)
+    )
+    if json_output:
+        typer.echo(json.dumps(result.model_dump(mode="json"), indent=2))
+    else:
+        outcome = "completed" if result.status is RunStatus.COMPLETED else "stopped"
+        typer.echo(f"Migration plan {outcome}. Details: {log_path}")
+    if result.status is RunStatus.FAILED:
+        raise typer.Exit(code=1)
 
 
 @app.command()

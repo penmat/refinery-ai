@@ -56,13 +56,21 @@ def verify(
         result = subprocess.run(
             command, cwd=repository, text=True, capture_output=True, check=False, timeout=timeout
         )
-        return VerificationResult(
+        verification = VerificationResult(
             command=command,
             exit_code=result.returncode,
             stdout=_clean_output(result.stdout, output_limit),
             stderr=_clean_stderr(result.stderr, result.returncode, output_limit),
             duration_seconds=time.monotonic() - started,
         )
+        logger.debug(
+            "Command completed with exit code %s in %.2fs\nstdout:\n%s\nstderr:\n%s",
+            verification.exit_code,
+            verification.duration_seconds,
+            verification.stdout,
+            verification.stderr,
+        )
+        return verification
     except FileNotFoundError as error:
         return VerificationResult(
             command=command,

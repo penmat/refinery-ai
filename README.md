@@ -243,6 +243,8 @@ Migration implementations live under `refinery_ai/migrations`; the dispatcher se
 each step's `execution_type`. OpenRewrite is the only registered type for now. In apply mode,
 recipes run serially and each is followed by the repository's build verification command. The
 plan stops at the first failing build so the responsible recipe is unambiguous.
+The terminal shows concise per-step progress; full commands and captured output are retained in
+`.refinery/logs/`. Pass `--json` to `migrate` when the complete result is needed on stdout.
 
 Run approved commands. In v0.1 this establishes a build baseline, performs an OpenRewrite dry run, and then stops for review:
 

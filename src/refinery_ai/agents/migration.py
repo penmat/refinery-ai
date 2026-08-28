@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +36,7 @@ class MigrationAgent:
         output_limit: int = 20_000,
         build_command: Callable[[DiscoverySnapshot], list[str] | None] = verification_command,
         build_verifier: Callable[..., VerificationResult] = verify,
+        progress: Callable[[str], None] | None = None,
     ) -> None:
         self.store = store
         self.runners = runners or {
@@ -44,15 +46,24 @@ class MigrationAgent:
         self.output_limit = output_limit
         self.build_command = build_command
         self.build_verifier = build_verifier
+        self.progress = progress or (lambda message: None)
 
     def run(self, plan_id: str | None = None, *, apply: bool = False) -> MigrationRun:
         plan = self.store.load(plan_id)
+        total = len(plan.steps)
+        self.progress(
+            f"Reading plan {plan.plan_id} ... about to run {total} "
+            f"migration{'s' if total != 1 else ''}."
+        )
         results: list[StepResult] = []
         status = RunStatus.COMPLETED
         for index, step in enumerate(plan.steps, start=1):
             runner = self.runners.get(step.execution_type)
             step_id = f"{index}-{step.execution_type.value}"
+            label = migration_display_name(step.recipe)
+            self.progress(f"Running Migration {index}/{total}: {label}")
             if runner is None:
+                self.progress(f"Migration {index}/{total} has an unsupported type: {label}")
                 results.append(
                     StepResult(
                         step_id=step_id,
@@ -66,6 +77,7 @@ class MigrationAgent:
                 plan.snapshot, step, apply=apply, timeout=self.timeout
             )
             if not execution.green:
+                self.progress(f"Migration {index}/{total} failed: {label}")
                 results.append(
                     StepResult(
                         step_id=step_id,
@@ -80,8 +92,12 @@ class MigrationAgent:
 
             build_result = None
             if apply:
+                self.progress(f"Verifying Migration {index}/{total}: {label}")
                 command = self.build_command(plan.snapshot)
                 if command is None:
+                    self.progress(
+                        f"Migration {index}/{total} cannot be verified: unknown build system"
+                    )
                     results.append(
                         StepResult(
                             step_id=step_id,
@@ -103,6 +119,7 @@ class MigrationAgent:
                     output_limit=self.output_limit,
                 )
                 if not build_result.green:
+                    self.progress(f"Migration {index}/{total} failed verification: {label}")
                     results.append(
                         StepResult(
                             step_id=step_id,
@@ -130,7 +147,22 @@ class MigrationAgent:
                     attempts=1,
                 )
             )
+            self.progress(f"Migration {index}/{total} completed: {label}")
         return MigrationRun(plan_id=plan.plan_id, status=status, steps=results)
+
+
+def migration_display_name(recipe: str) -> str:
+    """Turn a fully qualified recipe class into a concise progress label."""
+
+    name = recipe.rsplit(".", maxsplit=1)[-1]
+    java_upgrade = re.fullmatch(r"Java(\d+)(?:to|To)Java(\d+)", name)
+    if java_upgrade:
+        return f"Java {java_upgrade.group(1)} → Java {java_upgrade.group(2)}"
+    upgrade = re.fullmatch(r"UpgradeToJava(\d+)", name)
+    if upgrade:
+        return f"Upgrade to Java {upgrade.group(1)}"
+    words = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name)
+    return words.replace(" To ", " → ")
 
 
 @dataclass(frozen=True)

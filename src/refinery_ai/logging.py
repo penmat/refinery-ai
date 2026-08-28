@@ -12,8 +12,13 @@ LOGGER_NAME = "refinery_ai"
 _SECRET_MARKERS = ("password", "passwd", "secret", "token", "api_key", "apikey")
 
 
-def configure_logging(level: int = logging.INFO) -> None:
-    """Configure concise stderr logging once for CLI execution."""
+def configure_logging(
+    level: int = logging.INFO,
+    *,
+    console_level: int | None = None,
+    log_file: Path | None = None,
+) -> None:
+    """Configure optional concise console and detailed file logging."""
 
     logger = logging.getLogger(LOGGER_NAME)
     for existing in list(logger.handlers):
@@ -21,9 +26,19 @@ def configure_logging(level: int = logging.INFO) -> None:
             logger.removeHandler(existing)
             existing.close()
     handler = logging.StreamHandler(sys.stderr)
+    handler.setLevel(console_level if console_level is not None else level)
     handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
     handler._refinery_cli_handler = True  # type: ignore[attr-defined]
     logger.addHandler(handler)
+    if log_file is not None:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+        )
+        file_handler._refinery_cli_handler = True  # type: ignore[attr-defined]
+        logger.addHandler(file_handler)
     logger.setLevel(level)
     logger.propagate = False
 
