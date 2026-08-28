@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
-from refinery_ai.agents import PlanningDependencies, create_planning_agent
+from refinery_ai.agents.planning import PlanningDependencies, create_planning_agent
 from refinery_ai.config import Settings
 from refinery_ai.context_graph.contracts import ContextGraphBuildService
 from refinery_ai.harness import AssessmentHarnessPolicy, HarnessRepositoryEnvironment

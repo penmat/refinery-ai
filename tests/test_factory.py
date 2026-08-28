@@ -5,7 +5,7 @@ from typing import Any, cast
 
 from typer.testing import CliRunner
 
-from refinery_ai.agents import create_planning_agent, grounded_recipe_plan
+from refinery_ai.agents.planning import create_planning_agent, grounded_recipe_plan
 from refinery_ai.cli import app
 from refinery_ai.config import Settings
 from refinery_ai.context_graph.models import ContextGraphInfo

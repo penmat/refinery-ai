@@ -1,4 +1,4 @@
-"""Typed Pydantic AI agent boundaries."""
+"""Catalog-constrained modernization planning agent."""
 
 from __future__ import annotations
 
@@ -9,13 +9,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from refinery_ai.models import (
-    DiscoverySnapshot,
-    PatchProposal,
-    RecipePlan,
-    RepairProposal,
-    VerificationResult,
-)
+from refinery_ai.models import DiscoverySnapshot, RecipePlan
 
 
 def grounded_recipe_plan(
@@ -49,18 +43,6 @@ class PlanningDependencies:
     allowed_recipes: frozenset[str] = frozenset()
     evidence_corpus: str = ""
     evidence_facts: list[str] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class MigrationDependencies:
-    snapshot: DiscoverySnapshot
-    allowed_files: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class RepairDependencies(MigrationDependencies):
-    failure: VerificationResult
-    attempt: int
 
 
 def create_planning_agent(
@@ -109,9 +91,8 @@ def create_planning_agent(
             "Each evidence item must be a short verbatim excerpt from the supplied Goal, "
             "Citable project evidence facts, Knowledge graph, Scoped repository context, or "
             "Project artifacts. Prefer exact entries from Citable project evidence facts. "
-            "Recipe catalog "
-            "descriptions are not project evidence. Never use placeholders such as '...'. "
-            "Recommend a recipe only when project evidence directly demonstrates its "
+            "Recipe catalog descriptions are not project evidence. Never use placeholders such "
+            "as '...'. Recommend a recipe only when project evidence directly demonstrates its "
             "applicability. Do not invent evidence, do not recommend non-catalog recipes, and do "
             "not execute anything. Return an empty recommendations list when applicability is "
             "unsupported."
@@ -137,49 +118,6 @@ def create_planning_agent(
             output,
             ctx.deps.allowed_recipes,
             ctx.deps.evidence_corpus,
-        )
-
-    return agent
-
-
-def create_migration_agent(model: str) -> Agent[MigrationDependencies, PatchProposal]:
-    """Create a migration agent that proposes, but never applies, a unified diff."""
-
-    agent: Agent[MigrationDependencies, PatchProposal] = Agent(
-        model,
-        deps_type=MigrationDependencies,
-        output_type=PatchProposal,
-        system_prompt=(
-            "Propose the smallest correct unified diff for the assigned migration step. "
-            "Only touch explicitly allowed files. Do not weaken tests or add unrelated changes."
-        ),
-    )
-
-    @agent.instructions
-    def migration_scope(ctx: RunContext[MigrationDependencies]) -> str:
-        return f"Allowed files: {', '.join(ctx.deps.allowed_files)}"
-
-    return agent
-
-
-def create_repair_agent(model: str) -> Agent[RepairDependencies, RepairProposal]:
-    """Create a bounded repair agent supplied with the latest verification failure."""
-
-    agent: Agent[RepairDependencies, RepairProposal] = Agent(
-        model,
-        deps_type=RepairDependencies,
-        output_type=RepairProposal,
-        system_prompt=(
-            "Diagnose the verification failure and propose the smallest scoped repair diff. "
-            "Do not suppress checks, remove tests, or modify files outside the allowed set."
-        ),
-    )
-
-    @agent.instructions
-    def failure_context(ctx: RunContext[RepairDependencies]) -> str:
-        return (
-            f"Attempt: {ctx.deps.attempt}\nAllowed files: {ctx.deps.allowed_files}\n"
-            f"Failure: {ctx.deps.failure.model_dump_json()}"
         )
 
     return agent
