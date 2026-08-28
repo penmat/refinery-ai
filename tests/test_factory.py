@@ -17,6 +17,7 @@ from refinery_ai.models import (
     RecipeRecommendation,
     RunStatus,
 )
+from refinery_ai.planning_artifacts import load_migration_failures
 from refinery_ai.recipe_catalog import JavaMigrationCatalog, RecipeCatalogEntry
 from refinery_ai.recipe_sources import RecipeSource
 
@@ -110,6 +111,58 @@ def test_planner_filters_ungrounded_recommendations_instead_of_failing() -> None
     )
 
     assert result.recommendations == [valid]
+
+
+def test_planner_filters_recipes_that_failed_in_this_repository() -> None:
+    recommendation = RecipeRecommendation(
+        recipe="org.openrewrite.java.migrate.UpgradeToJava17",
+        reason="The project targets Java 8.",
+        evidence=['"java_version": "8"'],
+        expected_benefit="Upgrade the Java baseline.",
+        priority="high",
+        confidence=0.98,
+    )
+
+    result = grounded_recipe_plan(
+        RecipePlan(recommendations=[recommendation]),
+        frozenset({recommendation.recipe}),
+        'Discovery: {"java_version": "8"}',
+        failed_recipes=frozenset({recommendation.recipe}),
+    )
+
+    assert result.recommendations == []
+
+
+def test_load_migration_failures_returns_structured_planning_evidence(
+    tmp_path: Path,
+) -> None:
+    failed_step = tmp_path / ".refinery/migration-runs/run-1/step-002"
+    failed_step.mkdir(parents=True)
+    failed_step.joinpath("step.json").write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "reason": "Build verification failed",
+                "base_revision": "abc123",
+                "recipe": {
+                    "recipe": "org.openrewrite.java.springdoc.SpringFoxToSpringDoc"
+                },
+                "verification": {
+                    "exit_code": 1,
+                    "stderr": "cannot find symbol: Docket",
+                },
+            }
+        )
+    )
+
+    history = load_migration_failures(tmp_path, Path(".refinery"), 10_000)
+
+    assert history.failed_recipes == frozenset(
+        {"org.openrewrite.java.springdoc.SpringFoxToSpringDoc"}
+    )
+    assert "Build verification failed" in history.context
+    assert "cannot find symbol: Docket" in history.context
+    assert ".refinery/migration-runs/run-1/step-002" in history.context
 
 
 def test_planning_evidence_facts_include_goal_and_retained_warnings(tmp_path: Path) -> None:
@@ -210,6 +263,51 @@ def test_ai_prepare_supplies_graph_and_assessment_context(
     assert '"target_java": 17' in planner.deps.evidence_corpus
     assert "goal.target_java=17" in planner.deps.evidence_facts
     assert "No persisted project artifacts are available." in planner.deps.evidence_corpus
+    assert planner.deps.migration_failure_context == (
+        "No previous migration failures are recorded."
+    )
+    assert planner.deps.failed_recipes == frozenset()
+
+
+def test_ai_prepare_supplies_previous_migration_failures(
+    tmp_path: Path, monkeypatch
+) -> None:
+    (tmp_path / "pom.xml").write_text("<project><modelVersion>4.0.0</modelVersion></project>")
+    failed_step = tmp_path / ".refinery/migration-runs/run-1/step-001"
+    failed_step.mkdir(parents=True)
+    failed_step.joinpath("step.json").write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "reason": "Build verification failed",
+                "recipe": {
+                    "recipe": "org.openrewrite.java.migrate.UpgradeToJava17"
+                },
+                "verification": {"exit_code": 1, "stdout": "compilation failed"},
+            }
+        )
+    )
+    planner = FakePlanner()
+    monkeypatch.setattr(
+        "refinery_ai.factory.create_planning_agent", lambda model, **kwargs: planner
+    )
+
+    ModernizationFactory(
+        context_graph=FakeContextGraph(),
+        recipe_catalog=CATALOG,
+        recipe_sources=RECIPE_SOURCES,
+    ).prepare(
+        tmp_path,
+        ModernizationGoal(description="Upgrade Java", target_java=17),
+        use_ai_planner=True,
+    )
+
+    assert planner.deps is not None
+    assert planner.deps.failed_recipes == frozenset(
+        {"org.openrewrite.java.migrate.UpgradeToJava17"}
+    )
+    assert "compilation failed" in planner.deps.migration_failure_context
+    assert "compilation failed" in planner.deps.evidence_corpus
 
 
 def test_apply_stops_on_unknown_build_system(tmp_path: Path) -> None:

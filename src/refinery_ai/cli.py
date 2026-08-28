@@ -412,6 +412,13 @@ def migrate(
     json_output: Annotated[
         bool, typer.Option("--json", help="Print the complete machine-readable result")
     ] = False,
+    apply_result: Annotated[
+        bool,
+        typer.Option(
+            "--apply-result/--no-apply-result",
+            help="Apply the last verified checkpoint to the source checkout",
+        ),
+    ] = True,
 ) -> None:
     """Execute a persisted planner handoff through type-specific migration runners."""
 
@@ -429,7 +436,7 @@ def migrate(
         timeout=settings.command_timeout_seconds,
         output_limit=settings.max_output_characters,
         progress=None if json_output else typer.echo,
-    ).run(plan_id, apply=apply)
+    ).run(plan_id, apply=apply, publish=apply_result)
     get_logger(__name__).debug(
         "Migration result:\n%s", json.dumps(result.model_dump(mode="json"), indent=2)
     )
@@ -438,6 +445,18 @@ def migrate(
     else:
         outcome = "completed" if result.status is RunStatus.COMPLETED else "stopped"
         typer.echo(f"Migration plan {outcome}. Details: {log_path}")
+        if result.published_revision:
+            typer.echo(
+                f"Applied verified result to {root}: {result.published_revision[:12]}"
+            )
+        completed = [step for step in result.steps if step.status is RunStatus.COMPLETED]
+        if not result.published_revision and completed and completed[-1].workspace:
+            typer.echo(f"Last verified worktree: {completed[-1].workspace}")
+        failed = next(
+            (step for step in reversed(result.steps) if step.status is RunStatus.FAILED), None
+        )
+        if failed and failed.failure_artifacts:
+            typer.echo(f"Failure artifacts: {failed.failure_artifacts}")
     if result.status is RunStatus.FAILED:
         raise typer.Exit(code=1)
 

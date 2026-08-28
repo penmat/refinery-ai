@@ -17,6 +17,7 @@ def grounded_recipe_plan(
     allowed_recipes: frozenset[str],
     evidence_corpus: str,
     recipe_artifacts: dict[str, str] | None = None,
+    failed_recipes: frozenset[str] = frozenset(),
 ) -> RecipePlan:
     """Remove recommendations that are not backed by supplied project evidence."""
 
@@ -24,6 +25,8 @@ def grounded_recipe_plan(
     recommendations = []
     for recommendation in output.recommendations:
         if recommendation.recipe not in allowed_recipes:
+            continue
+        if recommendation.recipe in failed_recipes:
             continue
         if any(
             len(evidence.strip()) < 4
@@ -52,6 +55,8 @@ class PlanningDependencies:
     recipe_artifacts: dict[str, str] = field(default_factory=dict)
     evidence_corpus: str = ""
     evidence_facts: list[str] = field(default_factory=list)
+    migration_failure_context: str = "No previous migration failures are recorded."
+    failed_recipes: frozenset[str] = frozenset()
 
 
 def create_planning_agent(
@@ -104,7 +109,9 @@ def create_planning_agent(
             "as '...'. Recommend a recipe only when project evidence directly demonstrates its "
             "applicability. Do not invent evidence, do not recommend non-catalog recipes, and do "
             "not execute anything. Return an empty recommendations list when applicability is "
-            "unsupported."
+            "unsupported. Prior migration failures are authoritative execution evidence. Do not "
+            "recommend a previously failed recipe again unless a later workflow explicitly marks "
+            "its underlying prerequisite as repaired."
         ),
     )
 
@@ -116,6 +123,7 @@ def create_planning_agent(
             f"Knowledge graph: {ctx.deps.graph_summary}\n"
             f"Scoped repository context: {ctx.deps.graph_context}\n"
             f"Project artifacts:\n{ctx.deps.artifact_context}\n"
+            f"Previous migration failures:\n{ctx.deps.migration_failure_context}\n"
             f"OpenRewrite Java migration catalog:\n{ctx.deps.recipe_catalog}"
         )
 
@@ -128,6 +136,7 @@ def create_planning_agent(
             ctx.deps.allowed_recipes,
             ctx.deps.evidence_corpus,
             ctx.deps.recipe_artifacts,
+            ctx.deps.failed_recipes,
         )
 
     return agent

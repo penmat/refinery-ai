@@ -23,7 +23,11 @@ from refinery_ai.models import (
 )
 from refinery_ai.openrewrite import OpenRewriteAdapter
 from refinery_ai.planning import rule_based_plan, validate_plan
-from refinery_ai.planning_artifacts import MigrationPlanStore, load_planning_artifacts
+from refinery_ai.planning_artifacts import (
+    MigrationPlanStore,
+    load_migration_failures,
+    load_planning_artifacts,
+)
 from refinery_ai.recipe_catalog import JavaMigrationCatalog, fetch_java_migration_catalog
 from refinery_ai.recipe_sources import RecipeSource, fetch_recipe_sources
 from refinery_ai.reporting import to_markdown
@@ -114,6 +118,11 @@ class ModernizationFactory:
                 self.settings.state_directory,
                 self.settings.max_output_characters,
             )
+            migration_failures = load_migration_failures(
+                snapshot.repository,
+                self.settings.state_directory,
+                self.settings.max_output_characters,
+            )
             catalog = self.recipe_catalog or fetch_java_migration_catalog(
                 timeout=self.settings.recipe_catalog_timeout_seconds,
                 verify_ssl=self.settings.recipe_catalog_verify_ssl,
@@ -142,6 +151,7 @@ class ModernizationFactory:
                     graph.summary(),
                     graph_context,
                     artifact_context,
+                    migration_failures.context,
                 )
             )
             planner = create_planning_agent(
@@ -166,6 +176,8 @@ class ModernizationFactory:
                     graph_context=graph_context,
                     artifact_context=artifact_context,
                     evidence_facts=evidence_facts,
+                    migration_failure_context=migration_failures.context,
+                    failed_recipes=migration_failures.failed_recipes,
                     recipe_catalog=(
                         f"Catalog index: {catalog.source}\n"
                         "Declarative recipe source array:\n"

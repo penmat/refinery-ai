@@ -6,11 +6,13 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 from pydantic_ai import Agent, RunContext
 
 from refinery_ai.migrations.contracts import MigrationTypeRunner
 from refinery_ai.migrations.openrewrite import OpenRewriteMigrationRunner
+from refinery_ai.migrations.worktrees import GitWorktreeManager
 from refinery_ai.models import (
     DiscoverySnapshot,
     ExecutionType,
@@ -37,6 +39,7 @@ class MigrationAgent:
         build_command: Callable[[DiscoverySnapshot], list[str] | None] = verification_command,
         build_verifier: Callable[..., VerificationResult] = verify,
         progress: Callable[[str], None] | None = None,
+        worktree_factory: type[GitWorktreeManager] = GitWorktreeManager,
     ) -> None:
         self.store = store
         self.runners = runners or {
@@ -47,8 +50,15 @@ class MigrationAgent:
         self.build_command = build_command
         self.build_verifier = build_verifier
         self.progress = progress or (lambda message: None)
+        self.worktree_factory = worktree_factory
 
-    def run(self, plan_id: str | None = None, *, apply: bool = False) -> MigrationRun:
+    def run(
+        self,
+        plan_id: str | None = None,
+        *,
+        apply: bool = False,
+        publish: bool = True,
+    ) -> MigrationRun:
         plan = self.store.load(plan_id)
         total = len(plan.steps)
         self.progress(
@@ -57,6 +67,20 @@ class MigrationAgent:
         )
         results: list[StepResult] = []
         status = RunStatus.COMPLETED
+        run_id = uuid4().hex
+        worktrees = None
+        starting_revision = None
+        current_revision = None
+        if apply:
+            worktrees = self.worktree_factory(
+                self.store.repository,
+                self.store.state_directory,
+                run_id,
+                plan.plan_id,
+            )
+            self.progress("Preparing isolated migration worktrees ...")
+            starting_revision = worktrees.start()
+            current_revision = starting_revision
         for index, step in enumerate(plan.steps, start=1):
             runner = self.runners.get(step.execution_type)
             step_id = f"{index}-{step.execution_type.value}"
@@ -73,11 +97,29 @@ class MigrationAgent:
                 )
                 status = RunStatus.FAILED
                 break
+            workspace = None
+            step_snapshot = plan.snapshot
+            if worktrees is not None:
+                assert current_revision is not None
+                workspace = worktrees.create_step(index, current_revision)
+                step_snapshot = plan.snapshot.model_copy(
+                    update={"repository": workspace.path}
+                )
             execution = runner.run(
-                plan.snapshot, step, apply=apply, timeout=self.timeout
+                step_snapshot, step, apply=apply, timeout=self.timeout
             )
             if not execution.green:
                 self.progress(f"Migration {index}/{total} failed: {label}")
+                failure_artifacts = None
+                if worktrees is not None and workspace is not None:
+                    failure_artifacts = worktrees.record_failure(
+                        workspace,
+                        index,
+                        step,
+                        "Migration command failed",
+                        execution,
+                        None,
+                    )
                 results.append(
                     StepResult(
                         step_id=step_id,
@@ -85,6 +127,8 @@ class MigrationAgent:
                         message=f"Migration failed: {step.recipe}",
                         execution=execution,
                         attempts=1,
+                        workspace=workspace.path if workspace else None,
+                        failure_artifacts=failure_artifacts,
                     )
                 )
                 status = RunStatus.FAILED
@@ -93,11 +137,21 @@ class MigrationAgent:
             build_result = None
             if apply:
                 self.progress(f"Verifying Migration {index}/{total}: {label}")
-                command = self.build_command(plan.snapshot)
+                command = self.build_command(step_snapshot)
                 if command is None:
                     self.progress(
                         f"Migration {index}/{total} cannot be verified: unknown build system"
                     )
+                    failure_artifacts = None
+                    if worktrees is not None and workspace is not None:
+                        failure_artifacts = worktrees.record_failure(
+                            workspace,
+                            index,
+                            step,
+                            "Unknown build system",
+                            execution,
+                            None,
+                        )
                     results.append(
                         StepResult(
                             step_id=step_id,
@@ -108,18 +162,30 @@ class MigrationAgent:
                             ),
                             execution=execution,
                             attempts=1,
+                            workspace=workspace.path if workspace else None,
+                            failure_artifacts=failure_artifacts,
                         )
                     )
                     status = RunStatus.FAILED
                     break
                 build_result = self.build_verifier(
-                    Path(plan.snapshot.repository),
+                    Path(step_snapshot.repository),
                     command,
                     timeout=self.timeout,
                     output_limit=self.output_limit,
                 )
                 if not build_result.green:
                     self.progress(f"Migration {index}/{total} failed verification: {label}")
+                    failure_artifacts = None
+                    if worktrees is not None and workspace is not None:
+                        failure_artifacts = worktrees.record_failure(
+                            workspace,
+                            index,
+                            step,
+                            "Post-migration build failed",
+                            execution,
+                            build_result,
+                        )
                     results.append(
                         StepResult(
                             step_id=step_id,
@@ -128,10 +194,20 @@ class MigrationAgent:
                             execution=execution,
                             verification=build_result,
                             attempts=1,
+                            workspace=workspace.path if workspace else None,
+                            failure_artifacts=failure_artifacts,
                         )
                     )
                     status = RunStatus.FAILED
                     break
+
+            checkpoint = None
+            if worktrees is not None and workspace is not None:
+                assert build_result is not None
+                checkpoint = worktrees.checkpoint(
+                    workspace, index, step, execution, build_result
+                )
+                current_revision = checkpoint
 
             results.append(
                 StepResult(
@@ -145,10 +221,29 @@ class MigrationAgent:
                     execution=execution,
                     verification=build_result,
                     attempts=1,
+                    workspace=workspace.path if workspace else None,
+                    checkpoint=checkpoint,
                 )
             )
             self.progress(f"Migration {index}/{total} completed: {label}")
-        return MigrationRun(plan_id=plan.plan_id, status=status, steps=results)
+        published_revision = None
+        if worktrees is not None:
+            assert current_revision is not None
+            assert starting_revision is not None
+            if publish:
+                self.progress("Applying the last verified checkpoint to the source checkout ...")
+                published_revision = worktrees.publish(starting_revision, current_revision)
+                self.progress(f"Applied verified result: {published_revision[:12]}")
+            worktrees.finish(status.value, current_revision, published_revision)
+        return MigrationRun(
+            plan_id=plan.plan_id,
+            status=status,
+            run_id=run_id,
+            starting_revision=starting_revision,
+            final_revision=current_revision,
+            published_revision=published_revision,
+            steps=results,
+        )
 
 
 def migration_display_name(recipe: str) -> str:

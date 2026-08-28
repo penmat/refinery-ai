@@ -246,6 +246,21 @@ plan stops at the first failing build so the responsible recipe is unambiguous.
 The terminal shows concise per-step progress; full commands and captured output are retained in
 `.refinery/logs/`. Pass `--json` to `migrate` when the complete result is needed on stdout.
 
+Apply mode requires a clean Git checkout and creates one isolated worktree per migration under
+`.refinery/worktrees/<run-id>/`. Each green step is checkpointed and the next worktree starts from
+that exact revision. If a step fails, Refinery saves its patch, execution log, build log, and
+summary under `.refinery/migration-runs/<run-id>/step-NNN/`, then removes only the failed
+worktree. Earlier verified worktrees remain available, and the original checkout stays untouched
+during recipe execution.
+
+After execution, apply mode fast-forwards the source checkout to the last verified checkpoint by
+default. Thus, successful recipes are applied even when a later recipe fails and is rolled back.
+Use `--no-apply-result` to leave all verified changes isolated in their worktrees instead.
+
+Subsequent planning runs read the retained failed-step records as repository-specific evidence.
+Previously failed recipes are shown to the planner and excluded from the next persisted plan, so
+planning can continue with the remaining useful migrations instead of repeating a known failure.
+
 Run approved commands. In v0.1 this establishes a build baseline, performs an OpenRewrite dry run, and then stops for review:
 
 ```bash

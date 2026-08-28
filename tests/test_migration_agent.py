@@ -1,3 +1,5 @@
+import os
+import subprocess
 from pathlib import Path
 
 from refinery_ai.agents.migration import MigrationAgent, migration_display_name
@@ -23,7 +25,22 @@ class RecordingRunner:
         return VerificationResult(command=["rewrite"], exit_code=0, duration_seconds=0)
 
 
+def initialize_git_repository(path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    (path / "README.md").write_text("fixture\n")
+    subprocess.run(["git", "add", "README.md"], cwd=path, check=True)
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "Test",
+        "GIT_AUTHOR_EMAIL": "test@example.com",
+        "GIT_COMMITTER_NAME": "Test",
+        "GIT_COMMITTER_EMAIL": "test@example.com",
+    }
+    subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=path, env=env, check=True)
+
+
 def test_migration_agent_loads_latest_plan_and_dispatches_by_type(tmp_path: Path) -> None:
+    initialize_git_repository(tmp_path)
     store = MigrationPlanStore(tmp_path)
     store.root.mkdir(parents=True)
     step = RecipeRecommendation(
@@ -63,13 +80,17 @@ def test_migration_agent_loads_latest_plan_and_dispatches_by_type(tmp_path: Path
     assert result.steps[0].verification is not None
     assert progress == [
         "Reading plan plan1 ... about to run 1 migration.",
+        "Preparing isolated migration worktrees ...",
         "Running Migration 1/1: Upgrade to Java 17",
         "Verifying Migration 1/1: Upgrade to Java 17",
         "Migration 1/1 completed: Upgrade to Java 17",
+        "Applying the last verified checkpoint to the source checkout ...",
+        f"Applied verified result: {result.published_revision[:12]}",
     ]
 
 
 def test_migration_agent_stops_at_recipe_with_failing_post_build(tmp_path: Path) -> None:
+    initialize_git_repository(tmp_path)
     store = MigrationPlanStore(tmp_path)
     store.root.mkdir(parents=True)
     first = RecipeRecommendation(

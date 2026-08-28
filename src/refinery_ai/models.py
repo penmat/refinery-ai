@@ -158,6 +158,9 @@ class StepResult(BaseModel):
     execution: VerificationResult | None = None
     verification: VerificationResult | None = None
     attempts: int = 0
+    workspace: Path | None = None
+    checkpoint: str | None = None
+    failure_artifacts: Path | None = None
 
 
 class MigrationRun(BaseModel):
@@ -165,6 +168,10 @@ class MigrationRun(BaseModel):
 
     plan_id: str
     status: RunStatus
+    run_id: str | None = None
+    starting_revision: str | None = None
+    final_revision: str | None = None
+    published_revision: str | None = None
     steps: list[StepResult] = Field(default_factory=list)
 
 

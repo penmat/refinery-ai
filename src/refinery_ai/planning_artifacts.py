@@ -2,16 +2,80 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from refinery_ai.models import PersistedMigrationPlan, RecipePlan, RunReport
+
+
+@dataclass(frozen=True)
+class MigrationFailureHistory:
+    context: str
+    failed_recipes: frozenset[str]
+
+
+def load_migration_failures(
+    repository: Path,
+    state_directory: Path,
+    limit: int,
+) -> MigrationFailureHistory:
+    """Load bounded structured failures for the next planning run."""
+
+    root = repository.expanduser().resolve() / state_directory / "migration-runs"
+    candidates = sorted(
+        root.glob("*/step-*/step.json") if root.is_dir() else [],
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    failures: list[dict[str, object]] = []
+    failed_recipes: set[str] = set()
+    remaining = limit
+    for path in candidates:
+        try:
+            payload = json.loads(path.read_text())
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if payload.get("status") != "failed":
+            continue
+        recipe_payload = payload.get("recipe")
+        if not isinstance(recipe_payload, dict):
+            continue
+        recipe = recipe_payload.get("recipe")
+        if not isinstance(recipe, str):
+            continue
+        verification_payload = payload.get("verification")
+        verification = verification_payload if isinstance(verification_payload, dict) else {}
+        diagnostic = str(verification.get("stderr") or verification.get("stdout") or "")
+        failure = {
+            "recipe": recipe,
+            "reason": payload.get("reason") or "Migration failed",
+            "base_revision": payload.get("base_revision"),
+            "build_exit_code": verification.get("exit_code"),
+            "build_diagnostic_tail": diagnostic[-2000:],
+            "artifacts": str(path.parent.relative_to(repository)),
+        }
+        rendered = json.dumps(failure, indent=2)
+        if len(rendered) > remaining:
+            break
+        failures.append(failure)
+        failed_recipes.add(recipe)
+        remaining -= len(rendered)
+    context = (
+        json.dumps(failures, indent=2)
+        if failures
+        else "No previous migration failures are recorded."
+    )
+    return MigrationFailureHistory(context=context, failed_recipes=frozenset(failed_recipes))
 
 
 class MigrationPlanStore:
     """Store immutable migration plans beneath the repository state directory."""
 
     def __init__(self, repository: Path, state_directory: Path = Path(".refinery")) -> None:
-        self.root = repository.expanduser().resolve() / state_directory / "plans"
+        self.repository = repository.expanduser().resolve()
+        self.state_directory = state_directory
+        self.root = self.repository / state_directory / "plans"
 
     def save(self, report: RunReport) -> Path | None:
         if not isinstance(report.plan, RecipePlan):
