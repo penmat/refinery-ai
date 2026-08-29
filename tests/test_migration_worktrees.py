@@ -62,10 +62,13 @@ def test_worktrees_chain_green_checkpoint_and_rollback_only_failed_step(
     first = manager.create_step(1, starting)
     (first.path / "app.txt").write_text("migration one\n")
     checkpoint = manager.checkpoint(
-        first, 1, recommendation("recipe.one"), result(), result()
+        first, 1, recommendation("recipe.one"), result(), result(), "Java 8 → Java 11"
     )
 
     assert checkpoint != starting
+    assert git(first.path, "log", "-1", "--format=%s").strip() == (
+        "Refinery: Java 8 → Java 11"
+    )
     assert "migration one" in git(tmp_path, "show", f"{checkpoint}:app.txt")
     assert first.path.is_dir()
 
@@ -90,3 +93,15 @@ def test_worktrees_chain_green_checkpoint_and_rollback_only_failed_step(
     published = manager.publish(starting, checkpoint)
     assert published == checkpoint
     assert (tmp_path / "app.txt").read_text() == "migration one\n"
+
+
+def test_worktrees_record_failed_baseline_separately(tmp_path: Path) -> None:
+    initialize(tmp_path)
+    manager = GitWorktreeManager(tmp_path, Path(".refinery"), "run1", "plan1")
+    manager.start()
+
+    artifacts = manager.record_baseline(result(1))
+
+    assert artifacts.name == "baseline"
+    assert '"status": "failed"' in (artifacts / "baseline.json").read_text()
+    assert "not a migration regression" in (artifacts / "failure-summary.md").read_text()

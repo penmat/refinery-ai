@@ -241,7 +241,9 @@ uv run refinery migrate /path/to/java-project --plan-id <run-id> --apply
 
 Migration implementations live under `refinery_ai/migrations`; the dispatcher selects one from
 each step's `execution_type`. OpenRewrite is the only registered type for now. In apply mode,
-recipes run serially and each is followed by the repository's build verification command. The
+Refinery first records a build of the unchanged repository. A failing baseline stops the run
+before any recipe executes and is reported separately from migration regressions. With a green
+baseline, recipes run serially and each is followed by the repository's build verification command. The
 plan stops at the first failing build so the responsible recipe is unambiguous.
 The terminal shows concise per-step progress; full commands and captured output are retained in
 `.refinery/logs/`. Pass `--json` to `migrate` when the complete result is needed on stdout.

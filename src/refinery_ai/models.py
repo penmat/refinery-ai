@@ -172,6 +172,8 @@ class MigrationRun(BaseModel):
     starting_revision: str | None = None
     final_revision: str | None = None
     published_revision: str | None = None
+    baseline_verification: VerificationResult | None = None
+    baseline_artifacts: Path | None = None
     steps: list[StepResult] = Field(default_factory=list)
 
 

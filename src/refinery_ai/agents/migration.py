@@ -71,6 +71,8 @@ class MigrationAgent:
         worktrees = None
         starting_revision = None
         current_revision = None
+        baseline_verification = None
+        baseline_artifacts = None
         if apply:
             worktrees = self.worktree_factory(
                 self.store.repository,
@@ -81,7 +83,27 @@ class MigrationAgent:
             self.progress("Preparing isolated migration worktrees ...")
             starting_revision = worktrees.start()
             current_revision = starting_revision
-        for index, step in enumerate(plan.steps, start=1):
+            command = self.build_command(plan.snapshot)
+            if command is None:
+                self.progress("Baseline cannot be verified: unknown build system")
+                status = RunStatus.FAILED
+            else:
+                self.progress("Verifying baseline before Migration 1 ...")
+                baseline_verification = self.build_verifier(
+                    Path(plan.snapshot.repository),
+                    command,
+                    timeout=self.timeout,
+                    output_limit=self.output_limit,
+                )
+                baseline_artifacts = worktrees.record_baseline(baseline_verification)
+                if not baseline_verification.green:
+                    self.progress(
+                        "Baseline build failed; no migrations were run. "
+                        "This is not a migration regression."
+                    )
+                    status = RunStatus.FAILED
+        runnable_steps = plan.steps if status is not RunStatus.FAILED else []
+        for index, step in enumerate(runnable_steps, start=1):
             runner = self.runners.get(step.execution_type)
             step_id = f"{index}-{step.execution_type.value}"
             label = migration_display_name(step.recipe)
@@ -205,7 +227,7 @@ class MigrationAgent:
             if worktrees is not None and workspace is not None:
                 assert build_result is not None
                 checkpoint = worktrees.checkpoint(
-                    workspace, index, step, execution, build_result
+                    workspace, index, step, execution, build_result, label
                 )
                 current_revision = checkpoint
 
@@ -230,7 +252,7 @@ class MigrationAgent:
         if worktrees is not None:
             assert current_revision is not None
             assert starting_revision is not None
-            if publish:
+            if publish and baseline_verification is not None and baseline_verification.green:
                 self.progress("Applying the last verified checkpoint to the source checkout ...")
                 published_revision = worktrees.publish(starting_revision, current_revision)
                 self.progress(f"Applied verified result: {published_revision[:12]}")
@@ -242,6 +264,8 @@ class MigrationAgent:
             starting_revision=starting_revision,
             final_revision=current_revision,
             published_revision=published_revision,
+            baseline_verification=baseline_verification,
+            baseline_artifacts=baseline_artifacts,
             steps=results,
         )
 

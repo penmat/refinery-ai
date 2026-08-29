@@ -70,6 +70,27 @@ class GitWorktreeManager:
         self._git(self.repository, "worktree", "add", "--detach", str(path), base_revision)
         return StepWorkspace(path=path, artifact_directory=artifacts, base_revision=base_revision)
 
+    def record_baseline(self, verification: VerificationResult) -> Path:
+        """Persist the build result from the untouched source revision."""
+
+        artifacts = self.artifact_root / "baseline"
+        artifacts.mkdir(parents=True, exist_ok=False)
+        self._write_json(
+            artifacts / "baseline.json",
+            {
+                "status": "completed" if verification.green else "failed",
+                "verification": verification.model_dump(mode="json"),
+            },
+        )
+        self._write_verification(artifacts / "build.log", verification)
+        if not verification.green:
+            (artifacts / "failure-summary.md").write_text(
+                "# Failed baseline build\n\n"
+                "The unchanged repository did not pass verification. No migration recipe "
+                "was executed, so this is not a migration regression.\n"
+            )
+        return artifacts
+
     def checkpoint(
         self,
         workspace: StepWorkspace,
@@ -77,6 +98,7 @@ class GitWorktreeManager:
         step: RecipeRecommendation,
         execution: VerificationResult,
         verification: VerificationResult,
+        title: str | None = None,
     ) -> str:
         """Commit a green step in its isolated worktree and persist its exact patch."""
 
@@ -98,7 +120,7 @@ class GitWorktreeManager:
                 "commit",
                 "--no-verify",
                 "-m",
-                f"refinery: checkpoint migration {index}",
+                f"Refinery: {title or step.recipe.rsplit('.', maxsplit=1)[-1]}",
                 env=env,
             )
             revision = self._git(workspace.path, "rev-parse", "HEAD").strip()

@@ -449,6 +449,12 @@ def migrate(
             typer.echo(
                 f"Applied verified result to {root}: {result.published_revision[:12]}"
             )
+        if (
+            result.baseline_artifacts
+            and result.baseline_verification
+            and not result.baseline_verification.green
+        ):
+            typer.echo(f"Baseline failure artifacts: {result.baseline_artifacts}")
         completed = [step for step in result.steps if step.status is RunStatus.COMPLETED]
         if not result.published_revision and completed and completed[-1].workspace:
             typer.echo(f"Last verified worktree: {completed[-1].workspace}")

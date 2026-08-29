@@ -75,12 +75,15 @@ def test_migration_agent_loads_latest_plan_and_dispatches_by_type(tmp_path: Path
 
     assert result.status is RunStatus.COMPLETED
     assert runner.calls == [(step.recipe, True, 42)]
-    assert builds == [["mvn", "test"]]
+    assert builds == [["mvn", "test"], ["mvn", "test"]]
+    assert result.baseline_verification is not None
+    assert result.baseline_verification.green
     assert result.steps[0].execution is not None
     assert result.steps[0].verification is not None
     assert progress == [
         "Reading plan plan1 ... about to run 1 migration.",
         "Preparing isolated migration worktrees ...",
+        "Verifying baseline before Migration 1 ...",
         "Running Migration 1/1: Upgrade to Java 17",
         "Verifying Migration 1/1: Upgrade to Java 17",
         "Migration 1/1 completed: Upgrade to Java 17",
@@ -115,7 +118,7 @@ def test_migration_agent_stops_at_recipe_with_failing_post_build(tmp_path: Path)
         nonlocal build_count
         build_count += 1
         return VerificationResult(
-            command=command, exit_code=0 if build_count == 1 else 1, duration_seconds=0
+            command=command, exit_code=0 if build_count < 3 else 1, duration_seconds=0
         )
 
     result = MigrationAgent(
@@ -125,9 +128,56 @@ def test_migration_agent_stops_at_recipe_with_failing_post_build(tmp_path: Path)
     ).run("plan2", apply=True)
 
     assert result.status is RunStatus.FAILED
-    assert build_count == 2
+    assert build_count == 3
     assert result.steps[0].status is RunStatus.COMPLETED
     assert result.steps[1].message == "Post-migration build failed: recipe.two"
+
+
+def test_migration_agent_stops_before_recipes_when_baseline_is_red(tmp_path: Path) -> None:
+    initialize_git_repository(tmp_path)
+    store = MigrationPlanStore(tmp_path)
+    store.root.mkdir(parents=True)
+    step = RecipeRecommendation(
+        recipe="recipe.one",
+        reason="First.",
+        evidence=["first"],
+        expected_benefit="First benefit.",
+        priority="high",
+        confidence=0.9,
+    )
+    plan = PersistedMigrationPlan(
+        plan_id="redbaseline",
+        snapshot=DiscoverySnapshot(repository=tmp_path, build_system=BuildSystem.MAVEN),
+        steps=[step],
+    )
+    (store.root / "redbaseline.json").write_text(plan.model_dump_json())
+    runner = RecordingRunner()
+    progress: list[str] = []
+
+    result = MigrationAgent(
+        store,
+        runners={ExecutionType.OPENREWRITE: runner},
+        build_verifier=lambda repository, command, **kwargs: VerificationResult(
+            command=command,
+            exit_code=1,
+            stdout="existing test failure",
+            duration_seconds=0,
+        ),
+        progress=progress.append,
+    ).run(apply=True)
+
+    assert result.status is RunStatus.FAILED
+    assert result.steps == []
+    assert runner.calls == []
+    assert result.baseline_verification is not None
+    assert not result.baseline_verification.green
+    assert result.baseline_artifacts is not None
+    assert (result.baseline_artifacts / "baseline.json").is_file()
+    assert "not a migration regression" in (
+        result.baseline_artifacts / "failure-summary.md"
+    ).read_text()
+    assert "Baseline build failed; no migrations were run" in progress[-1]
+    assert result.published_revision is None
 
 
 def test_old_spring_plan_infers_rewrite_spring_artifact() -> None:
