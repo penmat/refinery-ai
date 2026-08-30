@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -181,6 +182,14 @@ class GitWorktreeManager:
         (workspace.artifact_directory / "failure-summary.md").write_text(
             "\n".join(summary) + "\n"
         )
+        for report_name in ("surefire-reports", "failsafe-reports"):
+            reports = workspace.path / "target" / report_name
+            if reports.is_dir():
+                shutil.copytree(
+                    reports,
+                    workspace.artifact_directory / report_name,
+                    dirs_exist_ok=True,
+                )
         self.rollback(workspace)
         return workspace.artifact_directory
 
@@ -265,7 +274,9 @@ class GitWorktreeManager:
         for entry in entries:
             status = entry[:2]
             path = entry[3:]
-            if status == "??" and path.startswith((".refinery/", "graphify-out/")):
+            if status == "??" and path.startswith(
+                (".refinery/", ".codegraph/", "graphify-out/")
+            ):
                 continue
             dirty.append(path)
         if dirty:

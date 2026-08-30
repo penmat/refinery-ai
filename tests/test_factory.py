@@ -12,6 +12,9 @@ from refinery_ai.context_graph.models import ContextGraphInfo
 from refinery_ai.factory import (
     ModernizationFactory,
     _planning_evidence_facts,
+    _retryable_repaired_recipes,
+    _with_boot3_before_jakarta,
+    _with_boot3_before_springdoc2,
     _with_datasource_initialization_prerequisite,
     _with_utf8_prerequisite,
 )
@@ -29,7 +32,7 @@ from refinery_ai.recipe_sources import RecipeSource
 
 class FakeContextGraph:
     def build(self, repository: Path) -> ContextGraphInfo:
-        output = repository / "graphify-out"
+        output = repository / ".refinery/fake-context"
         output.mkdir(exist_ok=True)
         graph = output / "graph.json"
         graph.write_text(
@@ -82,7 +85,7 @@ def test_planner_defaults_to_openai_terra() -> None:
 def test_planner_rules_capture_spring_boot_java_17_ordering() -> None:
     rules = load_planner_rules()
 
-    assert "type: Migration Planning Rules" in rules
+    assert "title: Upgrade Spring Boot before Java 11 to Java 17" in rules
     assert "tags: [refinery, migration, planning, java, spring-boot]" in rules
     assert "Spring Boot 2.1.x" in rules
     assert "preferably Spring Boot\n2.7.x as an intermediate step" in rules
@@ -299,6 +302,127 @@ def test_datasource_initialization_is_planned_before_boot_upgrade(tmp_path: Path
     ]
 
 
+def test_boot3_is_enforced_before_standalone_jakarta_migration(tmp_path: Path) -> None:
+    jakarta_recipe = "org.openrewrite.java.migrate.jakarta.JavaxMigrationToJakarta"
+    boot3_recipe = "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"
+    common = {
+        "reason": "Modernize Spring.",
+        "evidence": ["spring"],
+        "expected_benefit": "Modern Spring stack.",
+        "priority": "high",
+        "confidence": 1,
+    }
+    jakarta = RecipeRecommendation(
+        recipe=jakarta_recipe,
+        depends_on=["boot2"],
+        **common,
+    )
+    boot3 = RecipeRecommendation(
+        recipe=boot3_recipe,
+        depends_on=[jakarta_recipe, "boot2"],
+        **common,
+    )
+
+    result = _with_boot3_before_jakarta(
+        RecipePlan(recommendations=[jakarta, boot3]),
+        DiscoverySnapshot(
+            repository=tmp_path,
+            build_system="maven",
+            spring_boot_version="2.7.18",
+        ),
+    )
+
+    assert [item.recipe for item in result.recommendations] == [
+        boot3_recipe,
+        jakarta_recipe,
+    ]
+    assert result.recommendations[0].depends_on == ["boot2"]
+    assert result.recommendations[1].depends_on == [boot3_recipe, "boot2"]
+
+
+def test_boot3_is_enforced_before_springdoc2_migration(tmp_path: Path) -> None:
+    springdoc_recipe = "org.openrewrite.java.springdoc.UpgradeSpringDoc_2"
+    boot3_recipe = "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"
+    common = {
+        "reason": "Modernize Spring.",
+        "evidence": ["spring"],
+        "expected_benefit": "Modern Spring stack.",
+        "priority": "high",
+        "confidence": 1,
+    }
+    springdoc = RecipeRecommendation(
+        recipe=springdoc_recipe,
+        depends_on=["boot2"],
+        **common,
+    )
+    boot3 = RecipeRecommendation(
+        recipe=boot3_recipe,
+        depends_on=[springdoc_recipe, "boot2"],
+        **common,
+    )
+
+    result = _with_boot3_before_springdoc2(
+        RecipePlan(recommendations=[springdoc, boot3]),
+        DiscoverySnapshot(
+            repository=tmp_path,
+            build_system="maven",
+            spring_boot_version="2.7.18",
+        ),
+    )
+
+    assert [item.recipe for item in result.recommendations] == [
+        boot3_recipe,
+        springdoc_recipe,
+    ]
+    assert result.recommendations[0].depends_on == ["boot2"]
+    assert result.recommendations[1].depends_on == [boot3_recipe, "boot2"]
+
+
+def test_springdoc2_failure_is_retryable_after_ordering_repair_is_available(
+    tmp_path: Path,
+) -> None:
+    retryable = _retryable_repaired_recipes(
+        tmp_path,
+        "NoClassDefFoundError: org/springframework/http/HttpStatusCode",
+    )
+
+    assert retryable == {"org.openrewrite.java.springdoc.UpgradeSpringDoc_2"}
+
+
+def test_boot3_failure_is_retryable_after_generator_repair_is_available(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pom.xml").write_text(
+        """<project>
+  <openapi-generator-maven-plugin.version>5.2.1</openapi-generator-maven-plugin.version>
+  <artifactId>openapi-generator-maven-plugin</artifactId>
+</project>
+"""
+    )
+
+    retryable = _retryable_repaired_recipes(
+        tmp_path,
+        "package javax.validation does not exist",
+    )
+
+    assert retryable == {
+        "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"
+    }
+
+
+def test_boot3_failure_is_retryable_after_test_compatibility_repair_is_available(
+    tmp_path: Path,
+) -> None:
+    retryable = _retryable_repaired_recipes(
+        tmp_path,
+        "shouldDeletePet:213 » InvalidDataAccessApiUsage",
+    )
+
+    assert retryable == {
+        "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"
+    }
+
+
 def test_prepare_persists_reports(tmp_path: Path) -> None:
     (tmp_path / "pom.xml").write_text("<project><modelVersion>4.0.0</modelVersion></project>")
     report = ModernizationFactory(
@@ -310,7 +434,7 @@ def test_prepare_persists_reports(tmp_path: Path) -> None:
     )
     assert report.status is RunStatus.PLANNED
     assert report.context_graph.provider == "context-graph"
-    assert (tmp_path / "graphify-out/graph.json").exists()
+    assert (tmp_path / ".refinery/fake-context/graph.json").exists()
     assert (tmp_path / f".refinery/runs/{report.run_id}.json").exists()
     assert (tmp_path / f".refinery/runs/{report.run_id}.md").exists()
 
@@ -373,7 +497,7 @@ def test_ai_prepare_supplies_graph_and_assessment_context(
     assert planner.deps.artifact_context == "No persisted project artifacts are available."
     assert "Spring Boot 2.1.x" in planner.deps.planner_rules
     assert "JavaxMigrationToJakarta" in planner.deps.planner_rules
-    assert "Spring Boot 2.7 or greater" in planner.deps.planner_rules
+    assert "Spring Boot 3 or greater" in planner.deps.planner_rules
     assert "org.openrewrite.java.migrate.UpgradeToJava17" in planner.deps.recipe_catalog
     assert planner.deps.allowed_recipes == {
         "org.openrewrite.java.migrate.UpgradeToJava17"

@@ -309,7 +309,7 @@ def test_bootstrap_falls_back_when_password_change_response_is_uncertain() -> No
 
 
 def test_cli_defaults_on_and_no_sonarqube_skips_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stub_codegraph: None
 ) -> None:
     repository = maven_repository(tmp_path)
     monkeypatch.setenv("REFINERY_DEPENDENCY_ANALYSIS_ENABLED", "false")

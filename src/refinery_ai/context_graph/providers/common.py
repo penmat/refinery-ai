@@ -12,7 +12,16 @@ from refinery_ai.context_graph.contracts import ContextFragment
 from refinery_ai.context_graph.models import ContextEvidence, ContextNode
 from refinery_ai.models import DiscoverySnapshot
 
-_IGNORED = {".git", ".gradle", ".idea", ".refinery", "build", "target", "graphify-out"}
+_IGNORED = {
+    ".git",
+    ".gradle",
+    ".idea",
+    ".refinery",
+    ".codegraph",
+    "build",
+    "target",
+    "graphify-out",
+}
 _JAVA_TYPE = re.compile(r"\b(?:class|interface|record)\s+(\w+)")
 _PACKAGE = re.compile(r"\bpackage\s+([\w.]+)\s*;")
 STRING_LITERAL = r'["\']([^"\']+)["\']'

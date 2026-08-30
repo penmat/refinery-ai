@@ -28,7 +28,16 @@ from refinery_ai.summary.models import (
     SummaryObservation,
 )
 
-_IGNORED = {".git", ".gradle", ".idea", ".refinery", "build", "target", "graphify-out"}
+_IGNORED = {
+    ".git",
+    ".gradle",
+    ".idea",
+    ".refinery",
+    ".codegraph",
+    "build",
+    "target",
+    "graphify-out",
+}
 
 
 class SummaryError(RuntimeError):

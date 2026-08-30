@@ -1,7 +1,7 @@
 ---
-type: Migration Planning Rules
-title: Refinery Planner Rules
-description: Sequencing constraints learned from verified migration outcomes.
+type: Migration Planning Rule
+title: Upgrade Spring Boot before Java 11 to Java 17
+description: Sequence the Spring Boot 2.7 bridge before upgrading Java 11 applications to Java 17.
 tags: [refinery, migration, planning, java, spring-boot]
 status: stable
 ---

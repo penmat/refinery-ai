@@ -10,7 +10,16 @@ from refinery_ai.context_graph.contracts import ContextFragment, ContextRequest
 from refinery_ai.context_graph.models import ContextEdge, ContextEvidence, ContextNode
 from refinery_ai.models import DiscoverySnapshot
 
-_IGNORED_PARTS = {".git", ".gradle", ".idea", ".refinery", "build", "target", "graphify-out"}
+_IGNORED_PARTS = {
+    ".git",
+    ".gradle",
+    ".idea",
+    ".refinery",
+    ".codegraph",
+    "build",
+    "target",
+    "graphify-out",
+}
 _ANNOTATION = re.compile(r"@(?P<name>[\w.]+)(?:\s*\((?P<args>[^)]*)\))?")
 _TYPE = re.compile(
     r"(?P<annotations>(?:@[\w.]+(?:\s*\([^)]*\))?\s*)*)"

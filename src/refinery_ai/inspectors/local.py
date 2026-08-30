@@ -14,7 +14,16 @@ from refinery_ai.models import BuildSystem
 INSPECTOR_VERSION = "1.0"
 _CONFIGURATION = "phase1-local-v1"
 _CONFIGURATION_HASH = hashlib.sha256(_CONFIGURATION.encode()).hexdigest()
-_IGNORED = {".git", ".gradle", ".idea", ".refinery", "build", "target", "graphify-out"}
+_IGNORED = {
+    ".git",
+    ".gradle",
+    ".idea",
+    ".refinery",
+    ".codegraph",
+    "build",
+    "target",
+    "graphify-out",
+}
 
 
 def identity(name: str) -> ToolIdentity:

@@ -6,7 +6,7 @@
 
 Refinery AI is an early-stage, safe-by-default modernization factory for Java applications. It discovers a repository, builds a local context graph, creates a typed migration plan, routes deterministic work toward OpenRewrite, and verifies every approved step.
 
-Version **0.1.0** is a runnable architectural foundation. Discovery, Graphify AST indexing, deterministic planning, safety gates, OpenRewrite dry runs, build verification, repair budgets, typed Pydantic AI agent boundaries, and run reports are implemented. Repository investigation now uses a read-only Pydantic AI Harness FileSystem/RepoContext pilot and safe assessment Shell profile behind the `RepositoryEnvironment` seam. Source-changing OpenRewrite and AI execution remain explicitly review-gated.
+Version **0.1.0** is a runnable architectural foundation. Discovery, CodeGraph indexing, deterministic planning, safety gates, OpenRewrite dry runs, build verification, repair budgets, typed Pydantic AI agent boundaries, and run reports are implemented. Repository investigation now uses a read-only Pydantic AI Harness FileSystem/RepoContext pilot and safe assessment Shell profile behind the `RepositoryEnvironment` seam. Source-changing OpenRewrite and AI execution remain explicitly review-gated.
 
 ## Architecture
 
@@ -43,7 +43,7 @@ The factory—not an unconstrained model—owns control flow, repository mutatio
 - Detects Maven and Gradle repositories.
 - Inspects modules, Java/test file counts, Maven dependencies, Java version, frameworks, Git branch, and worktree state.
 - Builds a provider-neutral context graph from repository evidence.
-- Uses Graphify as a context provider for code symbols and cross-file relationships.
+- Uses CodeGraph as a context provider for code symbols and cross-file relationships.
 - Adds Spring semantic context for beans, dependency injection, HTTP endpoints, configuration,
   persistence mappings, Kafka listeners, and cache usage.
 - Adds infrastructure context from database drivers and SQL migrations, Kafka clients and
@@ -71,7 +71,8 @@ The factory—not an unconstrained model—owns control flow, repository mutatio
 ## Requirements
 
 - Python 3.12+
-- [`uv`](https://docs.astral.sh/uv/) (`uv sync` installs the `graphifyy` package)
+- [`uv`](https://docs.astral.sh/uv/)
+- The [`codegraph`](https://github.com/colbymchenry/codegraph) CLI on `PATH`
 - A JDK and Maven/Gradle, or the project wrappers, when running verification
 - Network access to configured artifact repositories and OSV for dependency analysis
 - Docker when running the default SonarQube-backed assessment
@@ -197,19 +198,18 @@ private certificate, configure that certificate in the trust chain when possible
 temporary fallback, `--no-osv-verify-ssl` disables certificate verification for OSV requests and
 records a warning in the assessment.
 
-Planning and run commands automatically rebuild the context graph. The initial Graphify provider
-produces its native files and the builder produces the normalized artifact:
+Planning and run commands automatically rebuild the context graph. CodeGraph produces its local
+SQLite index and the builder exports that index into Refinery's normalized artifact:
 
 ```text
-graphify-out/
-├── graph.json
-├── manifest.json
-└── .graphify_analysis.json
+.codegraph/
+└── codegraph.db
 .refinery/context/
 └── context-graph.json
 ```
 
-Code-only extraction does not generate the optional HTML visualization or narrative report. Those can be produced separately with Graphify's clustering and export commands.
+Refinery reads the CodeGraph database in read-only mode and retains file, line, relationship,
+metadata, and provenance fields in the normalized context graph.
 
 Run the catalog-aware planner, persist its audit report, and print its recipe recommendations:
 
@@ -300,7 +300,7 @@ Settings use the `REFINERY_` prefix and may be placed in `.env`. See `.env.examp
 | `REFINERY_MAX_REPAIR_ATTEMPTS` | `3` | Repair-loop attempt limit |
 | `REFINERY_REPAIR_MODE` | `disabled` | Semantic repair policy: `disabled`, `local`, or `configured-provider` |
 | `REFINERY_COMMAND_TIMEOUT_SECONDS` | `900` | Build command timeout |
-| `REFINERY_GRAPHIFY_TIMEOUT_SECONDS` | `900` | Graphify extraction timeout |
+| `REFINERY_CODEGRAPH_TIMEOUT_SECONDS` | `900` | CodeGraph indexing timeout |
 | `REFINERY_ALLOW_DIRTY_WORKTREE` | `false` | Permit apply mode with existing changes |
 | `REFINERY_DEPENDENCY_ANALYSIS_ENABLED` | `true` | Resolve dependencies and query OSV |
 | `REFINERY_DEPENDENCY_RESOLUTION_TIMEOUT_SECONDS` | `900` | Maven/Gradle graph timeout |
@@ -388,7 +388,7 @@ src/refinery_ai/
 Refinery AI separates facts, decisions, and effects:
 
 1. Deterministic discovery records observed facts.
-2. Context providers collect facts with source provenance; Graphify initially supplies AST facts.
+2. Context providers collect facts with source provenance; CodeGraph supplies structural facts.
 3. The context builder deterministically merges provider fragments into a versioned graph.
 4. Planning produces typed proposals; the agent boundary accepts scoped repository context.
 5. Policy code validates plans before execution.
@@ -406,20 +406,20 @@ Subprocesses receive argument lists directly and are never invoked through a she
   optional resolved-dependency inspector obtains the effective dependency graph from Gradle itself.
 - SonarQube Gradle analysis injects a pinned scanner plugin through a temporary init script when
   the project does not configure `org.sonarqube`; Refinery does not edit target build files.
-- Graphify is run in local, code-only mode. Semantic providers currently perform deterministic
+- CodeGraph is run locally and exported from its SQLite index. Semantic providers also perform deterministic
   source and configuration analysis; deeper Java type resolution, runtime topology, dynamically
   constructed SQL, topics, and Redis keys are not yet inferred.
 - OpenRewrite dry runs require the plugin/recipe dependencies to be resolvable by the target build.
 - OpenRewrite source application is review-gated.
 - AI agents are available as typed boundaries but are not invoked by the default CLI workflow.
-- Harness is the sole built-in assessment environment and is used for repository investigation, context controls, and one build/runtime specialist. Graphify and OpenRewrite remain Refinery-owned domain tools behind that environment; the architect/planner, persistence, and other specialists remain unchanged.
+- Harness is the sole built-in assessment environment and is used for repository investigation, context controls, and one build/runtime specialist. CodeGraph and OpenRewrite remain Refinery-owned domain tools behind that environment; the architect/planner, persistence, and other specialists remain unchanged.
 - Harness Shell command checks are policy guardrails, not OS-level network isolation. Assessment configuration denies network authority, and no network-capable command is exposed, but hard egress isolation requires a future sandbox/container execution environment.
 - Proposed AI patches are not automatically applied.
 - No web service, UI, pull-request automation, or remote-repository cloning.
 
 ## Roadmap
 
-The next milestone will feed scoped Graphify queries into the executable planning and repair agents, then add OpenRewrite patch approval/application and fixture-based real-build integration tests.
+The next milestone will feed scoped CodeGraph queries into the executable planning and repair agents, then add fixture-based real-build integration tests.
 
 ## License
 

@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     max_repair_attempts: int = 3
     repair_mode: RepairMode = RepairMode.DISABLED
     command_timeout_seconds: int = 900
-    graphify_timeout_seconds: int = 900
+    codegraph_timeout_seconds: int = 900
     allow_dirty_worktree: bool = False
     max_output_characters: int = 20_000
     recipe_catalog_timeout_seconds: int = 15

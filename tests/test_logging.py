@@ -17,7 +17,9 @@ def test_safe_command_redacts_inline_and_following_secrets() -> None:
     assert "example" in rendered
 
 
-def test_cli_logs_commands_and_inspectors_to_stderr(tmp_path: Path) -> None:
+def test_cli_logs_commands_and_inspectors_to_stderr(
+    tmp_path: Path, stub_codegraph: None
+) -> None:
     source = tmp_path / "src/main/java/example/App.java"
     source.parent.mkdir(parents=True)
     source.write_text("package example; class App {}")

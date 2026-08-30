@@ -9,7 +9,16 @@ from pathlib import Path
 def repository_fingerprint(repository: Path) -> str:
     """Hash relevant repository inputs while ignoring generated state."""
 
-    ignored = {".git", ".gradle", ".idea", ".refinery", "build", "target", "graphify-out"}
+    ignored = {
+        ".git",
+        ".gradle",
+        ".idea",
+        ".refinery",
+        ".codegraph",
+        "build",
+        "target",
+        "graphify-out",
+    }
     relevant_names = {
         "pom.xml",
         "build.gradle",

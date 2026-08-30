@@ -75,6 +75,9 @@ def test_worktrees_chain_green_checkpoint_and_rollback_only_failed_step(
     second = manager.create_step(2, checkpoint)
     assert (second.path / "app.txt").read_text() == "migration one\n"
     (second.path / "app.txt").write_text("broken migration two\n")
+    reports = second.path / "target/surefire-reports"
+    reports.mkdir(parents=True)
+    (reports / "TEST-example.xml").write_text("<testsuite failures=\"1\"/>\n")
     artifacts = manager.record_failure(
         second,
         2,
@@ -88,6 +91,7 @@ def test_worktrees_chain_green_checkpoint_and_rollback_only_failed_step(
     assert first.path.is_dir()
     assert "broken migration two" in (artifacts / "changes.patch").read_text()
     assert (artifacts / "failure-summary.md").is_file()
+    assert (artifacts / "surefire-reports/TEST-example.xml").is_file()
     assert git(tmp_path, "status", "--porcelain") == ""
 
     published = manager.publish(starting, checkpoint)

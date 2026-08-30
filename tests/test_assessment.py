@@ -83,7 +83,9 @@ def test_incompatible_profiles_suppress_score_deltas(tmp_path: Path) -> None:
     assert all(value is None for value in result.category_changes.values())
 
 
-def test_assess_cli_persists_and_compares_by_name(tmp_path: Path) -> None:
+def test_assess_cli_persists_and_compares_by_name(
+    tmp_path: Path, stub_codegraph: None
+) -> None:
     repository = _repository(tmp_path)
     runner = CliRunner()
 
@@ -120,7 +122,9 @@ def test_assess_cli_persists_and_compares_by_name(tmp_path: Path) -> None:
     assert comparison_reports[0].read_text() == latest.read_text()
 
 
-def test_assess_cli_retains_text_and_json_stdout(tmp_path: Path) -> None:
+def test_assess_cli_retains_text_and_json_stdout(
+    tmp_path: Path, stub_codegraph: None
+) -> None:
     repository = _repository(tmp_path)
     runner = CliRunner()
 

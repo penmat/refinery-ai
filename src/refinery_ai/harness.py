@@ -34,8 +34,8 @@ from refinery_ai.context_graph.builder import ContextGraphBuilder
 from refinery_ai.context_graph.contracts import ContextGraphBuildService
 from refinery_ai.context_graph.models import ContextGraphInfo
 from refinery_ai.context_graph.providers import (
+    CodeGraphProvider,
     DatabaseProvider,
-    GraphifyProvider,
     KafkaProvider,
     RedisProvider,
     SpringProvider,
@@ -248,7 +248,7 @@ def create_read_only_assessment_harness(
 class HarnessRepositoryEnvironment:
     """H2/H3 pilot implementation of the Refinery repository seam.
 
-    Repository investigation and approved verification commands use Harness. Graphify and
+    Repository investigation and approved verification commands use Harness. CodeGraph and
     OpenRewrite remain on the legacy implementation until their later migration phases.
     """
 
@@ -260,7 +260,7 @@ class HarnessRepositoryEnvironment:
         context_graph: ContextGraphBuildService | None = None,
         context_builder: ContextGraphBuilder | None = None,
         rewrite: OpenRewriteAdapter | None = None,
-        graphify_timeout: int = 900,
+        codegraph_timeout: int = 900,
         output_limit: int = 20_000,
         context_store: DurableContextStore | None = None,
     ) -> None:
@@ -291,7 +291,7 @@ class HarnessRepositoryEnvironment:
         self.context_graph = context_graph
         self.context_builder = context_builder or ContextGraphBuilder(
             [
-                GraphifyProvider(timeout=graphify_timeout, output_limit=output_limit),
+                CodeGraphProvider(timeout=codegraph_timeout, output_limit=output_limit),
                 SpringProvider(),
                 DatabaseProvider(),
                 KafkaProvider(),

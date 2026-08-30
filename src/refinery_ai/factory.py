@@ -40,6 +40,28 @@ from refinery_ai.reporting import to_markdown
 from refinery_ai.repository import RepositoryEnvironment
 
 
+def _retryable_repaired_recipes(repository: Path, failure_context: str) -> frozenset[str]:
+    """Return failed recipes whose recorded cause now has a deterministic repair."""
+
+    retryable: set[str] = set()
+    if "org/springframework/http/HttpStatusCode" in failure_context:
+        retryable.add("org.openrewrite.java.springdoc.UpgradeSpringDoc_2")
+    if (
+        "Status expected:<400> but was:<201>" in failure_context
+        or "InvalidDataAccessApiUsage" in failure_context
+    ):
+        retryable.add("org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0")
+    pom = repository / "pom.xml"
+    if pom.is_file() and "package javax.validation does not exist" in failure_context:
+        content = pom.read_text(errors="replace")
+        if (
+            "openapi-generator-maven-plugin" in content
+            and "<openapi-generator-maven-plugin.version>5." in content
+        ):
+            retryable.add("org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0")
+    return frozenset(retryable)
+
+
 def _planning_evidence_facts(
     snapshot: DiscoverySnapshot, goal: ModernizationGoal, artifact_context: str
 ) -> list[str]:
@@ -115,7 +137,7 @@ class ModernizationFactory:
             ),
             context_graph=self.context_graph,
             rewrite=self.rewrite,
-            graphify_timeout=self.settings.graphify_timeout_seconds,
+            codegraph_timeout=self.settings.codegraph_timeout_seconds,
             output_limit=self.settings.max_output_characters,
         )
 
@@ -149,6 +171,16 @@ class ModernizationFactory:
                     for recipe in failed_recipes
                     if "UpgradeSpringBoot" not in recipe
                 )
+            retryable_recipes = _retryable_repaired_recipes(
+                snapshot.repository, migration_failures.context
+            )
+            failed_recipes -= retryable_recipes
+            migration_failure_context = migration_failures.context
+            if retryable_recipes:
+                migration_failure_context += (
+                    "\nWorkflow repair now available; these recipes may be retried: "
+                    f"{sorted(retryable_recipes)}"
+                )
             planner_rules = load_planner_rules()
             catalog = self.recipe_catalog or fetch_java_migration_catalog(
                 timeout=self.settings.recipe_catalog_timeout_seconds,
@@ -178,7 +210,7 @@ class ModernizationFactory:
                     graph.summary(),
                     graph_context,
                     artifact_context,
-                    migration_failures.context,
+                    migration_failure_context,
                 )
             )
             planner = create_planning_agent(
@@ -204,7 +236,7 @@ class ModernizationFactory:
                     artifact_context=artifact_context,
                     planner_rules=planner_rules,
                     evidence_facts=evidence_facts,
-                    migration_failure_context=migration_failures.context,
+                    migration_failure_context=migration_failure_context,
                     failed_recipes=failed_recipes,
                     completed_recipes=migration_failures.completed_recipes,
                     recipe_catalog=(
@@ -433,5 +465,114 @@ def _with_datasource_initialization_prerequisite(
 def _with_deterministic_prerequisites(
     plan: RecipePlan, snapshot: DiscoverySnapshot
 ) -> RecipePlan:
+    plan = _with_boot3_before_jakarta(plan, snapshot)
+    plan = _with_boot3_before_springdoc2(plan, snapshot)
     plan = _with_datasource_initialization_prerequisite(plan, snapshot)
     return _with_utf8_prerequisite(plan, snapshot)
+
+
+def _with_boot3_before_jakarta(
+    plan: RecipePlan, snapshot: DiscoverySnapshot
+) -> RecipePlan:
+    """Keep Jakarta namespace changes behind the compatible Spring Boot stack."""
+
+    jakarta_recipe = "org.openrewrite.java.migrate.jakarta.JavaxMigrationToJakarta"
+    boot3_recipe = "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"
+    recommendations = list(plan.recommendations)
+    jakarta = next(
+        (item for item in recommendations if item.recipe == jakarta_recipe), None
+    )
+    if jakarta is None:
+        return plan
+    boot3 = next((item for item in recommendations if item.recipe == boot3_recipe), None)
+    already_boot3 = bool(
+        snapshot.spring_boot_version
+        and snapshot.spring_boot_version.lstrip().startswith("3.")
+    )
+    if boot3 is None:
+        return (
+            plan
+            if already_boot3
+            else RecipePlan(
+                recommendations=[item for item in recommendations if item is not jakarta]
+            )
+        )
+
+    boot3 = boot3.model_copy(
+        update={
+            "depends_on": [
+                dependency
+                for dependency in boot3.depends_on
+                if dependency != jakarta_recipe
+            ]
+        }
+    )
+    jakarta = jakarta.model_copy(
+        update={
+            "depends_on": list(dict.fromkeys([boot3_recipe, *jakarta.depends_on]))
+        }
+    )
+    ordered = [
+        boot3 if item.recipe == boot3_recipe else item
+        for item in recommendations
+        if item.recipe != jakarta_recipe
+    ]
+    boot3_index = next(
+        index for index, item in enumerate(ordered) if item.recipe == boot3_recipe
+    )
+    ordered.insert(boot3_index + 1, jakarta)
+    return RecipePlan(recommendations=ordered)
+
+
+def _with_boot3_before_springdoc2(
+    plan: RecipePlan, snapshot: DiscoverySnapshot
+) -> RecipePlan:
+    """Keep Springdoc 2 behind its Spring Framework 6 prerequisite."""
+
+    springdoc_recipe = "org.openrewrite.java.springdoc.UpgradeSpringDoc_2"
+    boot3_recipe = "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"
+    recommendations = list(plan.recommendations)
+    springdoc = next(
+        (item for item in recommendations if item.recipe == springdoc_recipe), None
+    )
+    if springdoc is None:
+        return plan
+    boot3 = next((item for item in recommendations if item.recipe == boot3_recipe), None)
+    already_boot3 = bool(
+        snapshot.spring_boot_version
+        and snapshot.spring_boot_version.lstrip().startswith("3.")
+    )
+    if boot3 is None:
+        return (
+            plan
+            if already_boot3
+            else RecipePlan(
+                recommendations=[
+                    item for item in recommendations if item is not springdoc
+                ]
+            )
+        )
+    boot3 = boot3.model_copy(
+        update={
+            "depends_on": [
+                dependency
+                for dependency in boot3.depends_on
+                if dependency != springdoc_recipe
+            ]
+        }
+    )
+    springdoc = springdoc.model_copy(
+        update={
+            "depends_on": list(dict.fromkeys([boot3_recipe, *springdoc.depends_on]))
+        }
+    )
+    ordered = [
+        boot3 if item.recipe == boot3_recipe else item
+        for item in recommendations
+        if item.recipe != springdoc_recipe
+    ]
+    boot3_index = next(
+        index for index, item in enumerate(ordered) if item.recipe == boot3_recipe
+    )
+    ordered.insert(boot3_index + 1, springdoc)
+    return RecipePlan(recommendations=ordered)

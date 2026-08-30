@@ -341,6 +341,7 @@ def discover(repository: Path) -> DiscoverySnapshot:
         "--",
         ".",
         ":(exclude).refinery/**",
+        ":(exclude).codegraph/**",
         ":(exclude)graphify-out/**",
     )
     return DiscoverySnapshot(
