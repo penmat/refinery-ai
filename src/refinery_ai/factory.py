@@ -10,11 +10,16 @@ from refinery_ai.agents.planning import PlanningDependencies, create_planning_ag
 from refinery_ai.config import Settings
 from refinery_ai.context_graph.contracts import ContextGraphBuildService
 from refinery_ai.harness import AssessmentHarnessPolicy, HarnessRepositoryEnvironment
+from refinery_ai.migrations.spring_properties import DEFER_DATASOURCE_INITIALIZATION_RECIPE
+from refinery_ai.migrations.utf8 import UTF8_APPLICATION_PROPERTIES_RECIPE
 from refinery_ai.models import (
     DiscoverySnapshot,
+    ExecutionType,
     ModernizationGoal,
     ModernizationPlan,
     RecipePlan,
+    RecipePriority,
+    RecipeRecommendation,
     RunReport,
     RunStatus,
     StepResult,
@@ -26,6 +31,7 @@ from refinery_ai.planning import rule_based_plan, validate_plan
 from refinery_ai.planning_artifacts import (
     MigrationPlanStore,
     load_migration_failures,
+    load_planner_rules,
     load_planning_artifacts,
 )
 from refinery_ai.recipe_catalog import JavaMigrationCatalog, fetch_java_migration_catalog
@@ -45,6 +51,16 @@ def _planning_evidence_facts(
     ]
     if goal.target_java is not None:
         facts.append(f"goal.target_java={goal.target_java}")
+    if snapshot.spring_boot_version is not None:
+        facts.append(f"discovery.spring_boot_version={snapshot.spring_boot_version}")
+    facts.extend(
+        f"discovery.non_utf8_application_properties={path}"
+        for path in snapshot.non_utf8_application_properties
+    )
+    facts.extend(
+        f"discovery.deferred_datasource_initialization_properties={path}"
+        for path in snapshot.deferred_datasource_initialization_properties
+    )
     facts.extend(f"discovery.framework={framework}" for framework in snapshot.frameworks)
     facts.extend(
         "discovery.dependency="
@@ -123,6 +139,17 @@ class ModernizationFactory:
                 self.settings.state_directory,
                 self.settings.max_output_characters,
             )
+            failed_recipes = migration_failures.failed_recipes
+            if (
+                snapshot.non_utf8_application_properties
+                or snapshot.deferred_datasource_initialization_properties
+            ):
+                failed_recipes = frozenset(
+                    recipe
+                    for recipe in failed_recipes
+                    if "UpgradeSpringBoot" not in recipe
+                )
+            planner_rules = load_planner_rules()
             catalog = self.recipe_catalog or fetch_java_migration_catalog(
                 timeout=self.settings.recipe_catalog_timeout_seconds,
                 verify_ssl=self.settings.recipe_catalog_verify_ssl,
@@ -175,9 +202,11 @@ class ModernizationFactory:
                     graph_summary=graph.summary(),
                     graph_context=graph_context,
                     artifact_context=artifact_context,
+                    planner_rules=planner_rules,
                     evidence_facts=evidence_facts,
                     migration_failure_context=migration_failures.context,
-                    failed_recipes=migration_failures.failed_recipes,
+                    failed_recipes=failed_recipes,
+                    completed_recipes=migration_failures.completed_recipes,
                     recipe_catalog=(
                         f"Catalog index: {catalog.source}\n"
                         "Declarative recipe source array:\n"
@@ -197,7 +226,7 @@ class ModernizationFactory:
                     evidence_corpus=evidence_corpus,
                 ),
             )
-            plan = result.output
+            plan = _with_deterministic_prerequisites(result.output, snapshot)
         else:
             plan = rule_based_plan(snapshot, goal)
             validate_plan(plan)
@@ -324,3 +353,85 @@ class ModernizationFactory:
         MigrationPlanStore(
             report.snapshot.repository, self.settings.state_directory
         ).save(report)
+
+
+def _with_utf8_prerequisite(
+    plan: RecipePlan, snapshot: DiscoverySnapshot
+) -> RecipePlan:
+    """Prepend the built-in encoding repair when discovery proves it is needed."""
+
+    if not snapshot.non_utf8_application_properties:
+        return plan
+    evidence = [
+        f"discovery.non_utf8_application_properties={path}"
+        for path in snapshot.non_utf8_application_properties
+    ]
+    conversion = RecipeRecommendation(
+        execution_type=ExecutionType.UTF8,
+        recipe=UTF8_APPLICATION_PROPERTIES_RECIPE,
+        reason="Application properties contain legacy non-UTF-8 bytes.",
+        evidence=evidence,
+        expected_benefit=(
+            "Prevents newer Maven resource plugins from rejecting application properties."
+        ),
+        priority=RecipePriority.HIGH,
+        confidence=1,
+    )
+    ordered = []
+    for recommendation in plan.recommendations[:9]:
+        if "UpgradeSpringBoot" in recommendation.recipe:
+            dependencies = list(
+                dict.fromkeys(
+                    [UTF8_APPLICATION_PROPERTIES_RECIPE, *recommendation.depends_on]
+                )
+            )
+            recommendation = recommendation.model_copy(
+                update={"depends_on": dependencies}
+            )
+        ordered.append(recommendation)
+    return RecipePlan(recommendations=[conversion, *ordered])
+
+
+def _with_datasource_initialization_prerequisite(
+    plan: RecipePlan, snapshot: DiscoverySnapshot
+) -> RecipePlan:
+    if not snapshot.deferred_datasource_initialization_properties:
+        return plan
+    prerequisite = RecipeRecommendation(
+        execution_type=ExecutionType.SPRING_PROPERTIES,
+        recipe=DEFER_DATASOURCE_INITIALIZATION_RECIPE,
+        reason="data.sql depends on Hibernate-created JPA tables.",
+        evidence=[
+            f"discovery.deferred_datasource_initialization_properties={path}"
+            for path in snapshot.deferred_datasource_initialization_properties
+        ],
+        expected_benefit=(
+            "Runs data.sql after Hibernate creates the schema on Spring Boot 2.5+."
+        ),
+        priority=RecipePriority.HIGH,
+        confidence=1,
+    )
+    ordered = []
+    for recommendation in plan.recommendations[:9]:
+        if "UpgradeSpringBoot" in recommendation.recipe:
+            recommendation = recommendation.model_copy(
+                update={
+                    "depends_on": list(
+                        dict.fromkeys(
+                            [
+                                DEFER_DATASOURCE_INITIALIZATION_RECIPE,
+                                *recommendation.depends_on,
+                            ]
+                        )
+                    )
+                }
+            )
+        ordered.append(recommendation)
+    return RecipePlan(recommendations=[prerequisite, *ordered])
+
+
+def _with_deterministic_prerequisites(
+    plan: RecipePlan, snapshot: DiscoverySnapshot
+) -> RecipePlan:
+    plan = _with_datasource_initialization_prerequisite(plan, snapshot)
+    return _with_utf8_prerequisite(plan, snapshot)

@@ -18,6 +18,7 @@ def grounded_recipe_plan(
     evidence_corpus: str,
     recipe_artifacts: dict[str, str] | None = None,
     failed_recipes: frozenset[str] = frozenset(),
+    completed_recipes: frozenset[str] = frozenset(),
 ) -> RecipePlan:
     """Remove recommendations that are not backed by supplied project evidence."""
 
@@ -26,7 +27,7 @@ def grounded_recipe_plan(
     for recommendation in output.recommendations:
         if recommendation.recipe not in allowed_recipes:
             continue
-        if recommendation.recipe in failed_recipes:
+        if recommendation.recipe in failed_recipes or recommendation.recipe in completed_recipes:
             continue
         if any(
             len(evidence.strip()) < 4
@@ -50,6 +51,7 @@ class PlanningDependencies:
     graph_summary: str
     graph_context: str = ""
     artifact_context: str = "No persisted project artifacts are available."
+    planner_rules: str = "No additional planner rules are configured."
     recipe_catalog: str = ""
     allowed_recipes: frozenset[str] = frozenset()
     recipe_artifacts: dict[str, str] = field(default_factory=dict)
@@ -57,6 +59,7 @@ class PlanningDependencies:
     evidence_facts: list[str] = field(default_factory=list)
     migration_failure_context: str = "No previous migration failures are recorded."
     failed_recipes: frozenset[str] = frozenset()
+    completed_recipes: frozenset[str] = frozenset()
 
 
 def create_planning_agent(
@@ -111,7 +114,9 @@ def create_planning_agent(
             "not execute anything. Return an empty recommendations list when applicability is "
             "unsupported. Prior migration failures are authoritative execution evidence. Do not "
             "recommend a previously failed recipe again unless a later workflow explicitly marks "
-            "its underlying prerequisite as repaired."
+            "its underlying prerequisite as repaired. Previously completed recipes are also "
+            "authoritative and must not be recommended again. Follow the supplied planner rules as "
+            "authoritative sequencing constraints, but never cite those rules as project evidence."
         ),
     )
 
@@ -123,7 +128,9 @@ def create_planning_agent(
             f"Knowledge graph: {ctx.deps.graph_summary}\n"
             f"Scoped repository context: {ctx.deps.graph_context}\n"
             f"Project artifacts:\n{ctx.deps.artifact_context}\n"
+            f"Planner rules:\n{ctx.deps.planner_rules}\n"
             f"Previous migration failures:\n{ctx.deps.migration_failure_context}\n"
+            f"Previously completed recipes: {sorted(ctx.deps.completed_recipes)}\n"
             f"OpenRewrite Java migration catalog:\n{ctx.deps.recipe_catalog}"
         )
 
@@ -137,6 +144,7 @@ def create_planning_agent(
             ctx.deps.evidence_corpus,
             ctx.deps.recipe_artifacts,
             ctx.deps.failed_recipes,
+            ctx.deps.completed_recipes,
         )
 
     return agent

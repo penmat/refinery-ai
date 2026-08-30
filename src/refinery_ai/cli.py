@@ -22,7 +22,8 @@ from refinery_ai.harness import HarnessRepositoryEnvironment
 from refinery_ai.llm import run_tool_loop
 from refinery_ai.logging import configure_logging, get_logger
 from refinery_ai.mcp import run_mcp_server
-from refinery_ai.models import ModernizationGoal, RecipePlan, RunReport, RunStatus
+from refinery_ai.migrations.ai_repair import AiMigrationRepairer
+from refinery_ai.models import ModernizationGoal, RecipePlan, RepairMode, RunReport, RunStatus
 from refinery_ai.planning_artifacts import MigrationPlanStore
 from refinery_ai.summary import ProjectSummaryService, SummaryError
 from refinery_ai.summary.reporting import summary_markdown
@@ -419,10 +420,19 @@ def migrate(
             help="Apply the last verified checkpoint to the source checkout",
         ),
     ] = True,
+    repair_mode: Annotated[
+        RepairMode | None,
+        typer.Option(
+            "--repair-mode",
+            help="Semantic repair policy: disabled, local, or configured-provider",
+        ),
+    ] = None,
 ) -> None:
     """Execute a persisted planner handoff through type-specific migration runners."""
 
     settings = Settings()
+    if repair_mode is not None:
+        settings.repair_mode = repair_mode
     root = repository.expanduser().resolve()
     log_path = (
         root
@@ -431,11 +441,18 @@ def migrate(
         / f"migrate-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.log"
     )
     configure_logging(logging.DEBUG, console_level=logging.WARNING, log_file=log_path)
+    repairer = (
+        None
+        if settings.repair_mode is RepairMode.DISABLED
+        else AiMigrationRepairer(settings)
+    )
     result = MigrationAgent(
         MigrationPlanStore(root, settings.state_directory),
         timeout=settings.command_timeout_seconds,
         output_limit=settings.max_output_characters,
         progress=None if json_output else typer.echo,
+        repairer=repairer,
+        max_repair_attempts=settings.max_repair_attempts,
     ).run(plan_id, apply=apply, publish=apply_result)
     get_logger(__name__).debug(
         "Migration result:\n%s", json.dumps(result.model_dump(mode="json"), indent=2)

@@ -9,7 +9,12 @@ from refinery_ai.agents.planning import create_planning_agent, grounded_recipe_p
 from refinery_ai.cli import app
 from refinery_ai.config import Settings
 from refinery_ai.context_graph.models import ContextGraphInfo
-from refinery_ai.factory import ModernizationFactory, _planning_evidence_facts
+from refinery_ai.factory import (
+    ModernizationFactory,
+    _planning_evidence_facts,
+    _with_datasource_initialization_prerequisite,
+    _with_utf8_prerequisite,
+)
 from refinery_ai.models import (
     DiscoverySnapshot,
     ModernizationGoal,
@@ -17,7 +22,7 @@ from refinery_ai.models import (
     RecipeRecommendation,
     RunStatus,
 )
-from refinery_ai.planning_artifacts import load_migration_failures
+from refinery_ai.planning_artifacts import load_migration_failures, load_planner_rules
 from refinery_ai.recipe_catalog import JavaMigrationCatalog, RecipeCatalogEntry
 from refinery_ai.recipe_sources import RecipeSource
 
@@ -72,6 +77,18 @@ RECIPE_SOURCES = [
 
 def test_planner_defaults_to_openai_terra() -> None:
     assert Settings().model == "openai:gpt-5.6-terra"
+
+
+def test_planner_rules_capture_spring_boot_java_17_ordering() -> None:
+    rules = load_planner_rules()
+
+    assert "type: Migration Planning Rules" in rules
+    assert "tags: [refinery, migration, planning, java, spring-boot]" in rules
+    assert "Spring Boot 2.1.x" in rules
+    assert "preferably Spring Boot\n2.7.x as an intermediate step" in rules
+    assert "before planning Java 11 to Java 17" in rules
+    assert "Normalize application properties to UTF-8 before Spring Boot upgrades" in rules
+    assert "Do not\nschedule the Spring Boot upgrade" in rules
 
 
 def test_planner_uses_the_configured_ollama_api_base() -> None:
@@ -133,6 +150,26 @@ def test_planner_filters_recipes_that_failed_in_this_repository() -> None:
     assert result.recommendations == []
 
 
+def test_planner_filters_recipes_that_completed_in_this_repository() -> None:
+    recommendation = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.SpringBoot2JUnit4to5Migration",
+        reason="The project still contains JUnit 4 tests.",
+        evidence=["org.junit.runner.RunWith"],
+        expected_benefit="Move tests to JUnit Jupiter.",
+        priority="medium",
+        confidence=0.9,
+    )
+
+    result = grounded_recipe_plan(
+        RecipePlan(recommendations=[recommendation]),
+        frozenset({recommendation.recipe}),
+        "org.junit.runner.RunWith",
+        completed_recipes=frozenset({recommendation.recipe}),
+    )
+
+    assert result.recommendations == []
+
+
 def test_load_migration_failures_returns_structured_planning_evidence(
     tmp_path: Path,
 ) -> None:
@@ -154,11 +191,29 @@ def test_load_migration_failures_returns_structured_planning_evidence(
             }
         )
     )
+    completed_step = tmp_path / ".refinery/migration-runs/run-2/step-001"
+    completed_step.mkdir(parents=True)
+    completed_step.joinpath("step.json").write_text(
+        json.dumps(
+            {
+                "status": "completed",
+                "recipe": {
+                    "recipe": (
+                        "org.openrewrite.java.spring.boot2."
+                        "SpringBoot2JUnit4to5Migration"
+                    )
+                },
+            }
+        )
+    )
 
     history = load_migration_failures(tmp_path, Path(".refinery"), 10_000)
 
     assert history.failed_recipes == frozenset(
         {"org.openrewrite.java.springdoc.SpringFoxToSpringDoc"}
+    )
+    assert history.completed_recipes == frozenset(
+        {"org.openrewrite.java.spring.boot2.SpringBoot2JUnit4to5Migration"}
     )
     assert "Build verification failed" in history.context
     assert "cannot find symbol: Docket" in history.context
@@ -169,6 +224,8 @@ def test_planning_evidence_facts_include_goal_and_retained_warnings(tmp_path: Pa
     snapshot = DiscoverySnapshot(
         repository=tmp_path,
         build_system="maven",
+        spring_boot_version="2.1.6.RELEASE",
+        non_utf8_application_properties=[Path("src/main/resources/application.properties")],
         frameworks=["Spring"],
     )
 
@@ -181,7 +238,65 @@ def test_planning_evidence_facts_include_goal_and_retained_warnings(tmp_path: Pa
     assert "discovery.java_version=unknown" in facts
     assert "goal.target_java=17" in facts
     assert "discovery.framework=Spring" in facts
+    assert "discovery.spring_boot_version=2.1.6.RELEASE" in facts
+    assert (
+        "discovery.non_utf8_application_properties="
+        "src/main/resources/application.properties"
+    ) in facts
     assert "- [warning] Legacy javax imports remain." in facts
+
+
+def test_utf8_conversion_is_planned_before_spring_boot_upgrade(tmp_path: Path) -> None:
+    boot = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7",
+        reason="Upgrade Boot.",
+        evidence=["discovery.spring_boot_version=2.1.6.RELEASE"],
+        expected_benefit="Boot 2.7 support.",
+        priority="high",
+        confidence=0.9,
+    )
+    snapshot = DiscoverySnapshot(
+        repository=tmp_path,
+        build_system="maven",
+        non_utf8_application_properties=[Path("src/main/resources/application.properties")],
+    )
+
+    plan = _with_utf8_prerequisite(RecipePlan(recommendations=[boot]), snapshot)
+
+    assert plan.recommendations[0].execution_type.value == "utf8"
+    assert plan.recommendations[0].recipe == (
+        "refinery.convert-application-properties-to-utf8"
+    )
+    assert plan.recommendations[1].depends_on == [
+        "refinery.convert-application-properties-to-utf8"
+    ]
+
+
+def test_datasource_initialization_is_planned_before_boot_upgrade(tmp_path: Path) -> None:
+    boot = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7",
+        reason="Upgrade Boot.",
+        evidence=["boot"],
+        expected_benefit="Boot 2.7.",
+        priority="high",
+        confidence=1,
+    )
+    snapshot = DiscoverySnapshot(
+        repository=tmp_path,
+        build_system="maven",
+        deferred_datasource_initialization_properties=[
+            Path("src/main/resources/application.properties")
+        ],
+    )
+
+    plan = _with_datasource_initialization_prerequisite(
+        RecipePlan(recommendations=[boot]), snapshot
+    )
+
+    assert plan.recommendations[0].execution_type.value == "spring-properties"
+    assert plan.recommendations[1].depends_on == [
+        "refinery.defer-datasource-initialization"
+    ]
 
 
 def test_prepare_persists_reports(tmp_path: Path) -> None:
@@ -256,6 +371,9 @@ def test_ai_prepare_supplies_graph_and_assessment_context(
     assert "Context graph with 0 nodes" in planner.deps.graph_summary
     assert '"question": "Upgrade Java Java version source target' in planner.deps.graph_context
     assert planner.deps.artifact_context == "No persisted project artifacts are available."
+    assert "Spring Boot 2.1.x" in planner.deps.planner_rules
+    assert "JavaxMigrationToJakarta" in planner.deps.planner_rules
+    assert "Spring Boot 2.7 or greater" in planner.deps.planner_rules
     assert "org.openrewrite.java.migrate.UpgradeToJava17" in planner.deps.recipe_catalog
     assert planner.deps.allowed_recipes == {
         "org.openrewrite.java.migrate.UpgradeToJava17"
@@ -267,6 +385,7 @@ def test_ai_prepare_supplies_graph_and_assessment_context(
         "No previous migration failures are recorded."
     )
     assert planner.deps.failed_recipes == frozenset()
+    assert planner.deps.completed_recipes == frozenset()
 
 
 def test_ai_prepare_supplies_previous_migration_failures(

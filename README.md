@@ -259,9 +259,21 @@ After execution, apply mode fast-forwards the source checkout to the last verifi
 default. Thus, successful recipes are applied even when a later recipe fails and is rolled back.
 Use `--no-apply-result` to leave all verified changes isolated in their worktrees instead.
 
+Semantic repair is disabled by default. `--repair-mode local` permits a bounded repair only when
+an OpenRewrite migration leaves recognized Springfox source behind and verification fails. Local
+mode requires `REFINERY_LITELLM_API_BASE` to point to `localhost`, `127.0.0.1`, or `::1`; only the
+residual Java files, relevant `pom.xml` content, recipe name, and build failure are sent to that
+endpoint. `--repair-mode configured-provider` uses the configured LiteLLM provider explicitly.
+Every proposed patch is file-scoped, checked by Git, and must pass the build before checkpointing.
+
 Subsequent planning runs read the retained failed-step records as repository-specific evidence.
 Previously failed recipes are shown to the planner and excluded from the next persisted plan, so
 planning can continue with the remaining useful migrations instead of repeating a known failure.
+Maintained sequencing constraints live as Open Knowledge Format concepts under
+`src/refinery_ai/refinery-context/` and are supplied to every AI planning run. Each rule document
+is Markdown with YAML front matter; add generally applicable lessons there as migration behavior
+is discovered. An OKF `index.md` can be added later if the bundle grows enough to benefit from
+progressive disclosure.
 
 Run approved commands. In v0.1 this establishes a build baseline, performs an OpenRewrite dry run, and then stops for review:
 
@@ -286,6 +298,7 @@ Settings use the `REFINERY_` prefix and may be placed in `.env`. See `.env.examp
 | `REFINERY_LITELLM_MODEL` | `openai/gpt-5.6-terra` | LiteLLM provider and model identifier |
 | `REFINERY_LITELLM_API_BASE` | none | Optional provider base URL; set to `http://localhost:11434` for Ollama |
 | `REFINERY_MAX_REPAIR_ATTEMPTS` | `3` | Repair-loop attempt limit |
+| `REFINERY_REPAIR_MODE` | `disabled` | Semantic repair policy: `disabled`, `local`, or `configured-provider` |
 | `REFINERY_COMMAND_TIMEOUT_SECONDS` | `900` | Build command timeout |
 | `REFINERY_GRAPHIFY_TIMEOUT_SECONDS` | `900` | Graphify extraction timeout |
 | `REFINERY_ALLOW_DIRTY_WORKTREE` | `false` | Permit apply mode with existing changes |

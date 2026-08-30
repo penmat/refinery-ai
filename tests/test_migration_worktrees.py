@@ -105,3 +105,43 @@ def test_worktrees_record_failed_baseline_separately(tmp_path: Path) -> None:
     assert artifacts.name == "baseline"
     assert '"status": "failed"' in (artifacts / "baseline.json").read_text()
     assert "not a migration regression" in (artifacts / "failure-summary.md").read_text()
+
+
+def test_checkpoint_preserves_patch_with_legacy_encoded_bytes(tmp_path: Path) -> None:
+    initialize(tmp_path)
+    properties = tmp_path / "application.properties"
+    properties.write_bytes("name=Jos\xe9\n".encode("latin-1"))
+    git(tmp_path, "add", "application.properties")
+    commit_env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "Test",
+        "GIT_AUTHOR_EMAIL": "test@example.com",
+        "GIT_COMMITTER_NAME": "Test",
+        "GIT_COMMITTER_EMAIL": "test@example.com",
+    }
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "legacy properties"],
+        cwd=tmp_path,
+        env=commit_env,
+        check=True,
+    )
+    manager = GitWorktreeManager(tmp_path, Path(".refinery"), "run1", "plan1")
+    starting = manager.start()
+    workspace = manager.create_step(1, starting)
+    (workspace.path / "application.properties").write_text(
+        "name=José\n", encoding="utf-8"
+    )
+
+    checkpoint = manager.checkpoint(
+        workspace,
+        1,
+        recommendation("refinery.convert-application-properties-to-utf8"),
+        result(),
+        result(),
+        "Convert application properties to UTF-8",
+    )
+
+    assert checkpoint != starting
+    patch = (workspace.artifact_directory / "changes.patch").read_bytes()
+    assert b"Jos\xe9" in patch
+    assert "José".encode() in patch

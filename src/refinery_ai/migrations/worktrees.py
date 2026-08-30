@@ -130,7 +130,9 @@ class GitWorktreeManager:
             f"refs/refinery/{self.run_id}/step-{index:03d}",
             revision,
         )
-        (workspace.artifact_directory / "changes.patch").write_text(patch)
+        (workspace.artifact_directory / "changes.patch").write_text(
+            patch, errors="surrogateescape"
+        )
         self._write_step_metadata(
             workspace,
             index,
@@ -155,7 +157,9 @@ class GitWorktreeManager:
 
         self._git(workspace.path, "add", "-A")
         patch = self._git(workspace.path, "diff", "--cached", "--binary", workspace.base_revision)
-        (workspace.artifact_directory / "changes.patch").write_text(patch)
+        (workspace.artifact_directory / "changes.patch").write_text(
+            patch, errors="surrogateescape"
+        )
         self._write_step_metadata(
             workspace,
             index,
@@ -310,6 +314,8 @@ class GitWorktreeManager:
             cwd=cwd,
             env=env,
             text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
             capture_output=True,
             check=False,
         )

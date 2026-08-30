@@ -9,10 +9,28 @@ from pathlib import Path
 from refinery_ai.models import PersistedMigrationPlan, RecipePlan, RunReport
 
 
+def load_planner_rules() -> str:
+    """Load Refinery's maintained OKF planning concepts."""
+
+    root = Path(__file__).with_name("refinery-context")
+    documents = sorted(
+        path
+        for path in root.rglob("*.md")
+        if path.name not in {"index.md", "log.md"}
+    )
+    if not documents:
+        raise RuntimeError(f"No planner rule concepts found in OKF bundle {root}")
+    try:
+        return "\n\n---\n\n".join(path.read_text() for path in documents)
+    except (OSError, UnicodeError) as error:
+        raise RuntimeError(f"Unable to load planner rules from OKF bundle {root}") from error
+
+
 @dataclass(frozen=True)
 class MigrationFailureHistory:
     context: str
     failed_recipes: frozenset[str]
+    completed_recipes: frozenset[str]
 
 
 def load_migration_failures(
@@ -30,19 +48,23 @@ def load_migration_failures(
     )
     failures: list[dict[str, object]] = []
     failed_recipes: set[str] = set()
+    completed_recipes: set[str] = set()
     remaining = limit
     for path in candidates:
         try:
             payload = json.loads(path.read_text())
         except (OSError, UnicodeError, json.JSONDecodeError):
             continue
-        if payload.get("status") != "failed":
-            continue
         recipe_payload = payload.get("recipe")
         if not isinstance(recipe_payload, dict):
             continue
         recipe = recipe_payload.get("recipe")
         if not isinstance(recipe, str):
+            continue
+        if payload.get("status") == "completed":
+            completed_recipes.add(recipe)
+            continue
+        if payload.get("status") != "failed":
             continue
         verification_payload = payload.get("verification")
         verification = verification_payload if isinstance(verification_payload, dict) else {}
@@ -66,7 +88,11 @@ def load_migration_failures(
         if failures
         else "No previous migration failures are recorded."
     )
-    return MigrationFailureHistory(context=context, failed_recipes=frozenset(failed_recipes))
+    return MigrationFailureHistory(
+        context=context,
+        failed_recipes=frozenset(failed_recipes),
+        completed_recipes=frozenset(completed_recipes),
+    )
 
 
 class MigrationPlanStore:

@@ -83,6 +83,19 @@ def test_harness_environment_satisfies_refinery_protocol(tmp_path: Path) -> None
     assert snapshot.build_system is BuildSystem.UNKNOWN
 
 
+def test_harness_discovers_non_utf8_application_properties(tmp_path: Path) -> None:
+    resources = tmp_path / "src/main/resources"
+    resources.mkdir(parents=True)
+    properties = resources / "application.properties"
+    properties.write_bytes("welcome=caf\xe9\n".encode("latin-1"))
+
+    snapshot = HarnessRepositoryEnvironment(tmp_path).discover(tmp_path)
+
+    assert snapshot.non_utf8_application_properties == [
+        Path("src/main/resources/application.properties")
+    ]
+
+
 def test_harness_investigator_matches_golden_fixture_without_writes() -> None:
     repository = Path(__file__).parent / "fixtures/legacy-java"
     before = {path.relative_to(repository) for path in repository.rglob("*")}

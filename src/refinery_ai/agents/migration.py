@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -10,8 +11,20 @@ from uuid import uuid4
 
 from pydantic_ai import Agent, RunContext
 
+from refinery_ai.migrations.ai_repair import (
+    MigrationRepairer,
+    springdoc_repair_applicable,
+)
 from refinery_ai.migrations.contracts import MigrationTypeRunner
 from refinery_ai.migrations.openrewrite import OpenRewriteMigrationRunner
+from refinery_ai.migrations.spring_properties import (
+    DEFER_DATASOURCE_INITIALIZATION_RECIPE,
+    SpringPropertiesMigrationRunner,
+)
+from refinery_ai.migrations.utf8 import (
+    UTF8_APPLICATION_PROPERTIES_RECIPE,
+    Utf8PropertiesMigrationRunner,
+)
 from refinery_ai.migrations.worktrees import GitWorktreeManager
 from refinery_ai.models import (
     DiscoverySnapshot,
@@ -40,10 +53,14 @@ class MigrationAgent:
         build_verifier: Callable[..., VerificationResult] = verify,
         progress: Callable[[str], None] | None = None,
         worktree_factory: type[GitWorktreeManager] = GitWorktreeManager,
+        repairer: MigrationRepairer | None = None,
+        max_repair_attempts: int = 1,
     ) -> None:
         self.store = store
         self.runners = runners or {
             ExecutionType.OPENREWRITE: OpenRewriteMigrationRunner(),
+            ExecutionType.UTF8: Utf8PropertiesMigrationRunner(),
+            ExecutionType.SPRING_PROPERTIES: SpringPropertiesMigrationRunner(),
         }
         self.timeout = timeout
         self.output_limit = output_limit
@@ -51,6 +68,8 @@ class MigrationAgent:
         self.build_verifier = build_verifier
         self.progress = progress or (lambda message: None)
         self.worktree_factory = worktree_factory
+        self.repairer = repairer
+        self.max_repair_attempts = max_repair_attempts
 
     def run(
         self,
@@ -157,6 +176,7 @@ class MigrationAgent:
                 break
 
             build_result = None
+            repairs: list[VerificationResult] = []
             if apply:
                 self.progress(f"Verifying Migration {index}/{total}: {label}")
                 command = self.build_command(step_snapshot)
@@ -196,6 +216,31 @@ class MigrationAgent:
                     timeout=self.timeout,
                     output_limit=self.output_limit,
                 )
+                while (
+                    not build_result.green
+                    and self.repairer is not None
+                    and workspace is not None
+                    and len(repairs) < self.max_repair_attempts
+                    and springdoc_repair_applicable(workspace.path, build_result)
+                ):
+                    attempt = len(repairs) + 1
+                    self.progress(
+                        f"Attempting local/scoped repair {attempt}/"
+                        f"{self.max_repair_attempts}: {label}"
+                    )
+                    repair = self.repairer.repair(workspace.path, step, build_result)
+                    repairs.append(repair)
+                    if not repair.green:
+                        detail = repair.stderr.strip() or "no diagnostic was returned"
+                        self.progress(f"Repair attempt {attempt} failed: {detail}")
+                        break
+                    self.progress(f"Verifying repair {attempt}: {label}")
+                    build_result = self.build_verifier(
+                        Path(step_snapshot.repository),
+                        command,
+                        timeout=self.timeout,
+                        output_limit=self.output_limit,
+                    )
                 if not build_result.green:
                     self.progress(f"Migration {index}/{total} failed verification: {label}")
                     failure_artifacts = None
@@ -208,6 +253,14 @@ class MigrationAgent:
                             execution,
                             build_result,
                         )
+                        if repairs:
+                            (failure_artifacts / "repairs.json").write_text(
+                                json.dumps(
+                                    [repair.model_dump(mode="json") for repair in repairs],
+                                    indent=2,
+                                )
+                                + "\n"
+                            )
                     results.append(
                         StepResult(
                             step_id=step_id,
@@ -215,7 +268,8 @@ class MigrationAgent:
                             message=f"Post-migration build failed: {step.recipe}",
                             execution=execution,
                             verification=build_result,
-                            attempts=1,
+                            repairs=repairs,
+                            attempts=1 + len(repairs),
                             workspace=workspace.path if workspace else None,
                             failure_artifacts=failure_artifacts,
                         )
@@ -242,7 +296,8 @@ class MigrationAgent:
                     ),
                     execution=execution,
                     verification=build_result,
-                    attempts=1,
+                    repairs=repairs,
+                    attempts=1 + len(repairs),
                     workspace=workspace.path if workspace else None,
                     checkpoint=checkpoint,
                 )
@@ -252,7 +307,13 @@ class MigrationAgent:
         if worktrees is not None:
             assert current_revision is not None
             assert starting_revision is not None
-            if publish and baseline_verification is not None and baseline_verification.green:
+            has_publishable_change = current_revision != starting_revision
+            if (
+                publish
+                and baseline_verification is not None
+                and baseline_verification.green
+                and has_publishable_change
+            ):
                 self.progress("Applying the last verified checkpoint to the source checkout ...")
                 published_revision = worktrees.publish(starting_revision, current_revision)
                 self.progress(f"Applied verified result: {published_revision[:12]}")
@@ -273,6 +334,10 @@ class MigrationAgent:
 def migration_display_name(recipe: str) -> str:
     """Turn a fully qualified recipe class into a concise progress label."""
 
+    if recipe == UTF8_APPLICATION_PROPERTIES_RECIPE:
+        return "Convert application properties to UTF-8"
+    if recipe == DEFER_DATASOURCE_INITIALIZATION_RECIPE:
+        return "Defer datasource initialization"
     name = recipe.rsplit(".", maxsplit=1)[-1]
     java_upgrade = re.fullmatch(r"Java(\d+)(?:to|To)Java(\d+)", name)
     if java_upgrade:

@@ -22,6 +22,8 @@ class RecordingRunner:
 
     def run(self, snapshot, step, *, apply: bool, timeout: int) -> VerificationResult:
         self.calls.append((step.recipe, apply, timeout))
+        if apply:
+            Path(snapshot.repository, "migration-output.txt").write_text(step.recipe + "\n")
         return VerificationResult(command=["rewrite"], exit_code=0, duration_seconds=0)
 
 
@@ -133,6 +135,57 @@ def test_migration_agent_stops_at_recipe_with_failing_post_build(tmp_path: Path)
     assert result.steps[1].message == "Post-migration build failed: recipe.two"
 
 
+def test_migration_agent_repairs_residual_springfox_before_stopping(tmp_path: Path) -> None:
+    initialize_git_repository(tmp_path)
+    store = MigrationPlanStore(tmp_path)
+    store.root.mkdir(parents=True)
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7",
+        reason="Upgrade Boot.",
+        evidence=["boot"],
+        expected_benefit="Boot 2.7.",
+        priority="high",
+        confidence=1,
+    )
+    plan = PersistedMigrationPlan(
+        plan_id="repair",
+        snapshot=DiscoverySnapshot(repository=tmp_path, build_system=BuildSystem.MAVEN),
+        steps=[step],
+    )
+    (store.root / "repair.json").write_text(plan.model_dump_json())
+
+    class SpringfoxRunner:
+        def run(self, snapshot, step, *, apply: bool, timeout: int):
+            source = Path(snapshot.repository, "src/main/java/SwaggerConfiguration.java")
+            source.parent.mkdir(parents=True)
+            source.write_text("import springfox.documentation.spring.web.plugins.Docket;\n")
+            return VerificationResult(command=["rewrite"], exit_code=0, duration_seconds=0)
+
+    class Repairer:
+        def repair(self, repository, step, failure):
+            Path(repository, "src/main/java/SwaggerConfiguration.java").write_text(
+                "class SwaggerConfiguration {}\n"
+            )
+            return VerificationResult(command=["repair"], exit_code=0, duration_seconds=0)
+
+    def verifier(repository, command, **kwargs):
+        source = Path(repository, "src/main/java/SwaggerConfiguration.java")
+        red = source.is_file() and "springfox." in source.read_text()
+        return VerificationResult(command=command, exit_code=int(red), duration_seconds=0)
+
+    result = MigrationAgent(
+        store,
+        runners={ExecutionType.OPENREWRITE: SpringfoxRunner()},
+        build_verifier=verifier,
+        repairer=Repairer(),
+    ).run(apply=True)
+
+    assert result.status is RunStatus.COMPLETED
+    assert len(result.steps[0].repairs) == 1
+    assert result.steps[0].verification is not None
+    assert result.steps[0].verification.green
+
+
 def test_migration_agent_stops_before_recipes_when_baseline_is_red(tmp_path: Path) -> None:
     initialize_git_repository(tmp_path)
     store = MigrationPlanStore(tmp_path)
@@ -178,6 +231,53 @@ def test_migration_agent_stops_before_recipes_when_baseline_is_red(tmp_path: Pat
     ).read_text()
     assert "Baseline build failed; no migrations were run" in progress[-1]
     assert result.published_revision is None
+
+
+def test_first_failed_migration_does_not_publish_unchanged_starting_revision(
+    tmp_path: Path,
+) -> None:
+    initialize_git_repository(tmp_path)
+    store = MigrationPlanStore(tmp_path)
+    store.root.mkdir(parents=True)
+    step = RecipeRecommendation(
+        recipe="recipe.one",
+        reason="First.",
+        evidence=["first"],
+        expected_benefit="First benefit.",
+        priority="high",
+        confidence=0.9,
+    )
+    plan = PersistedMigrationPlan(
+        plan_id="firstfailure",
+        snapshot=DiscoverySnapshot(repository=tmp_path, build_system=BuildSystem.MAVEN),
+        steps=[step],
+    )
+    (store.root / "firstfailure.json").write_text(plan.model_dump_json())
+    verification_count = 0
+    progress: list[str] = []
+
+    def verifier(repository, command, **kwargs):
+        nonlocal verification_count
+        verification_count += 1
+        return VerificationResult(
+            command=command,
+            exit_code=0 if verification_count == 1 else 1,
+            duration_seconds=0,
+        )
+
+    result = MigrationAgent(
+        store,
+        runners={ExecutionType.OPENREWRITE: RecordingRunner()},
+        build_verifier=verifier,
+        progress=progress.append,
+    ).run(apply=True)
+
+    assert result.status is RunStatus.FAILED
+    assert result.published_revision is None
+    assert not any(message.startswith("Applied verified result:") for message in progress)
+    assert not any(
+        message.startswith("Applying the last verified checkpoint") for message in progress
+    )
 
 
 def test_old_spring_plan_infers_rewrite_spring_artifact() -> None:

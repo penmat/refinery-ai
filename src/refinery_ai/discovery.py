@@ -33,6 +33,58 @@ def _is_source_file(path: Path) -> bool:
     return not IGNORED_DIRECTORIES.intersection(path.parts)
 
 
+def non_utf8_application_properties(root: Path) -> list[Path]:
+    invalid: list[Path] = []
+    for path in sorted(root.glob("**/resources/application*.properties")):
+        if not _is_source_file(path):
+            continue
+        try:
+            path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            invalid.append(path.relative_to(root))
+        except OSError:
+            continue
+    return invalid
+
+
+def deferred_datasource_initialization_properties(
+    root: Path, dependencies: list[Dependency]
+) -> list[Path]:
+    """Find JPA modules whose data.sql must wait for Hibernate schema creation."""
+
+    has_jpa = any(
+        dependency.artifact in {"spring-boot-starter-data-jpa", "hibernate-core"}
+        for dependency in dependencies
+    )
+    if not has_jpa:
+        return []
+    targets: list[Path] = []
+    for data_sql in sorted(root.glob("**/resources/data.sql")):
+        if not _is_source_file(data_sql):
+            continue
+        resources = data_sql.parent
+        configured = False
+        for candidate in resources.glob("application*"):
+            if candidate.suffix not in {".properties", ".yml", ".yaml"}:
+                continue
+            try:
+                content = candidate.read_text(errors="replace")
+            except OSError:
+                continue
+            if re.search(
+                r"spring\.jpa\.defer-datasource-initialization\s*[=:]\s*true",
+                content,
+                re.IGNORECASE,
+            ) or re.search(
+                r"defer-datasource-initialization\s*:\s*true", content, re.IGNORECASE
+            ):
+                configured = True
+                break
+        if not configured:
+            targets.append((resources / "application.properties").relative_to(root))
+    return targets
+
+
 def _xml_text(element: ET.Element, prefix: str, name: str) -> str | None:
     node = element.find(f"{prefix}{name}")
     return node.text.strip() if node is not None and node.text else None
@@ -186,6 +238,19 @@ def _maven_details(path: Path) -> tuple[list[Dependency], str | None]:
         return [], None
 
 
+def _spring_boot_parent_version(path: Path) -> str | None:
+    try:
+        parent = _parent_coordinates(path.read_text())
+    except (OSError, UnicodeError):
+        return None
+    if parent is None:
+        return None
+    group, artifact, version, _ = parent
+    if group == "org.springframework.boot" and artifact == "spring-boot-starter-parent":
+        return version
+    return None
+
+
 def select_build_files(
     root: Path,
     pom_files: list[Path],
@@ -239,6 +304,7 @@ def discover(repository: Path) -> DiscoverySnapshot:
     modules: list[Module] = []
     dependencies: list[Dependency] = []
     java_version: str | None = None
+    spring_boot_version: str | None = None
     for build_file in build_files:
         module_root = build_file.parent
         main = list((module_root / "src/main/java").rglob("*.java"))
@@ -256,6 +322,7 @@ def discover(repository: Path) -> DiscoverySnapshot:
             found, version = _maven_details(build_file)
             dependencies.extend(found)
             java_version = java_version or version
+            spring_boot_version = spring_boot_version or _spring_boot_parent_version(build_file)
 
     coordinates = " ".join(f"{item.group}:{item.artifact}" for item in dependencies)
     frameworks: list[str] = []
@@ -283,6 +350,11 @@ def discover(repository: Path) -> DiscoverySnapshot:
         modules=modules,
         dependencies=dependencies,
         java_version=java_version,
+        spring_boot_version=spring_boot_version,
+        non_utf8_application_properties=non_utf8_application_properties(root),
+        deferred_datasource_initialization_properties=(
+            deferred_datasource_initialization_properties(root, dependencies)
+        ),
         frameworks=frameworks,
         git_branch=_git(root, "branch", "--show-current"),
         dirty=bool(status),

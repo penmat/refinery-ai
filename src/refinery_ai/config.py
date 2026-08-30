@@ -5,6 +5,8 @@ from pathlib import Path
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from refinery_ai.models import RepairMode
+
 
 class Settings(BaseSettings):
     """Runtime policy and provider configuration."""
@@ -17,6 +19,7 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     state_directory: Path = Path(".refinery")
     max_repair_attempts: int = 3
+    repair_mode: RepairMode = RepairMode.DISABLED
     command_timeout_seconds: int = 900
     graphify_timeout_seconds: int = 900
     allow_dirty_worktree: bool = False

@@ -41,16 +41,10 @@ from refinery_ai.context_graph.providers import (
     SpringProvider,
 )
 from refinery_ai.context_graph.query import ContextGraphQuery
-from refinery_ai.discovery import (
-    IGNORED_DIRECTORIES,
-    maven_details,
-    resolve_parent_java_version,
-    select_build_files,
-)
+from refinery_ai.discovery import discover as discover_repository
 from refinery_ai.logging import get_logger, log_command
 from refinery_ai.models import (
     DiscoverySnapshot,
-    Module,
     VerificationResult,
 )
 from refinery_ai.openrewrite import OpenRewriteAdapter
@@ -336,124 +330,12 @@ class HarnessRepositoryEnvironment:
         return preview, receipt
 
     def discover(self, repository: Path) -> DiscoverySnapshot:
+        """Use Refinery's canonical repository discovery implementation."""
+
         root = repository.expanduser().resolve()
         if root != self.repository:
             raise HarnessPolicyError("Discovery repository does not match Harness root")
-
-        async def investigate() -> tuple[list[str], dict[str, str]]:
-            patterns = (
-                "pom.xml",
-                "build.gradle",
-                "build.gradle.kts",
-                "settings.gradle",
-                "settings.gradle.kts",
-                "**/*.java",
-            )
-            found = await asyncio.gather(*(self.find_files(pattern) for pattern in patterns))
-            paths = sorted(
-                {
-                    path
-                    for result in found
-                    for path in _found_paths(result)
-                    if not IGNORED_DIRECTORIES.intersection(Path(path).parts)
-                }
-            )
-            build_paths = [
-                path
-                for path in paths
-                if Path(path).name in {"pom.xml", "build.gradle", "build.gradle.kts"}
-            ]
-            evidence = {
-                path: _evidence_text(await self.read_file(path))
-                for path in build_paths
-                if Path(path).name == "pom.xml"
-            }
-            return paths, evidence
-
-        paths, evidence = asyncio.run(investigate())
-        pom_files = [Path(path) for path in paths if Path(path).name == "pom.xml"]
-        gradle_files = [
-            Path(path) for path in paths if Path(path).name in {"build.gradle", "build.gradle.kts"}
-        ]
-        root_has_gradle_marker = any(
-            Path(path)
-            in {
-                Path("build.gradle"),
-                Path("build.gradle.kts"),
-                Path("settings.gradle"),
-                Path("settings.gradle.kts"),
-            }
-            for path in paths
-        )
-        build_system, build_files = select_build_files(
-            Path("."),
-            pom_files,
-            gradle_files,
-            root_has_gradle_marker=root_has_gradle_marker,
-        )
-        java_files = [Path(path) for path in paths if path.endswith(".java")]
-        modules: list[Module] = []
-        dependencies = []
-        java_version: str | None = None
-        for build_file in build_files:
-            module_root = build_file.parent
-            main_root = module_root / "src/main/java"
-            test_root = module_root / "src/test/java"
-            modules.append(
-                Module(
-                    name=module_root.name if module_root != Path(".") else root.name,
-                    path=module_root,
-                    java_files=sum(path.is_relative_to(main_root) for path in java_files),
-                    test_files=sum(path.is_relative_to(test_root) for path in java_files),
-                )
-            )
-            if build_file.name == "pom.xml":
-                pom_content = evidence[str(build_file)]
-                found_dependencies, found_version = maven_details(pom_content)
-                if found_version is None:
-                    found_version = resolve_parent_java_version(root / build_file, pom_content)
-                dependencies.extend(found_dependencies)
-                java_version = java_version or found_version
-
-        coordinates = " ".join(f"{item.group}:{item.artifact}" for item in dependencies)
-        frameworks: list[str] = []
-        if "org.springframework" in coordinates:
-            frameworks.append("Spring")
-        if re.search(r"(^|\s)org\.quarkus:", coordinates):
-            frameworks.append("Quarkus")
-
-        status = self.verify(
-            root,
-            [
-                "git",
-                "status",
-                "--porcelain",
-                "--untracked-files=all",
-                "--",
-                ".",
-                ":(exclude).refinery/**",
-                ":(exclude)graphify-out/**",
-            ],
-            timeout=self.policy.command_timeout_seconds,
-            output_limit=self.policy.tool_output_limit_characters,
-        )
-        branch = self.verify(
-            root,
-            ["git", "branch", "--show-current"],
-            timeout=self.policy.command_timeout_seconds,
-            output_limit=self.policy.tool_output_limit_characters,
-        )
-        snapshot = DiscoverySnapshot(
-            repository=root,
-            build_system=build_system,
-            build_files=build_files,
-            modules=modules,
-            dependencies=dependencies,
-            java_version=java_version,
-            frameworks=frameworks,
-            git_branch=branch.stdout.strip() if branch.green else None,
-            dirty=bool(status.stdout.strip()) if status.green else False,
-        )
+        snapshot = discover_repository(root)
         self._last_discovery = snapshot
         return snapshot
 
@@ -527,19 +409,6 @@ def _split_harness_output(output: str) -> tuple[str, str]:
     elif output.startswith("[stderr]\n"):
         stderr = output[len("[stderr]\n") :]
     return stdout, stderr
-
-
-def _found_paths(output: str) -> list[str]:
-    return [] if output == "No matches found." else output.splitlines()
-
-
-def _evidence_text(output: str) -> str:
-    """Remove Harness evidence metadata while retaining the repository text."""
-
-    lines = output.splitlines()
-    if lines and lines[0].startswith("["):
-        lines = lines[1:]
-    return "\n".join(line.split("\t", 1)[1] if "\t" in line else line for line in lines) + "\n"
 
 
 def _context_root(repository: Path) -> Path:

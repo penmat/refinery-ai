@@ -8,5 +8,8 @@
     {"group": "org.springframework", "artifact": "spring-core", "version": "5.3.39", "scope": null}
   ],
   "java_version": "11",
+  "spring_boot_version": null,
+  "non_utf8_application_properties": [],
+  "deferred_datasource_initialization_properties": [],
   "frameworks": ["Spring"]
 }

@@ -53,6 +53,9 @@ class DiscoverySnapshot(BaseModel):
     modules: list[Module] = Field(default_factory=list)
     dependencies: list[Dependency] = Field(default_factory=list)
     java_version: str | None = None
+    spring_boot_version: str | None = None
+    non_utf8_application_properties: list[Path] = Field(default_factory=list)
+    deferred_datasource_initialization_properties: list[Path] = Field(default_factory=list)
     frameworks: list[str] = Field(default_factory=list)
     git_branch: str | None = None
     dirty: bool = False
@@ -96,6 +99,14 @@ class RecipePriority(StrEnum):
 
 class ExecutionType(StrEnum):
     OPENREWRITE = "openrewrite"
+    UTF8 = "utf8"
+    SPRING_PROPERTIES = "spring-properties"
+
+
+class RepairMode(StrEnum):
+    DISABLED = "disabled"
+    LOCAL = "local"
+    CONFIGURED_PROVIDER = "configured-provider"
 
 
 class RecipeRecommendation(BaseModel):
@@ -157,6 +168,7 @@ class StepResult(BaseModel):
     message: str
     execution: VerificationResult | None = None
     verification: VerificationResult | None = None
+    repairs: list[VerificationResult] = Field(default_factory=list)
     attempts: int = 0
     workspace: Path | None = None
     checkpoint: str | None = None
