@@ -71,7 +71,11 @@ class GitWorktreeManager:
         self._git(self.repository, "worktree", "add", "--detach", str(path), base_revision)
         return StepWorkspace(path=path, artifact_directory=artifacts, base_revision=base_revision)
 
-    def record_baseline(self, verification: VerificationResult) -> Path:
+    def record_baseline(
+        self,
+        verification: VerificationResult,
+        attempts: list[tuple[int, VerificationResult]] | None = None,
+    ) -> Path:
         """Persist the build result from the untouched source revision."""
 
         artifacts = self.artifact_root / "baseline"
@@ -84,6 +88,16 @@ class GitWorktreeManager:
             },
         )
         self._write_verification(artifacts / "build.log", verification)
+        if attempts:
+            self._write_json(
+                artifacts / "attempts.json",
+                [
+                    {"jdk": major, "verification": result.model_dump(mode="json")}
+                    for major, result in attempts
+                ],
+            )
+            for major, result in attempts:
+                self._write_verification(artifacts / f"jdk-{major}.log", result)
         if not verification.green:
             (artifacts / "failure-summary.md").write_text(
                 "# Failed baseline build\n\n"

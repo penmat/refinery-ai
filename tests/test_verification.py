@@ -1,6 +1,25 @@
 from pathlib import Path
 
-from refinery_ai.verification import MACOS_JAVA_HOME_PROBE_WARNING, _clean_stderr, verify
+from refinery_ai.models import BuildSystem, DiscoverySnapshot
+from refinery_ai.verification import (
+    MACOS_JAVA_HOME_PROBE_WARNING,
+    _clean_stderr,
+    verification_command,
+    verify,
+)
+
+
+def test_maven_verification_cleans_before_testing(tmp_path: Path) -> None:
+    snapshot = DiscoverySnapshot(repository=tmp_path, build_system=BuildSystem.MAVEN)
+
+    assert verification_command(snapshot) == ["mvn", "clean", "test"]
+
+
+def test_maven_wrapper_verification_cleans_before_testing(tmp_path: Path) -> None:
+    (tmp_path / "mvnw").touch()
+    snapshot = DiscoverySnapshot(repository=tmp_path, build_system=BuildSystem.MAVEN)
+
+    assert verification_command(snapshot) == ["./mvnw", "clean", "test"]
 
 
 def test_successful_command_omits_benign_macos_java_home_probe_warning() -> None:

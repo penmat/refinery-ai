@@ -74,6 +74,8 @@ The factory—not an unconstrained model—owns control flow, repository mutatio
 - [`uv`](https://docs.astral.sh/uv/)
 - The [`codegraph`](https://github.com/colbymchenry/codegraph) CLI on `PATH`
 - A JDK and Maven/Gradle, or the project wrappers, when running verification
+- Installed bridge and target JDKs for profile runs; Refinery discovers them through `JAVA_HOME`,
+  `PATH`, SDKMAN, and conventional macOS/Linux JDK locations
 - Network access to configured artifact repositories and OSV for dependency analysis
 - Docker when running the default SonarQube-backed assessment
 - An AI provider API key only when using the Pydantic AI agents
@@ -219,6 +221,46 @@ uv run refinery plan \
   --goal "Upgrade this application to Java 17" \
   --target-java 17
 ```
+
+Use a named modernization profile to keep recommendations within a defined target. Profiles live
+under `src/refinery_ai/profiles/`; the initial profile permits prerequisite migrations while
+excluding upgrades beyond Java 17, Spring Boot 3.2, and Springdoc 2.5:
+
+```bash
+uv run refinery plan /path/to/java-project \
+  --profile spring-boot-3.2-java-17
+
+uv run refinery migrate /path/to/java-project \
+  --profile spring-boot-3.2-java-17 \
+  --apply
+```
+
+The selected profile is stored with the plan. Supplying a different profile to `migrate` is
+rejected, which prevents accidentally executing a plan against a different modernization target.
+For now, reaching a profile's target may require more than one plan/migrate cycle.
+
+To let Refinery repeat analyze, plan, and migrate until the profile has no remaining
+recommendations, use the profile-driven run mode:
+
+```bash
+uv run refinery run \
+  --repository /path/to/java-project \
+  --profile spring-boot-3.2-java-17 \
+  --apply
+```
+
+Profile runs are bounded to 20 cycles by default; use `--max-cycles` to choose another safety
+limit. SonarQube runs on the first cycle and again only when Maven or Gradle dependency inputs
+change. Otherwise, the last SonarQube result is retained in the new assessment. A failed migration,
+a repeated plan, or a migration that produces no published change stops the loop for review.
+
+Refinery selects a JDK independently for each command without changing the user's shell. Baseline
+verification starts with the first planned Java target, then works backward to the declared source
+JDK until the unchanged project builds. That verified JDK runs the early migrations; after each
+Java upgrade, verification and subsequent migrations switch to the new target JDK. SDKMAN
+installations are discovered beneath
+`$SDKMAN_DIR/candidates/java` (or `~/.sdkman/candidates/java`). If a required major version is not
+installed, the profile run stops with an actionable error.
 
 The earlier goal-first form remains supported with `--repository /path/to/java-project`.
 

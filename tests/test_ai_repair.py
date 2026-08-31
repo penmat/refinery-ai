@@ -6,8 +6,11 @@ import pytest
 from refinery_ai.config import Settings
 from refinery_ai.migrations.ai_repair import (
     AiMigrationRepairer,
+    DeterministicMigrationRepairer,
     configure_boot3_test_compatibility,
     configure_openapi_generator_for_springdoc,
+    remove_obsolete_junit_platform_surefire_provider,
+    repair_springdoc_info_constructor,
     springdoc_repair_applicable,
     springdoc_repair_files,
 )
@@ -129,6 +132,133 @@ def test_springdoc_repair_preserves_v1_annotations_alongside_v3(tmp_path: Path) 
     updated = pom.read_text()
     assert "<groupId>io.swagger.core.v3</groupId>" in updated
     assert "<groupId>io.swagger</groupId>" in updated
+
+
+def test_springdoc_repair_converts_invalid_info_constructor(tmp_path: Path) -> None:
+    source = tmp_path / "src/main/java/example/SwaggerConfig.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        '''package example;
+
+import java.util.Collections;
+import io.swagger.v3.oas.models.info.Contact;
+import io.swagger.v3.oas.models.info.Info;
+
+class SwaggerConfig {
+    private Info apiInfo() {
+        return new Info(
+            "Flight Booking REST API",
+            "Flight Booking REST API Documentation",
+            "1.0",
+            "Terms of service",
+            new Contact().name("Name").url("https://example.com").email("a@example.com"),
+            "License of API",
+            "https://example.com/license",
+            Collections.emptyList());
+    }
+}
+'''
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "test"],
+        exit_code=1,
+        stdout=(
+            "constructor Info in class io.swagger.v3.oas.models.info.Info "
+            "cannot be applied to given types"
+        ),
+        duration_seconds=0,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert repair_springdoc_info_constructor(tmp_path, failure) == (
+        "src/main/java/example/SwaggerConfig.java",
+    )
+    updated = source.read_text()
+    assert "return new Info()" in updated
+    assert '.title("Flight Booking REST API")' in updated
+    assert '.version("1.0")' in updated
+    assert "new License().name" in updated
+    assert "import io.swagger.v3.oas.models.info.License;" in updated
+    assert "Collections" not in updated
+
+
+def test_deterministic_repair_handles_info_constructor_without_ai(tmp_path: Path) -> None:
+    source = tmp_path / "SwaggerConfig.java"
+    source.write_text(
+        '''import io.swagger.v3.oas.models.info.Info;
+class SwaggerConfig {
+    Info info() {
+        return new Info("title", "description", "1", "terms", null,
+            "license", "license-url", java.util.Collections.emptyList());
+    }
+}
+'''
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stdout="constructor Info in class io.swagger.v3.oas.models.info.Info",
+        duration_seconds=0,
+    )
+
+    result = DeterministicMigrationRepairer().repair(
+        tmp_path,
+        RecipeRecommendation(
+            recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7",
+            reason="upgrade",
+            evidence=["test"],
+            expected_benefit="upgrade",
+            priority="high",
+            confidence=1,
+        ),
+        failure,
+    )
+
+    assert result.green
+    assert "return new Info()" in source.read_text()
+
+
+def test_deterministic_repair_removes_obsolete_junit_platform_provider(
+    tmp_path: Path,
+) -> None:
+    pom = tmp_path / "pom.xml"
+    pom.write_text(
+        """<project>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+        <dependencies>
+          <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-surefire-provider</artifactId>
+            <version>1.1.0</version>
+          </dependency>
+        </dependencies>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+"""
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stdout=(
+            "org.apache.maven.surefire.api.testset.TestSetFailedException "
+            "was missing while executing maven-surefire-plugin:3.2.5"
+        ),
+        duration_seconds=0,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert remove_obsolete_junit_platform_surefire_provider(tmp_path, failure)
+    updated = pom.read_text()
+    assert "junit-platform-surefire-provider" not in updated
+    assert "<dependencies>" not in updated
+    assert "<version>3.2.5</version>" in updated
 
 
 def test_boot3_repair_upgrades_openapi_generator_to_jakarta_mode(tmp_path: Path) -> None:

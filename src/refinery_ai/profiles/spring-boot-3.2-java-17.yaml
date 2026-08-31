@@ -1,0 +1,13 @@
+name: spring-boot-3.2-java-17
+description: Minimally modern Spring baseline using Java 17, Spring Boot 3.2, and Jakarta APIs.
+goal: >-
+  Reach a verified Java 17 and Spring Boot 3.2 baseline. Use Jakarta APIs and Springdoc 2.5
+  when API documentation is present. Stop at Spring Boot 3.2 and Java 17.
+target_java: 17
+exclude_recipes:
+  - "*UpgradeToJava2[1-9]"
+  - "*UpgradeToJava[3-9][0-9]"
+  - "*UpgradeSpringBoot_3_[3-9]"
+  - "*UpgradeSpringBoot_4*"
+  - "*UpgradeSpringDoc_2_[6-9]"
+  - "*UpgradeSpringDoc_[3-9]*"

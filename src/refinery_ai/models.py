@@ -133,6 +133,7 @@ class PersistedMigrationPlan(BaseModel):
     """Planner-to-migration-agent handoff stored in the target repository."""
 
     plan_id: str
+    profile: str | None = None
     snapshot: DiscoverySnapshot
     steps: list[RecipeRecommendation] = Field(default_factory=list)
 
@@ -191,6 +192,7 @@ class MigrationRun(BaseModel):
 
 class RunReport(BaseModel):
     run_id: str
+    profile: str | None = None
     status: RunStatus
     snapshot: DiscoverySnapshot
     context_graph: ContextGraphInfo

@@ -85,11 +85,13 @@ def test_planner_defaults_to_openai_terra() -> None:
 def test_planner_rules_capture_spring_boot_java_17_ordering() -> None:
     rules = load_planner_rules()
 
-    assert "title: Upgrade Spring Boot before Java 11 to Java 17" in rules
+    assert "title: Upgrade Spring Boot 2.x before Java 8 or 11 to Java 17" in rules
     assert "tags: [refinery, migration, planning, java, spring-boot]" in rules
-    assert "Spring Boot 2.1.x" in rules
-    assert "preferably Spring Boot\n2.7.x as an intermediate step" in rules
-    assert "before planning Java 11 to Java 17" in rules
+    assert "any Spring Boot release older than 2.7" in rules
+    assert "upgrade Spring\nBoot to 2.7.x" in rules
+    assert "Verify the Spring Boot 2.7 upgrade before" in rules
+    assert "UpgradeToJava17` depend" in rules
+    assert "class-file version 61" in rules
     assert "Normalize application properties to UTF-8 before Spring Boot upgrades" in rules
     assert "Do not\nschedule the Spring Boot upgrade" in rules
 
@@ -495,7 +497,7 @@ def test_ai_prepare_supplies_graph_and_assessment_context(
     assert "Context graph with 0 nodes" in planner.deps.graph_summary
     assert '"question": "Upgrade Java Java version source target' in planner.deps.graph_context
     assert planner.deps.artifact_context == "No persisted project artifacts are available."
-    assert "Spring Boot 2.1.x" in planner.deps.planner_rules
+    assert "any Spring Boot release older than 2.7" in planner.deps.planner_rules
     assert "JavaxMigrationToJakarta" in planner.deps.planner_rules
     assert "Spring Boot 3 or greater" in planner.deps.planner_rules
     assert "org.openrewrite.java.migrate.UpgradeToJava17" in planner.deps.recipe_catalog
@@ -580,7 +582,9 @@ def test_plan_command_runs_ai_planner_and_prints_its_output(
         goal: ModernizationGoal,
         *,
         use_ai_planner: bool = False,
+        profile: object | None = None,
     ) -> SimpleNamespace:
+        assert profile is None
         calls.append((repository, goal, use_ai_planner))
         return SimpleNamespace(plan=RecipePlan(recommendations=[recommendation]))
 
@@ -617,7 +621,9 @@ def test_plan_command_accepts_repository_as_the_positional_argument(
         goal: ModernizationGoal,
         *,
         use_ai_planner: bool = False,
+        profile: object | None = None,
     ) -> SimpleNamespace:
+        assert profile is None
         calls.append((repository, goal, use_ai_planner))
         return SimpleNamespace(plan=RecipePlan())
 

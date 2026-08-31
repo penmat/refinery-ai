@@ -10,7 +10,7 @@
       "depends_on": [],
       "affected_files": [],
       "recipe": null,
-      "acceptance_checks": ["./mvnw test"],
+      "acceptance_checks": ["./mvnw clean test"],
       "risk": "low"
     },
     {
@@ -21,7 +21,7 @@
       "depends_on": ["baseline"],
       "affected_files": ["pom.xml"],
       "recipe": "org.openrewrite.java.migrate.UpgradeToJava17",
-      "acceptance_checks": ["./mvnw test"],
+      "acceptance_checks": ["./mvnw clean test"],
       "risk": "medium"
     },
     {
@@ -32,7 +32,7 @@
       "depends_on": ["rewrite"],
       "affected_files": ["pom.xml"],
       "recipe": null,
-      "acceptance_checks": ["./mvnw test"],
+      "acceptance_checks": ["./mvnw clean test"],
       "risk": "medium"
     }
   ]

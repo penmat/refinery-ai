@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import io
+import json
 import ssl
+import time
 import zipfile
-from pathlib import PurePosixPath
+from collections.abc import Callable
+from pathlib import Path, PurePosixPath
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -19,6 +23,7 @@ RECIPE_REPOSITORIES = (
     "openrewrite/rewrite-migrate-java",
     "openrewrite/rewrite-spring",
 )
+TRANSIENT_HTTP_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
 
 class RecipeSource(BaseModel):
@@ -87,12 +92,81 @@ def _fetch_repository_recipes(
     return recipes
 
 
+def _cache_path(cache_directory: Path, repository: str) -> Path:
+    """Return a stable cache path for one trusted recipe repository."""
+
+    return cache_directory / f"{repository.replace('/', '--')}.json"
+
+
+def _read_cached_recipes(cache_directory: Path, repository: str) -> list[RecipeSource] | None:
+    """Read a valid repository cache, ignoring absent or corrupt cache entries."""
+
+    path = _cache_path(cache_directory, repository)
+    try:
+        payload = json.loads(path.read_text())
+        recipes = [RecipeSource.model_validate(item) for item in payload]
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not recipes or any(recipe.repository != repository for recipe in recipes):
+        return None
+    return recipes
+
+
+def _write_cached_recipes(
+    cache_directory: Path, repository: str, recipes: list[RecipeSource]
+) -> None:
+    """Atomically persist one repository's normalized recipe definitions."""
+
+    cache_directory.mkdir(parents=True, exist_ok=True)
+    path = _cache_path(cache_directory, repository)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps([recipe.model_dump() for recipe in recipes], indent=2))
+    temporary.replace(path)
+
+
+def _is_transient_failure(error: BaseException) -> bool:
+    if isinstance(error, HTTPError):
+        return error.code in TRANSIENT_HTTP_STATUS_CODES
+    return isinstance(error, (URLError, TimeoutError))
+
+
 def fetch_recipe_sources(
-    timeout: float = 30, *, verify_ssl: bool = True
+    timeout: float = 30,
+    *,
+    verify_ssl: bool = True,
+    cache_directory: Path | None = None,
+    retry_attempts: int = 3,
+    retry_delay_seconds: float = 0.5,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> list[RecipeSource]:
-    """Download Java migration and Spring declarative recipe catalogs from GitHub."""
+    """Download recipe catalogs, retrying transient failures and using a local cache."""
+
+    if retry_attempts < 1:
+        raise ValueError("retry_attempts must be at least 1")
 
     recipes: list[RecipeSource] = []
     for repository in RECIPE_REPOSITORIES:
-        recipes.extend(_fetch_repository_recipes(repository, timeout, verify_ssl))
+        failure: BaseException | None = None
+        repository_recipes: list[RecipeSource] | None = None
+        for attempt in range(retry_attempts):
+            try:
+                repository_recipes = _fetch_repository_recipes(
+                    repository, timeout, verify_ssl
+                )
+                failure = None
+                break
+            except (HTTPError, URLError, TimeoutError) as error:
+                failure = error
+                if not _is_transient_failure(error) or attempt == retry_attempts - 1:
+                    break
+                sleep(retry_delay_seconds * (2**attempt))
+
+        if repository_recipes is None and cache_directory is not None:
+            repository_recipes = _read_cached_recipes(cache_directory, repository)
+        if repository_recipes is None:
+            assert failure is not None
+            raise failure
+        if cache_directory is not None and failure is None:
+            _write_cached_recipes(cache_directory, repository, repository_recipes)
+        recipes.extend(repository_recipes)
     return recipes

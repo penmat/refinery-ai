@@ -89,7 +89,20 @@ class ResolvedDependencyCollector:
                 "--batch-mode",
                 "--no-transfer-progress",
             ]
-            self._run(command, repository, "Maven")
+            try:
+                self._run(command, repository, "Maven")
+            except DependencyAnalysisError as error:
+                if "Unrecognized option: --no-transfer-progress" not in str(error):
+                    raise
+                logger.info(
+                    "Maven wrapper does not support --no-transfer-progress; retrying without it"
+                )
+                output.unlink(missing_ok=True)
+                self._run(
+                    [argument for argument in command if argument != "--no-transfer-progress"],
+                    repository,
+                    "Maven",
+                )
             if not output.is_file():
                 raise DependencyAnalysisError("Maven completed without producing a dependency tree")
             try:

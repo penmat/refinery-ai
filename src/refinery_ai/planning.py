@@ -14,7 +14,9 @@ from refinery_ai.models import (
 def rule_based_plan(snapshot: DiscoverySnapshot, goal: ModernizationGoal) -> ModernizationPlan:
     """Create a conservative plan that remains useful without model credentials."""
 
-    check = "./mvnw test" if snapshot.build_system.value == "maven" else "./gradlew test"
+    check = (
+        "./mvnw clean test" if snapshot.build_system.value == "maven" else "./gradlew test"
+    )
     if snapshot.build_system.value == "unknown":
         check = "manual verification"
     recipe = None

@@ -19,8 +19,9 @@ class SpringPropertiesMigrationRunner:
         *,
         apply: bool,
         timeout: int,
+        environment: dict[str, str] | None = None,
     ) -> VerificationResult:
-        del step, timeout
+        del step, timeout, environment
         started = monotonic()
         repository = Path(snapshot.repository).resolve()
         changed: list[str] = []

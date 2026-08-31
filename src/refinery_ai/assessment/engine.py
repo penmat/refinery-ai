@@ -35,12 +35,14 @@ class AssessmentEngine:
         dependency_analysis_enabled: bool = False,
         sonarqube_enabled: bool = False,
         keep_sonarqube: bool = False,
+        retained_results: dict[str, AnalyzerResult] | None = None,
         settings: Settings | None = None,
     ) -> None:
         self.inspectors = inspectors
         self.dependency_analysis_enabled = dependency_analysis_enabled
         self.sonarqube_enabled = sonarqube_enabled
         self.keep_sonarqube = keep_sonarqube
+        self.retained_results = retained_results or {}
         self.settings = settings or Settings()
 
     def assess(self, repository: Path, *, name: str | None = None) -> Assessment:
@@ -86,6 +88,8 @@ class AssessmentEngine:
         inspection = InspectionRunner(registry).inspect(root)
         snapshot = inspection.request.snapshot
         results: dict[str, AnalyzerResult] = dict(inspection.results)
+        for analyzer, result in self.retained_results.items():
+            results.setdefault(analyzer, result)
         metrics = {
             analyzer_name: dict(result.metrics) for analyzer_name, result in sorted(results.items())
         }

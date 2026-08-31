@@ -108,6 +108,7 @@ class MigrationPlanStore:
             return None
         artifact = PersistedMigrationPlan(
             plan_id=report.run_id,
+            profile=report.profile,
             snapshot=report.snapshot,
             steps=report.plan.recommendations,
         )

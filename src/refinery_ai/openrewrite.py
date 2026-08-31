@@ -25,12 +25,17 @@ class OpenRewriteAdapter:
         )
 
     def dry_run(
-        self, snapshot: DiscoverySnapshot, recipe: str, *, timeout: int = 900
+        self,
+        snapshot: DiscoverySnapshot,
+        recipe: str,
+        *,
+        timeout: int = 900,
+        environment: dict[str, str] | None = None,
     ) -> VerificationResult:
         if recipe not in self.allowed_recipes:
             raise ValueError(f"Recipe is not allowlisted: {recipe}")
         command = self._command(snapshot, recipe)
-        return verify(snapshot.repository, command, timeout=timeout)
+        return verify(snapshot.repository, command, timeout=timeout, environment=environment)
 
     def run(
         self,
@@ -40,6 +45,7 @@ class OpenRewriteAdapter:
         apply: bool = False,
         timeout: int = 900,
         recipe_artifact: str | None = None,
+        environment: dict[str, str] | None = None,
     ) -> VerificationResult:
         """Run a recipe in preview mode unless applying was explicitly requested."""
 
@@ -48,7 +54,7 @@ class OpenRewriteAdapter:
         command = self._command(
             snapshot, recipe, apply=apply, recipe_artifact=recipe_artifact
         )
-        return verify(snapshot.repository, command, timeout=timeout)
+        return verify(snapshot.repository, command, timeout=timeout, environment=environment)
 
     @staticmethod
     def _command(

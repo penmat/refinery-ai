@@ -35,7 +35,11 @@ def _clean_stderr(value: str, exit_code: int, limit: int) -> str:
 def verification_command(snapshot: DiscoverySnapshot) -> list[str] | None:
     root = snapshot.repository
     if snapshot.build_system is BuildSystem.MAVEN:
-        return ["./mvnw", "test"] if (root / "mvnw").exists() else ["mvn", "test"]
+        return (
+            ["./mvnw", "clean", "test"]
+            if (root / "mvnw").exists()
+            else ["mvn", "clean", "test"]
+        )
     if snapshot.build_system is BuildSystem.GRADLE:
         return ["./gradlew", "test"] if (root / "gradlew").exists() else ["gradle", "test"]
     return None
@@ -47,6 +51,7 @@ def verify(
     *,
     timeout: int = 900,
     output_limit: int = 20_000,
+    environment: dict[str, str] | None = None,
 ) -> VerificationResult:
     """Run an approved argument vector, capturing bounded diagnostic output."""
 
@@ -54,7 +59,13 @@ def verify(
     log_command(logger, command, cwd=repository)
     try:
         result = subprocess.run(
-            command, cwd=repository, text=True, capture_output=True, check=False, timeout=timeout
+            command,
+            cwd=repository,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=timeout,
+            env=environment,
         )
         verification = VerificationResult(
             command=command,

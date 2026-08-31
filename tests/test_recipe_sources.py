@@ -1,4 +1,14 @@
-from refinery_ai.recipe_sources import RECIPE_REPOSITORIES, parse_recipe_yaml
+import io
+from pathlib import Path
+from urllib.error import HTTPError
+
+import refinery_ai.recipe_sources as recipe_sources_module
+from refinery_ai.recipe_sources import (
+    RECIPE_REPOSITORIES,
+    RecipeSource,
+    fetch_recipe_sources,
+    parse_recipe_yaml,
+)
 
 
 def test_parse_recipe_yaml_builds_planner_objects_with_source_paths() -> None:
@@ -53,3 +63,79 @@ description: Migrate applications to Spring Boot 3.5.
 
     assert recipes[0].repository == "openrewrite/rewrite-spring"
     assert recipes[0].recipe == "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_5"
+
+
+def _recipe(repository: str) -> RecipeSource:
+    return RecipeSource(
+        recipe=f"{repository}.Recipe",
+        display_name="Recipe",
+        description="Description",
+        repository=repository,
+        file_path="src/main/resources/META-INF/rewrite/recipe.yml",
+    )
+
+
+def test_fetch_recipe_sources_caches_each_successful_repository(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    calls: list[str] = []
+
+    def fetch(repository: str, timeout: float, verify_ssl: bool) -> list[RecipeSource]:
+        calls.append(repository)
+        return [_recipe(repository)]
+
+    monkeypatch.setattr(recipe_sources_module, "_fetch_repository_recipes", fetch)  # type: ignore[attr-defined]
+
+    recipes = fetch_recipe_sources(cache_directory=tmp_path)
+
+    assert [recipe.repository for recipe in recipes] == list(RECIPE_REPOSITORIES)
+    assert calls == list(RECIPE_REPOSITORIES)
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "openrewrite--rewrite-migrate-java.json",
+        "openrewrite--rewrite-spring.json",
+    ]
+
+
+def test_fetch_recipe_sources_retries_gateway_timeout_then_succeeds(
+    monkeypatch: object,
+) -> None:
+    attempts: dict[str, int] = {}
+    delays: list[float] = []
+
+    def fetch(repository: str, timeout: float, verify_ssl: bool) -> list[RecipeSource]:
+        attempts[repository] = attempts.get(repository, 0) + 1
+        if repository == RECIPE_REPOSITORIES[0] and attempts[repository] < 3:
+            raise HTTPError("https://github.com", 504, "Gateway Time-out", {}, io.BytesIO())
+        return [_recipe(repository)]
+
+    monkeypatch.setattr(recipe_sources_module, "_fetch_repository_recipes", fetch)  # type: ignore[attr-defined]
+
+    recipes = fetch_recipe_sources(sleep=delays.append)
+
+    assert len(recipes) == 2
+    assert attempts[RECIPE_REPOSITORIES[0]] == 3
+    assert delays == [0.5, 1.0]
+
+
+def test_fetch_recipe_sources_uses_cache_after_retries_are_exhausted(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        recipe_sources_module,
+        "_fetch_repository_recipes",
+        lambda repository, timeout, verify_ssl: [_recipe(repository)],
+    )
+    expected = fetch_recipe_sources(cache_directory=tmp_path)
+    attempts = 0
+
+    def fail(repository: str, timeout: float, verify_ssl: bool) -> list[RecipeSource]:
+        nonlocal attempts
+        attempts += 1
+        raise HTTPError("https://github.com", 504, "Gateway Time-out", {}, io.BytesIO())
+
+    monkeypatch.setattr(recipe_sources_module, "_fetch_repository_recipes", fail)  # type: ignore[attr-defined]
+
+    actual = fetch_recipe_sources(cache_directory=tmp_path, sleep=lambda _: None)
+
+    assert actual == expected
+    assert attempts == 6

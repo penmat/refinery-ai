@@ -14,17 +14,31 @@ from refinery_ai.agents.migration import MigrationAgent
 from refinery_ai.assessment.comparison import compare
 from refinery_ai.assessment.dependency_artifacts import write_dependency_artifact
 from refinery_ai.assessment.engine import AssessmentEngine
+from refinery_ai.assessment.models import AnalyzerStatus, Assessment
 from refinery_ai.assessment.reporting import assessment_text, comparison_text
 from refinery_ai.assessment.storage import AssessmentStore
 from refinery_ai.config import Settings
 from refinery_ai.factory import ModernizationFactory
 from refinery_ai.harness import HarnessRepositoryEnvironment
+from refinery_ai.jdks import JdkResolver, project_runtime_java, selected_jdk
 from refinery_ai.llm import run_tool_loop
 from refinery_ai.logging import configure_logging, get_logger
 from refinery_ai.mcp import run_mcp_server
-from refinery_ai.migrations.ai_repair import AiMigrationRepairer
-from refinery_ai.models import ModernizationGoal, RecipePlan, RepairMode, RunReport, RunStatus
+from refinery_ai.migrations.ai_repair import (
+    AiMigrationRepairer,
+    DeterministicMigrationRepairer,
+)
+from refinery_ai.models import (
+    MigrationRun,
+    ModernizationGoal,
+    RecipePlan,
+    RepairMode,
+    RunReport,
+    RunStatus,
+)
 from refinery_ai.planning_artifacts import MigrationPlanStore
+from refinery_ai.profile_run import ProfileRunner
+from refinery_ai.profiles import load_profile
 from refinery_ai.summary import ProjectSummaryService, SummaryError
 from refinery_ai.summary.reporting import summary_markdown
 from refinery_ai.tools import RepositoryEvidenceTools
@@ -135,7 +149,9 @@ def analyze_command(
     include_tests: Annotated[
         bool, typer.Option("--include-tests", help="Include test graph components")
     ] = False,
-) -> None:
+    internal_quiet: Annotated[bool, typer.Option(hidden=True)] = False,
+    reuse_sonarqube: Annotated[bool, typer.Option(hidden=True)] = False,
+) -> Assessment:
     """Discover, assess, and summarize a Java repository."""
 
     root = repository.expanduser().resolve()
@@ -147,11 +163,11 @@ def analyze_command(
     )
     settings.osv_verify_ssl = settings.osv_verify_ssl if osv_verify_ssl is None else osv_verify_ssl
     enabled = settings.sonarqube_enabled if sonarqube is None else sonarqube
-    if dependencies_enabled:
+    if dependencies_enabled and not internal_quiet:
         typer.echo("Resolving dependencies and checking OSV...", err=True)
         if not settings.osv_verify_ssl:
             typer.echo("Warning: OSV TLS certificate verification is disabled.", err=True)
-    if enabled:
+    if enabled and not internal_quiet:
         typer.echo(
             f"Running temporary local SonarQube analysis with {settings.sonarqube_image}...",
             err=True,
@@ -161,10 +177,23 @@ def analyze_command(
     graph_path = root / settings.state_directory / "context/context-graph.json"
     if not graph_path.is_file():
         graph_path = environment.build_context(root).graph_path
+    retained_results = {}
+    if reuse_sonarqube and not enabled:
+        prior_sonar = next(
+            (
+                assessment.analyzers.get("sonarqube")
+                for assessment in store.list()
+                if "sonarqube" in assessment.analyzers
+            ),
+            None,
+        )
+        if prior_sonar is not None:
+            retained_results["sonarqube"] = prior_sonar
     current = AssessmentEngine(
         dependency_analysis_enabled=dependencies_enabled,
         sonarqube_enabled=enabled,
         keep_sonarqube=keep_sonarqube,
+        retained_results=retained_results,
         settings=settings,
     ).assess(root, name=name)
     write_dependency_artifact(current)
@@ -214,9 +243,11 @@ def analyze_command(
         output_path = output.expanduser().resolve()
         if output_path != summary_path:
             _write_output(output_path, summary_rendered)
-        typer.echo(f"Summary written to {output_path}")
-    else:
+        if not internal_quiet:
+            typer.echo(f"Summary written to {output_path}")
+    elif not internal_quiet:
         typer.echo(summary_rendered, nl=False)
+    return current
 
 
 @assessment_app.command("show")
@@ -362,6 +393,10 @@ def plan(
         str | None,
         typer.Option("--goal", help="Modernization goal when the repository is positional"),
     ] = None,
+    profile_name: Annotated[
+        str | None,
+        typer.Option("--profile", help="Named modernization profile limiting recommendations"),
+    ] = None,
     catalog_verify_ssl: Annotated[
         bool | None,
         typer.Option(
@@ -388,10 +423,20 @@ def plan(
         typer.echo(
             "Warning: OpenRewrite catalog TLS certificate verification is disabled.", err=True
         )
+    profile = load_profile(profile_name) if profile_name else None
+    effective_target_java = target_java if target_java is not None else (
+        profile.target_java if profile else None
+    )
+    if profile is not None:
+        goal_description = f"{goal_description}. Profile target: {profile.goal}"
     report = ModernizationFactory(settings=settings).prepare(
         repository,
-        ModernizationGoal(description=goal_description, target_java=target_java),
+        ModernizationGoal(
+            description=goal_description,
+            target_java=effective_target_java,
+        ),
         use_ai_planner=True,
+        profile=profile,
     )
     if not isinstance(report.plan, RecipePlan):
         raise RuntimeError("Planner did not return recipe recommendations")
@@ -405,6 +450,13 @@ def migrate(
     ] = Path("."),
     plan_id: Annotated[
         str | None, typer.Option("--plan-id", help="Persisted plan ID; defaults to latest")
+    ] = None,
+    profile_name: Annotated[
+        str | None,
+        typer.Option(
+            "--profile",
+            help="Require the persisted plan to use this modernization profile",
+        ),
     ] = None,
     apply: Annotated[
         bool,
@@ -431,6 +483,8 @@ def migrate(
     """Execute a persisted planner handoff through type-specific migration runners."""
 
     settings = Settings()
+    if profile_name:
+        load_profile(profile_name)
     if repair_mode is not None:
         settings.repair_mode = repair_mode
     root = repository.expanduser().resolve()
@@ -442,7 +496,7 @@ def migrate(
     )
     configure_logging(logging.DEBUG, console_level=logging.WARNING, log_file=log_path)
     repairer = (
-        None
+        DeterministicMigrationRepairer()
         if settings.repair_mode is RepairMode.DISABLED
         else AiMigrationRepairer(settings)
     )
@@ -453,7 +507,13 @@ def migrate(
         progress=None if json_output else typer.echo,
         repairer=repairer,
         max_repair_attempts=settings.max_repair_attempts,
-    ).run(plan_id, apply=apply, publish=apply_result)
+        jdk_resolver=JdkResolver(),
+    ).run(
+        plan_id,
+        apply=apply,
+        publish=apply_result,
+        expected_profile=profile_name,
+    )
     get_logger(__name__).debug(
         "Migration result:\n%s", json.dumps(result.model_dump(mode="json"), indent=2)
     )
@@ -486,12 +546,113 @@ def migrate(
 
 @app.command()
 def run(
-    goal: Annotated[str, typer.Argument(help="Modernization goal")],
+    goal: Annotated[str | None, typer.Argument(help="Modernization goal")] = None,
     repository: Annotated[Path, typer.Option("--repository", "-r")] = Path("."),
     target_java: Annotated[int | None, typer.Option("--target-java")] = None,
     apply: Annotated[bool, typer.Option(help="Run approved commands and dry runs")] = False,
+    profile_name: Annotated[
+        str | None,
+        typer.Option("--profile", help="Run analyze/plan/migrate until this profile is complete"),
+    ] = None,
+    max_cycles: Annotated[
+        int, typer.Option("--max-cycles", min=1, help="Maximum profile migration cycles")
+    ] = 20,
 ) -> None:
-    """Run the factory; defaults to a non-mutating plan."""
+    """Run manually, or converge on a named profile through repeated verified migrations."""
+
+    if profile_name is not None:
+        if not apply:
+            typer.echo("Profile runs change source code; pass --apply to continue.", err=True)
+            raise typer.Exit(code=2)
+        root = repository.expanduser().resolve()
+        profile = load_profile(profile_name)
+        settings = Settings()
+        jdk_resolver = JdkResolver()
+        effective_target = target_java if target_java is not None else profile.target_java
+        goal_description = goal or profile.goal
+
+        profile_log = (
+            root
+            / settings.state_directory
+            / "logs"
+            / f"profile-{profile.name}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.log"
+        )
+        configure_logging(logging.DEBUG, console_level=logging.WARNING, log_file=profile_log)
+
+        def analyze_cycle(run_sonar: bool) -> bool:
+            snapshot = HarnessRepositoryEnvironment(root).discover(root)
+            environment = jdk_resolver.environment(project_runtime_java(snapshot.java_version))
+            with selected_jdk(environment):
+                assessment = analyze_command(
+                    repository=root,
+                    name=None,
+                    compare_to=None,
+                    json_output=False,
+                    dependencies=None,
+                    osv_verify_ssl=None,
+                    sonarqube=run_sonar,
+                    keep_sonarqube=False,
+                    output=None,
+                    top=10,
+                    include_tests=False,
+                    internal_quiet=True,
+                    reuse_sonarqube=not run_sonar,
+                )
+            sonar = assessment.analyzers.get("sonarqube")
+            return sonar is not None and sonar.status in {
+                AnalyzerStatus.COMPLETED,
+                AnalyzerStatus.PARTIAL,
+            }
+
+        def plan_cycle() -> RunReport:
+            snapshot = HarnessRepositoryEnvironment(root).discover(root)
+            environment = jdk_resolver.environment(project_runtime_java(snapshot.java_version))
+            with selected_jdk(environment):
+                return ModernizationFactory(settings=settings).prepare(
+                    root,
+                    ModernizationGoal(
+                        description=f"{goal_description}. Profile target: {profile.goal}",
+                        target_java=effective_target,
+                    ),
+                    use_ai_planner=True,
+                    profile=profile,
+                )
+
+        def migrate_cycle(plan_id: str) -> MigrationRun:
+            repairer = (
+                DeterministicMigrationRepairer()
+                if settings.repair_mode is RepairMode.DISABLED
+                else AiMigrationRepairer(settings)
+            )
+            return MigrationAgent(
+                MigrationPlanStore(root, settings.state_directory),
+                timeout=settings.command_timeout_seconds,
+                output_limit=settings.max_output_characters,
+                progress=typer.echo,
+                repairer=repairer,
+                max_repair_attempts=settings.max_repair_attempts,
+                jdk_resolver=jdk_resolver,
+            ).run(plan_id, apply=True, publish=True, expected_profile=profile.name)
+
+        result = ProfileRunner(
+            root,
+            profile,
+            analyze=analyze_cycle,
+            plan=plan_cycle,
+            migrate=migrate_cycle,
+            progress=typer.echo,
+            max_cycles=max_cycles,
+            state_directory=settings.state_directory,
+        ).run()
+        typer.echo(result.message)
+        typer.echo(f"Profile run details: {profile_log}")
+        if result.status is not RunStatus.COMPLETED:
+            raise typer.Exit(code=1)
+        return
+
+    if goal is None:
+        typer.echo("Provide a modernization goal or select --profile.", err=True)
+        raise typer.Exit(code=2)
 
     _print(
         ModernizationFactory().run(

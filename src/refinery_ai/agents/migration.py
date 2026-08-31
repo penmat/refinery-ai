@@ -11,6 +11,12 @@ from uuid import uuid4
 
 from pydantic_ai import Agent, RunContext
 
+from refinery_ai.jdks import (
+    JdkResolver,
+    baseline_java_candidates,
+    project_runtime_java,
+    recipe_target_java,
+)
 from refinery_ai.migrations.ai_repair import (
     MigrationRepairer,
     springdoc_repair_applicable,
@@ -55,6 +61,7 @@ class MigrationAgent:
         worktree_factory: type[GitWorktreeManager] = GitWorktreeManager,
         repairer: MigrationRepairer | None = None,
         max_repair_attempts: int = 1,
+        jdk_resolver: JdkResolver | None = None,
     ) -> None:
         self.store = store
         self.runners = runners or {
@@ -70,6 +77,8 @@ class MigrationAgent:
         self.worktree_factory = worktree_factory
         self.repairer = repairer
         self.max_repair_attempts = max_repair_attempts
+        self.jdk_resolver = jdk_resolver
+        self._jdk_environments: dict[int, dict[str, str]] = {}
 
     def run(
         self,
@@ -77,8 +86,14 @@ class MigrationAgent:
         *,
         apply: bool = False,
         publish: bool = True,
+        expected_profile: str | None = None,
     ) -> MigrationRun:
         plan = self.store.load(plan_id)
+        if expected_profile is not None and plan.profile != expected_profile:
+            actual = plan.profile or "no profile"
+            raise ValueError(
+                f"Migration plan uses {actual}; requested profile is {expected_profile}"
+            )
         total = len(plan.steps)
         self.progress(
             f"Reading plan {plan.plan_id} ... about to run {total} "
@@ -92,6 +107,21 @@ class MigrationAgent:
         current_revision = None
         baseline_verification = None
         baseline_artifacts = None
+        current_java = project_runtime_java(plan.snapshot.java_version)
+        baseline_candidates = baseline_java_candidates(
+            plan.snapshot.java_version, [step.recipe for step in plan.steps]
+        )
+        required_jdks = {
+            major
+            for major in [
+                current_java,
+                *(recipe_target_java(step.recipe) for step in plan.steps),
+            ]
+            if major is not None
+        }
+        if self.jdk_resolver is not None:
+            for major in sorted(required_jdks):
+                self._jdk_environments[major] = self.jdk_resolver.environment(major) or {}
         if apply:
             worktrees = self.worktree_factory(
                 self.store.repository,
@@ -107,14 +137,47 @@ class MigrationAgent:
                 self.progress("Baseline cannot be verified: unknown build system")
                 status = RunStatus.FAILED
             else:
-                self.progress("Verifying baseline before Migration 1 ...")
-                baseline_verification = self.build_verifier(
-                    Path(plan.snapshot.repository),
-                    command,
-                    timeout=self.timeout,
-                    output_limit=self.output_limit,
+                attempts: list[tuple[int, VerificationResult]] = []
+                if self.jdk_resolver is None or not baseline_candidates:
+                    self.progress("Verifying baseline before Migration 1 ...")
+                    baseline_verification = self.build_verifier(
+                        Path(plan.snapshot.repository),
+                        command,
+                        timeout=self.timeout,
+                        output_limit=self.output_limit,
+                        environment=self._jdk_environment(current_java),
+                    )
+                else:
+                    for major in baseline_candidates:
+                        try:
+                            environment = self._jdk_environment(major)
+                        except RuntimeError as error:
+                            self.progress(f"Cannot try baseline with JDK {major}: {error}")
+                            continue
+                        self.progress(
+                            f"Verifying baseline before Migration 1 with installed JDK {major} ..."
+                        )
+                        candidate = self.build_verifier(
+                            Path(plan.snapshot.repository),
+                            command,
+                            timeout=self.timeout,
+                            output_limit=self.output_limit,
+                            environment=environment,
+                        )
+                        attempts.append((major, candidate))
+                        baseline_verification = candidate
+                        if candidate.green:
+                            current_java = major
+                            self.progress(
+                                f"Baseline verified with JDK {major}; using it for migrations ..."
+                            )
+                            break
+                        self.progress(f"Baseline failed with JDK {major}.")
+                if baseline_verification is None:
+                    raise RuntimeError("No installed JDK was available for baseline verification")
+                baseline_artifacts = worktrees.record_baseline(
+                    baseline_verification, attempts or None
                 )
-                baseline_artifacts = worktrees.record_baseline(baseline_verification)
                 if not baseline_verification.green:
                     self.progress(
                         "Baseline build failed; no migrations were run. "
@@ -147,7 +210,11 @@ class MigrationAgent:
                     update={"repository": workspace.path}
                 )
             execution = runner.run(
-                step_snapshot, step, apply=apply, timeout=self.timeout
+                step_snapshot,
+                step,
+                apply=apply,
+                timeout=self.timeout,
+                environment=self._jdk_environment(current_java),
             )
             if not execution.green:
                 self.progress(f"Migration {index}/{total} failed: {label}")
@@ -178,6 +245,13 @@ class MigrationAgent:
             build_result = None
             repairs: list[VerificationResult] = []
             if apply:
+                target_java = recipe_target_java(step.recipe)
+                if target_java is not None and target_java != current_java:
+                    current_java = target_java
+                    if self.jdk_resolver is not None:
+                        self.progress(
+                            f"Switching verification runtime to installed JDK {target_java} ..."
+                        )
                 self.progress(f"Verifying Migration {index}/{total}: {label}")
                 command = self.build_command(step_snapshot)
                 if command is None:
@@ -215,6 +289,7 @@ class MigrationAgent:
                     command,
                     timeout=self.timeout,
                     output_limit=self.output_limit,
+                    environment=self._jdk_environment(current_java),
                 )
                 while (
                     not build_result.green
@@ -240,6 +315,7 @@ class MigrationAgent:
                         command,
                         timeout=self.timeout,
                         output_limit=self.output_limit,
+                        environment=self._jdk_environment(current_java),
                     )
                 if not build_result.green:
                     self.progress(f"Migration {index}/{total} failed verification: {label}")
@@ -329,6 +405,15 @@ class MigrationAgent:
             baseline_artifacts=baseline_artifacts,
             steps=results,
         )
+
+    def _jdk_environment(self, major: int | None) -> dict[str, str] | None:
+        if self.jdk_resolver is None:
+            return None
+        if major is None:
+            return None
+        if major not in self._jdk_environments:
+            self._jdk_environments[major] = self.jdk_resolver.environment(major) or {}
+        return self._jdk_environments[major]
 
 
 def migration_display_name(recipe: str) -> str:

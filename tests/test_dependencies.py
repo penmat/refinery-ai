@@ -121,6 +121,53 @@ def test_maven_collector_reads_resolved_transitive_tree(
     assert dependencies[1].direct is False
 
 
+def test_maven_collector_retries_old_wrapper_without_transfer_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "pom.xml").write_text("<project/>")
+    commands: list[list[str]] = []
+
+    def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        if "--no-transfer-progress" in command:
+            return subprocess.CompletedProcess(
+                command,
+                1,
+                "",
+                "Unable to parse command line options: "
+                "Unrecognized option: --no-transfer-progress",
+            )
+        output_argument = next(item for item in command if item.startswith("-DoutputFile="))
+        Path(output_argument.split("=", 1)[1]).write_text(
+            json.dumps(
+                {
+                    "groupId": "app",
+                    "artifactId": "root",
+                    "version": "1",
+                    "children": [
+                        {
+                            "groupId": "org.example",
+                            "artifactId": "resolved",
+                            "version": "2",
+                        }
+                    ],
+                }
+            )
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    dependencies = ResolvedDependencyCollector("3.11.0", 20, 1000).collect(
+        tmp_path, BuildSystem.MAVEN
+    )
+
+    assert dependencies[0].coordinate == "org.example:resolved:2"
+    assert len(commands) == 2
+    assert "--no-transfer-progress" in commands[0]
+    assert "--no-transfer-progress" not in commands[1]
+
+
 def test_gradle_collector_uses_temporary_resolution_task(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

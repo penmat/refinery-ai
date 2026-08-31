@@ -34,6 +34,7 @@ from refinery_ai.planning_artifacts import (
     load_planner_rules,
     load_planning_artifacts,
 )
+from refinery_ai.profiles import ModernizationProfile
 from refinery_ai.recipe_catalog import JavaMigrationCatalog, fetch_java_migration_catalog
 from refinery_ai.recipe_sources import RecipeSource, fetch_recipe_sources
 from refinery_ai.reporting import to_markdown
@@ -142,7 +143,12 @@ class ModernizationFactory:
         )
 
     def prepare(
-        self, repository: Path, goal: ModernizationGoal, *, use_ai_planner: bool = False
+        self,
+        repository: Path,
+        goal: ModernizationGoal,
+        *,
+        use_ai_planner: bool = False,
+        profile: ModernizationProfile | None = None,
     ) -> RunReport:
         environment = self._environment(repository)
         snapshot = environment.discover(repository)
@@ -182,6 +188,15 @@ class ModernizationFactory:
                     f"{sorted(retryable_recipes)}"
                 )
             planner_rules = load_planner_rules()
+            if profile is not None:
+                planner_rules += (
+                    "\n\n---\n\n# Active modernization profile\n\n"
+                    f"Name: {profile.name}\nDescription: {profile.description}\n"
+                    f"Goal: {profile.goal}\nTarget Java: {profile.target_java or 'unspecified'}\n"
+                    f"Excluded recipe patterns: {profile.exclude_recipes}\n"
+                    "Included recipe patterns: "
+                    f"{profile.include_recipes or ['all except exclusions']}"
+                )
             catalog = self.recipe_catalog or fetch_java_migration_catalog(
                 timeout=self.settings.recipe_catalog_timeout_seconds,
                 verify_ssl=self.settings.recipe_catalog_verify_ssl,
@@ -192,6 +207,7 @@ class ModernizationFactory:
                 else fetch_recipe_sources(
                     timeout=self.settings.recipe_catalog_timeout_seconds,
                     verify_ssl=self.settings.recipe_catalog_verify_ssl,
+                    cache_directory=state_dir / "cache" / "recipe-sources",
                 )
             )
             graph_context = environment.query_context(
@@ -247,7 +263,11 @@ class ModernizationFactory:
                             indent=2,
                         )
                     ),
-                    allowed_recipes=frozenset(source.recipe for source in recipe_sources),
+                    allowed_recipes=frozenset(
+                        source.recipe
+                        for source in recipe_sources
+                        if profile is None or profile.permits(source.recipe)
+                    ),
                     recipe_artifacts={
                         source.recipe: (
                             "org.openrewrite.recipe:"
@@ -259,11 +279,14 @@ class ModernizationFactory:
                 ),
             )
             plan = _with_deterministic_prerequisites(result.output, snapshot)
+            if profile is not None:
+                plan = profile.filter_plan(plan)
         else:
             plan = rule_based_plan(snapshot, goal)
             validate_plan(plan)
         report = RunReport(
             run_id=uuid4().hex,
+            profile=profile.name if profile else None,
             status=RunStatus.PLANNED,
             snapshot=snapshot,
             context_graph=graph,

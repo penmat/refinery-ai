@@ -14,6 +14,7 @@ class OpenRewriteMigrationRunner:
         *,
         apply: bool,
         timeout: int,
+        environment: dict[str, str] | None = None,
     ) -> VerificationResult:
         adapter = OpenRewriteAdapter(allowed_recipes=frozenset({step.recipe}))
         return adapter.run(
@@ -22,6 +23,7 @@ class OpenRewriteMigrationRunner:
             apply=apply,
             timeout=timeout,
             recipe_artifact=step.recipe_artifact or _infer_recipe_artifact(step.recipe),
+            environment=environment,
         )
 
 

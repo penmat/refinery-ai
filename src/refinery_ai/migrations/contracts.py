@@ -13,4 +13,5 @@ class MigrationTypeRunner(Protocol):
         *,
         apply: bool,
         timeout: int,
+        environment: dict[str, str] | None = None,
     ) -> VerificationResult: ...

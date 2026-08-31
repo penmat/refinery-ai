@@ -20,7 +20,10 @@ class RecordingRunner:
     def __init__(self) -> None:
         self.calls: list[tuple[str, bool, int]] = []
 
-    def run(self, snapshot, step, *, apply: bool, timeout: int) -> VerificationResult:
+    def run(
+        self, snapshot, step, *, apply: bool, timeout: int, environment=None
+    ) -> VerificationResult:
+        del environment
         self.calls.append((step.recipe, apply, timeout))
         if apply:
             Path(snapshot.repository, "migration-output.txt").write_text(step.recipe + "\n")
@@ -77,7 +80,7 @@ def test_migration_agent_loads_latest_plan_and_dispatches_by_type(tmp_path: Path
 
     assert result.status is RunStatus.COMPLETED
     assert runner.calls == [(step.recipe, True, 42)]
-    assert builds == [["mvn", "test"], ["mvn", "test"]]
+    assert builds == [["mvn", "clean", "test"], ["mvn", "clean", "test"]]
     assert result.baseline_verification is not None
     assert result.baseline_verification.green
     assert result.steps[0].execution is not None
@@ -92,6 +95,122 @@ def test_migration_agent_loads_latest_plan_and_dispatches_by_type(tmp_path: Path
         "Applying the last verified checkpoint to the source checkout ...",
         f"Applied verified result: {result.published_revision[:12]}",
     ]
+
+
+def test_migration_agent_uses_green_target_jdk_for_java_upgrade(tmp_path: Path) -> None:
+    initialize_git_repository(tmp_path)
+    store = MigrationPlanStore(tmp_path)
+    store.root.mkdir(parents=True)
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.migrate.UpgradeToJava17",
+        reason="Upgrade Java.",
+        evidence=["goal.target_java=17"],
+        expected_benefit="Java 17 support.",
+        priority="high",
+        confidence=0.9,
+    )
+    plan = PersistedMigrationPlan(
+        plan_id="jdkswitch",
+        snapshot=DiscoverySnapshot(
+            repository=tmp_path,
+            build_system=BuildSystem.MAVEN,
+            java_version="11",
+        ),
+        steps=[step],
+    )
+    (store.root / "jdkswitch.json").write_text(plan.model_dump_json())
+    runner_environments: list[dict[str, str] | None] = []
+    build_environments: list[dict[str, str] | None] = []
+
+    class Runner:
+        def run(self, snapshot, step, *, apply, timeout, environment=None):
+            del step, timeout
+            runner_environments.append(environment)
+            if apply:
+                Path(snapshot.repository, "migration-output.txt").write_text("changed")
+            return VerificationResult(command=["rewrite"], exit_code=0, duration_seconds=0)
+
+    class Resolver:
+        def environment(self, major):
+            return {"JAVA_HOME": f"/jdk/{major}", "PATH": f"/jdk/{major}/bin"}
+
+    def build_verifier(repository, command, **kwargs):
+        del repository
+        build_environments.append(kwargs["environment"])
+        return VerificationResult(command=command, exit_code=0, duration_seconds=0)
+
+    result = MigrationAgent(
+        store,
+        runners={ExecutionType.OPENREWRITE: Runner()},
+        build_verifier=build_verifier,
+        jdk_resolver=Resolver(),  # type: ignore[arg-type]
+    ).run("jdkswitch", apply=True)
+
+    assert result.status is RunStatus.COMPLETED
+    assert runner_environments[0]["JAVA_HOME"] == "/jdk/17"
+    assert [environment["JAVA_HOME"] for environment in build_environments] == [
+        "/jdk/17",
+        "/jdk/17",
+    ]
+
+
+def test_migration_agent_falls_back_from_java_target_to_source_jdk(tmp_path: Path) -> None:
+    initialize_git_repository(tmp_path)
+    store = MigrationPlanStore(tmp_path)
+    store.root.mkdir(parents=True)
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.migrate.Java8ToJava11",
+        reason="Upgrade Java.",
+        evidence=["java.version=1.8"],
+        expected_benefit="Java 11 support.",
+        priority="high",
+        confidence=0.9,
+    )
+    plan = PersistedMigrationPlan(
+        plan_id="jdkfallback",
+        snapshot=DiscoverySnapshot(
+            repository=tmp_path,
+            build_system=BuildSystem.MAVEN,
+            java_version="1.8",
+        ),
+        steps=[step],
+    )
+    (store.root / "jdkfallback.json").write_text(plan.model_dump_json())
+    runner_environments: list[dict[str, str] | None] = []
+    build_environments: list[str] = []
+
+    class Runner:
+        def run(self, snapshot, step, *, apply, timeout, environment=None):
+            del step, timeout
+            runner_environments.append(environment)
+            if apply:
+                Path(snapshot.repository, "migration-output.txt").write_text("changed")
+            return VerificationResult(command=["rewrite"], exit_code=0, duration_seconds=0)
+
+    class Resolver:
+        def environment(self, major):
+            return {"JAVA_HOME": f"/jdk/{major}", "PATH": f"/jdk/{major}/bin"}
+
+    def build_verifier(repository, command, **kwargs):
+        del repository
+        home = kwargs["environment"]["JAVA_HOME"]
+        build_environments.append(home)
+        return VerificationResult(
+            command=command,
+            exit_code=0 if home == "/jdk/8" or len(build_environments) == 3 else 1,
+            duration_seconds=0,
+        )
+
+    result = MigrationAgent(
+        store,
+        runners={ExecutionType.OPENREWRITE: Runner()},
+        build_verifier=build_verifier,
+        jdk_resolver=Resolver(),  # type: ignore[arg-type]
+    ).run("jdkfallback", apply=True)
+
+    assert result.status is RunStatus.COMPLETED
+    assert build_environments == ["/jdk/11", "/jdk/8", "/jdk/11"]
+    assert runner_environments[0]["JAVA_HOME"] == "/jdk/8"
 
 
 def test_migration_agent_stops_at_recipe_with_failing_post_build(tmp_path: Path) -> None:
@@ -155,7 +274,8 @@ def test_migration_agent_repairs_residual_springfox_before_stopping(tmp_path: Pa
     (store.root / "repair.json").write_text(plan.model_dump_json())
 
     class SpringfoxRunner:
-        def run(self, snapshot, step, *, apply: bool, timeout: int):
+        def run(self, snapshot, step, *, apply: bool, timeout: int, environment=None):
+            del environment
             source = Path(snapshot.repository, "src/main/java/SwaggerConfiguration.java")
             source.parent.mkdir(parents=True)
             source.write_text("import springfox.documentation.spring.web.plugins.Docket;\n")
