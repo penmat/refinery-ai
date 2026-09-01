@@ -28,7 +28,6 @@ corpus:
         - application behavior is preserved
 
 projects:
-  - {id: bank-app, name: BankApp, repo_url: "https://github.com/sbathina/BankApp", tier: normal, category: rest-jpa-security, notes: "H2, Swagger, and Lombok; strong general-purpose candidate."}
   - {id: spring-boot-ecommerce-devrobots, name: spring-boot-ecommerce, repo_url: "https://github.com/devRobots/spring-boot-ecommerce", tier: normal, category: ecommerce-rest, notes: "MySQL backend with React; archived repository and useful stable fixture."}
   - {id: springboot-ecommerce-hendisantika, name: springboot-ecommerce, repo_url: "https://github.com/hendisantika/springboot-ecommerce", tier: normal, category: ecommerce, notes: "H2 and Angular; moderate, self-contained application."}
   - {id: fleetms-v1, name: fleetms-v1, repo_url: "https://github.com/KindsonTheGenius/fleetms-v1", tier: normal, category: fleet-management, notes: "JPA, Security, Thymeleaf, MySQL, and Lombok."}
