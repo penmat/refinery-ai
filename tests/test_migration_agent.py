@@ -154,6 +154,69 @@ def test_migration_agent_uses_green_target_jdk_for_java_upgrade(tmp_path: Path) 
     ]
 
 
+def test_boot_3_recipe_verifies_with_java_17_after_legacy_baseline(
+    tmp_path: Path,
+) -> None:
+    initialize_git_repository(tmp_path)
+    store = MigrationPlanStore(tmp_path)
+    store.root.mkdir(parents=True)
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0",
+        reason="Upgrade Boot.",
+        evidence=["spring_boot_version=2.7.18"],
+        expected_benefit="Boot 3.",
+        priority="high",
+        confidence=1,
+    )
+    plan = PersistedMigrationPlan(
+        plan_id="boot3jdkswitch",
+        snapshot=DiscoverySnapshot(
+            repository=tmp_path,
+            build_system=BuildSystem.MAVEN,
+            java_version="1.8",
+        ),
+        steps=[step],
+    )
+    (store.root / "boot3jdkswitch.json").write_text(plan.model_dump_json())
+    runner_environments: list[dict[str, str] | None] = []
+    build_environments: list[str] = []
+
+    class Runner:
+        def run(self, snapshot, step, *, apply, timeout, environment=None):
+            del step, timeout
+            runner_environments.append(environment)
+            if apply:
+                Path(snapshot.repository, "migration-output.txt").write_text("changed")
+            return VerificationResult(command=["rewrite"], exit_code=0, duration_seconds=0)
+
+    class Resolver:
+        def environment(self, major):
+            return {"JAVA_HOME": f"/jdk/{major}", "PATH": f"/jdk/{major}/bin"}
+
+    def build_verifier(repository, command, **kwargs):
+        del repository
+        java_home = kwargs["environment"]["JAVA_HOME"]
+        build_environments.append(java_home)
+        # The pre-migration source only builds on JDK 8; the migrated source is
+        # then expected to build on the composite recipe's implicit JDK 17 target.
+        baseline_attempt = len(build_environments) <= 3
+        exit_code = 0 if java_home == "/jdk/8" or not baseline_attempt else 1
+        return VerificationResult(
+            command=command, exit_code=exit_code, duration_seconds=0
+        )
+
+    result = MigrationAgent(
+        store,
+        runners={ExecutionType.OPENREWRITE: Runner()},
+        build_verifier=build_verifier,
+        jdk_resolver=Resolver(),  # type: ignore[arg-type]
+    ).run("boot3jdkswitch", apply=True)
+
+    assert result.status is RunStatus.COMPLETED
+    assert build_environments == ["/jdk/17", "/jdk/11", "/jdk/8", "/jdk/17"]
+    assert runner_environments[0]["JAVA_HOME"] == "/jdk/8"
+
+
 def test_migration_agent_falls_back_from_java_target_to_source_jdk(tmp_path: Path) -> None:
     initialize_git_repository(tmp_path)
     store = MigrationPlanStore(tmp_path)

@@ -62,13 +62,25 @@ def load_migration_failures(
         if not isinstance(recipe, str):
             continue
         if payload.get("status") == "completed":
-            completed_recipes.add(recipe)
+            base_revision = payload.get("base_revision")
+            checkpoint = payload.get("checkpoint")
+            if not (
+                isinstance(base_revision, str)
+                and isinstance(checkpoint, str)
+                and base_revision == checkpoint
+            ):
+                completed_recipes.add(recipe)
             continue
         if payload.get("status") != "failed":
             continue
         verification_payload = payload.get("verification")
         verification = verification_payload if isinstance(verification_payload, dict) else {}
-        diagnostic = str(verification.get("stderr") or verification.get("stdout") or "")
+        # Maven and Gradle frequently split the useful exception across stdout and
+        # stderr. Preserve both so a non-empty but unhelpful stderr stream cannot
+        # hide a known, newly repairable failure from the planner.
+        stdout = str(verification.get("stdout") or "")
+        stderr = str(verification.get("stderr") or "")
+        diagnostic = "\n".join(part for part in (stdout, stderr) if part)
         failure = {
             "recipe": recipe,
             "reason": payload.get("reason") or "Migration failed",

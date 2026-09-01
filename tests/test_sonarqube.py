@@ -109,6 +109,19 @@ def test_scanner_builds_pinned_maven_command_without_token(tmp_path: Path) -> No
     assert "test" not in command
 
 
+def test_scanner_uses_shell_for_non_executable_maven_wrapper(tmp_path: Path) -> None:
+    repository = maven_repository(tmp_path)
+    (repository / "mvnw").touch()
+    context = SonarScannerContext(repository, "http://127.0.0.1:9000", "secret", "key")
+    runner = ScannerRunner(
+        "5.5.0.6356", "7.2.2.6593", timeout_seconds=20, output_limit=1000
+    )
+
+    command, _ = runner.command(context, discover(repository))
+
+    assert command[:2] == ["sh", "./mvnw"]
+
+
 def test_scanner_redacts_token_and_server_on_failure(tmp_path: Path) -> None:
     repository = maven_repository(tmp_path)
     context = SonarScannerContext(repository, "http://127.0.0.1:9000", "top-secret", "key")

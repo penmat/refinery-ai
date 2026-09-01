@@ -7,6 +7,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from refinery_ai.build_tools import maven_command_prefix
 from refinery_ai.logging import get_logger, log_command
 from refinery_ai.models import BuildSystem, DiscoverySnapshot, VerificationResult
 
@@ -35,11 +36,7 @@ def _clean_stderr(value: str, exit_code: int, limit: int) -> str:
 def verification_command(snapshot: DiscoverySnapshot) -> list[str] | None:
     root = snapshot.repository
     if snapshot.build_system is BuildSystem.MAVEN:
-        return (
-            ["./mvnw", "clean", "test"]
-            if (root / "mvnw").exists()
-            else ["mvn", "clean", "test"]
-        )
+        return [*maven_command_prefix(root), "clean", "test"]
     if snapshot.build_system is BuildSystem.GRADLE:
         return ["./gradlew", "test"] if (root / "gradlew").exists() else ["gradle", "test"]
     return None

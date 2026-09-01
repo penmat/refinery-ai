@@ -15,8 +15,16 @@ def test_maven_verification_cleans_before_testing(tmp_path: Path) -> None:
     assert verification_command(snapshot) == ["mvn", "clean", "test"]
 
 
-def test_maven_wrapper_verification_cleans_before_testing(tmp_path: Path) -> None:
+def test_non_executable_maven_wrapper_runs_through_shell(tmp_path: Path) -> None:
     (tmp_path / "mvnw").touch()
+    snapshot = DiscoverySnapshot(repository=tmp_path, build_system=BuildSystem.MAVEN)
+
+    assert verification_command(snapshot) == ["sh", "./mvnw", "clean", "test"]
+
+
+def test_executable_maven_wrapper_runs_directly(tmp_path: Path) -> None:
+    wrapper = tmp_path / "mvnw"
+    wrapper.touch(mode=0o755)
     snapshot = DiscoverySnapshot(repository=tmp_path, build_system=BuildSystem.MAVEN)
 
     assert verification_command(snapshot) == ["./mvnw", "clean", "test"]

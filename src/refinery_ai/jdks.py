@@ -162,6 +162,11 @@ def baseline_java_candidates(source: str | None, recipes: list[str]) -> tuple[in
 
 def recipe_target_java(recipe: str) -> int | None:
     name = recipe.rsplit(".", maxsplit=1)[-1]
+    # OpenRewrite's Boot 3 composite recipes include UpgradeToJava17. Treat that
+    # implicit target exactly like an explicit Java migration so the migrated
+    # source is not verified with the older baseline JDK.
+    if re.fullmatch(r"UpgradeSpringBoot_3(?:_\d+)?", name):
+        return 17
     match = re.search(r"(?:to|To|UpgradeTo)Java(\d+)$", name)
     return int(match.group(1)) if match else None
 

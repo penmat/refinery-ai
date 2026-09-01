@@ -9,6 +9,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
+from refinery_ai.build_tools import maven_command_prefix
 from refinery_ai.inspectors.sonarqube.models import (
     SonarQubeError,
     SonarQubeTimeout,
@@ -104,13 +105,12 @@ class ScannerRunner:
             [f"-Dsonar.scanner.metadataFilePath={metadata_path}"] if metadata_path else []
         )
         if snapshot.build_system is BuildSystem.MAVEN:
-            executable = "./mvnw" if (context.repository / "mvnw").is_file() else "mvn"
             goal = (
                 "org.sonarsource.scanner.maven:sonar-maven-plugin:"
                 f"{self.maven_scanner_version}:sonar"
             )
             return [
-                executable,
+                *maven_command_prefix(context.repository),
                 "compile",
                 goal,
                 f"-Dsonar.projectKey={context.project_key}",

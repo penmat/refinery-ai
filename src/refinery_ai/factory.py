@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -60,6 +61,36 @@ def _retryable_repaired_recipes(repository: Path, failure_context: str) -> froze
             and "<openapi-generator-maven-plugin.version>5." in content
         ):
             retryable.add("org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0")
+    if "package org.hibernate.validator.constraints does not exist" in failure_context:
+        retryable.update(
+            f"org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_{minor}"
+            for minor in range(3, 8)
+        )
+    if (
+        "BeanCurrentlyInCreationException" in failure_context
+        and "webSecurityConfig" in failure_context
+    ):
+        retryable.add("org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_6")
+    if "EnableGlobalMethodSecurity is required" in failure_context:
+        retryable.add("org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0")
+    if (
+        "package springfox.documentation" in failure_context
+        and "does not exist" in failure_context
+    ):
+        retryable.add("org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7")
+        retryable.add("org.openrewrite.java.springdoc.SpringFoxToSpringDoc")
+    if (
+        "method does not override or implement a method from a supertype"
+        in failure_context
+        and any(
+            "implements RepositoryRestConfigurer"
+            in (content := path.read_text(errors="replace"))
+            and "configureRepositoryRestConfiguration(RepositoryRestConfiguration"
+            in content
+            for path in repository.glob("src/main/java/**/*.java")
+        )
+    ):
+        retryable.add("org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7")
     return frozenset(retryable)
 
 
@@ -488,10 +519,123 @@ def _with_datasource_initialization_prerequisite(
 def _with_deterministic_prerequisites(
     plan: RecipePlan, snapshot: DiscoverySnapshot
 ) -> RecipePlan:
+    plan = _with_springfox_before_boot27(plan, snapshot)
     plan = _with_boot3_before_jakarta(plan, snapshot)
     plan = _with_boot3_before_springdoc2(plan, snapshot)
+    plan = _with_boot2_before_validation_starter(plan)
     plan = _with_datasource_initialization_prerequisite(plan, snapshot)
     return _with_utf8_prerequisite(plan, snapshot)
+
+
+def _with_springfox_before_boot27(
+    plan: RecipePlan, snapshot: DiscoverySnapshot
+) -> RecipePlan:
+    """Remove Springfox before the Boot 2.7 composite can partially migrate it."""
+
+    springfox_recipe = "org.openrewrite.java.springdoc.SpringFoxToSpringDoc"
+    boot27_recipe = "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7"
+    recommendations = list(plan.recommendations)
+    springfox = next(
+        (item for item in recommendations if item.recipe == springfox_recipe), None
+    )
+    boot27 = next(
+        (item for item in recommendations if item.recipe == boot27_recipe), None
+    )
+    if boot27 is None:
+        return plan
+    uses_springfox = any(
+        dependency.group == "io.springfox" for dependency in snapshot.dependencies
+    )
+    if springfox is None and uses_springfox:
+        springfox = RecipeRecommendation(
+            recipe=springfox_recipe,
+            recipe_artifact="org.openrewrite.recipe:rewrite-spring:RELEASE",
+            reason="Springfox must be converted before upgrading Spring Boot to 2.7.",
+            evidence=["discovery.dependency=io.springfox"],
+            expected_benefit=(
+                "Prevents the Boot upgrade from leaving Springfox configuration without its "
+                "dependencies."
+            ),
+            priority=RecipePriority.HIGH,
+            confidence=1,
+        )
+    if springfox is None:
+        return plan
+    springfox = springfox.model_copy(
+        update={
+            "depends_on": [
+                dependency
+                for dependency in springfox.depends_on
+                if dependency != boot27_recipe
+            ]
+        }
+    )
+    boot27 = boot27.model_copy(
+        update={
+            "depends_on": list(
+                dict.fromkeys([springfox_recipe, *boot27.depends_on])
+            )
+        }
+    )
+    ordered = [
+        boot27 if item.recipe == boot27_recipe else item
+        for item in recommendations
+        if item.recipe != springfox_recipe
+    ]
+    boot27_index = next(
+        index for index, item in enumerate(ordered) if item.recipe == boot27_recipe
+    )
+    ordered.insert(boot27_index, springfox)
+    return RecipePlan(recommendations=ordered)
+
+
+def _with_boot2_before_validation_starter(plan: RecipePlan) -> RecipePlan:
+    """Run the validation-starter recipe only after a Boot release that requires it."""
+
+    validation_recipe = (
+        "org.openrewrite.java.spring.boot2.AddSpringBootStarterValidation"
+    )
+    recommendations = list(plan.recommendations)
+    validation = next(
+        (item for item in recommendations if item.recipe == validation_recipe), None
+    )
+    if validation is None:
+        return plan
+    boot_upgrades = [
+        item
+        for item in recommendations
+        if re.fullmatch(
+            r"org\.openrewrite\.java\.spring\.boot2\.UpgradeSpringBoot_2_[3-7]",
+            item.recipe,
+        )
+    ]
+    if not boot_upgrades:
+        return plan
+    original_validation = validation
+    original_boot = boot_upgrades[-1]
+    boot = original_boot
+    boot = boot.model_copy(
+        update={
+            "depends_on": [
+                dependency
+                for dependency in boot.depends_on
+                if dependency != validation_recipe
+            ]
+        }
+    )
+    validation = validation.model_copy(
+        update={
+            "depends_on": list(dict.fromkeys([boot.recipe, *validation.depends_on]))
+        }
+    )
+    ordered = [
+        boot if item is original_boot else item
+        for item in recommendations
+        if item is not original_validation
+    ]
+    boot_index = next(index for index, item in enumerate(ordered) if item.recipe == boot.recipe)
+    ordered.insert(boot_index + 1, validation)
+    return RecipePlan(recommendations=ordered)
 
 
 def _with_boot3_before_jakarta(

@@ -13,9 +13,11 @@ from refinery_ai.factory import (
     ModernizationFactory,
     _planning_evidence_facts,
     _retryable_repaired_recipes,
+    _with_boot2_before_validation_starter,
     _with_boot3_before_jakarta,
     _with_boot3_before_springdoc2,
     _with_datasource_initialization_prerequisite,
+    _with_springfox_before_boot27,
     _with_utf8_prerequisite,
 )
 from refinery_ai.models import (
@@ -94,6 +96,9 @@ def test_planner_rules_capture_spring_boot_java_17_ordering() -> None:
     assert "class-file version 61" in rules
     assert "Normalize application properties to UTF-8 before Spring Boot upgrades" in rules
     assert "Do not\nschedule the Spring Boot upgrade" in rules
+    assert "Add the validation starter after the Spring Boot bridge" in rules
+    assert "when it makes no source\nor build-file changes" in rules
+    assert "Convert Springfox before upgrading to Spring Boot 2.7" in rules
 
 
 def test_planner_uses_the_configured_ollama_api_base() -> None:
@@ -225,6 +230,58 @@ def test_load_migration_failures_returns_structured_planning_evidence(
     assert ".refinery/migration-runs/run-1/step-002" in history.context
 
 
+def test_load_migration_failures_keeps_stdout_when_stderr_is_nonempty(
+    tmp_path: Path,
+) -> None:
+    failed_step = tmp_path / ".refinery/migration-runs/run-1/step-001"
+    failed_step.mkdir(parents=True)
+    failed_step.joinpath("step.json").write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "reason": "Post-migration build failed",
+                "recipe": {
+                    "recipe": "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"
+                },
+                "verification": {
+                    "exit_code": 1,
+                    "stdout": "EnableGlobalMethodSecurity is required",
+                    "stderr": "Conditions evaluation report",
+                },
+            }
+        )
+    )
+
+    history = load_migration_failures(tmp_path, Path(".refinery"), 10_000)
+
+    assert "EnableGlobalMethodSecurity is required" in history.context
+    assert "Conditions evaluation report" in history.context
+
+
+def test_no_change_migration_is_not_recorded_as_completed(tmp_path: Path) -> None:
+    step = tmp_path / ".refinery/migration-runs/run-1/step-001"
+    step.mkdir(parents=True)
+    step.joinpath("step.json").write_text(
+        json.dumps(
+            {
+                "status": "completed",
+                "recipe": {
+                    "recipe": (
+                        "org.openrewrite.java.spring.boot2."
+                        "AddSpringBootStarterValidation"
+                    )
+                },
+                "base_revision": "abc123",
+                "checkpoint": "abc123",
+            }
+        )
+    )
+
+    history = load_migration_failures(tmp_path, Path(".refinery"), 10_000)
+
+    assert history.completed_recipes == frozenset()
+
+
 def test_planning_evidence_facts_include_goal_and_retained_warnings(tmp_path: Path) -> None:
     snapshot = DiscoverySnapshot(
         repository=tmp_path,
@@ -301,6 +358,104 @@ def test_datasource_initialization_is_planned_before_boot_upgrade(tmp_path: Path
     assert plan.recommendations[0].execution_type.value == "spring-properties"
     assert plan.recommendations[1].depends_on == [
         "refinery.defer-datasource-initialization"
+    ]
+
+
+def test_boot2_upgrade_is_enforced_before_validation_starter() -> None:
+    boot_recipe = "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_5"
+    validation_recipe = (
+        "org.openrewrite.java.spring.boot2.AddSpringBootStarterValidation"
+    )
+    common = {
+        "reason": "Modernize validation.",
+        "evidence": ["validation"],
+        "expected_benefit": "Compatible validation.",
+        "priority": "high",
+        "confidence": 1,
+    }
+    validation = RecipeRecommendation(
+        recipe=validation_recipe,
+        depends_on=["constraints"],
+        **common,
+    )
+    boot = RecipeRecommendation(
+        recipe=boot_recipe,
+        depends_on=[validation_recipe, "constraints"],
+        **common,
+    )
+
+    result = _with_boot2_before_validation_starter(
+        RecipePlan(recommendations=[validation, boot])
+    )
+
+    assert [item.recipe for item in result.recommendations] == [
+        boot_recipe,
+        validation_recipe,
+    ]
+    assert result.recommendations[0].depends_on == ["constraints"]
+    assert result.recommendations[1].depends_on == [boot_recipe, "constraints"]
+
+
+def test_springfox_conversion_is_enforced_before_boot_27() -> None:
+    springfox_recipe = "org.openrewrite.java.springdoc.SpringFoxToSpringDoc"
+    boot27_recipe = "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7"
+    common = {
+        "reason": "Modernize API documentation.",
+        "evidence": ["springfox"],
+        "expected_benefit": "Compatible API documentation.",
+        "priority": "high",
+        "confidence": 1,
+    }
+    boot27 = RecipeRecommendation(
+        recipe=boot27_recipe,
+        depends_on=["encoding"],
+        **common,
+    )
+    springfox = RecipeRecommendation(
+        recipe=springfox_recipe,
+        depends_on=[boot27_recipe],
+        **common,
+    )
+
+    result = _with_springfox_before_boot27(
+        RecipePlan(recommendations=[boot27, springfox]),
+        DiscoverySnapshot(repository=Path("."), build_system="maven"),
+    )
+
+    assert [item.recipe for item in result.recommendations] == [
+        springfox_recipe,
+        boot27_recipe,
+    ]
+    assert result.recommendations[0].depends_on == []
+    assert result.recommendations[1].depends_on == [springfox_recipe, "encoding"]
+
+
+def test_springfox_prerequisite_is_restored_when_failure_history_filtered_it() -> None:
+    boot27_recipe = "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7"
+    boot27 = RecipeRecommendation(
+        recipe=boot27_recipe,
+        reason="Upgrade Boot.",
+        evidence=["boot"],
+        expected_benefit="Boot 2.7.",
+        priority="high",
+        confidence=1,
+    )
+    snapshot = DiscoverySnapshot(
+        repository=Path("."),
+        build_system="maven",
+        dependencies=[{"group": "io.springfox", "artifact": "springfox-swagger2"}],
+    )
+
+    result = _with_springfox_before_boot27(
+        RecipePlan(recommendations=[boot27]), snapshot
+    )
+
+    assert [item.recipe for item in result.recommendations] == [
+        "org.openrewrite.java.springdoc.SpringFoxToSpringDoc",
+        boot27_recipe,
+    ]
+    assert result.recommendations[1].depends_on == [
+        "org.openrewrite.java.springdoc.SpringFoxToSpringDoc"
     ]
 
 
@@ -391,6 +546,18 @@ def test_springdoc2_failure_is_retryable_after_ordering_repair_is_available(
     assert retryable == {"org.openrewrite.java.springdoc.UpgradeSpringDoc_2"}
 
 
+def test_boot27_springfox_failure_is_retryable_after_ordering_rule() -> None:
+    retryable = _retryable_repaired_recipes(
+        Path("."),
+        "package springfox.documentation.swagger2.annotations does not exist",
+    )
+
+    assert retryable == {
+        "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7",
+        "org.openrewrite.java.springdoc.SpringFoxToSpringDoc",
+    }
+
+
 def test_boot3_failure_is_retryable_after_generator_repair_is_available(
     tmp_path: Path,
 ) -> None:
@@ -422,6 +589,48 @@ def test_boot3_failure_is_retryable_after_test_compatibility_repair_is_available
 
     assert retryable == {
         "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"
+    }
+
+
+def test_boot2_validation_failure_is_retryable_after_dependency_repair() -> None:
+    retryable = _retryable_repaired_recipes(
+        Path("."),
+        "package org.hibernate.validator.constraints does not exist",
+    )
+
+    assert retryable == {
+        f"org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_{minor}"
+        for minor in range(3, 8)
+    }
+
+
+def test_boot26_circular_security_failure_is_retryable_after_repair() -> None:
+    retryable = _retryable_repaired_recipes(
+        Path("."),
+        "BeanCurrentlyInCreationException: webSecurityConfig",
+    )
+
+    assert retryable == {
+        "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_6"
+    }
+
+
+def test_boot27_repository_rest_override_failure_is_retryable(tmp_path: Path) -> None:
+    source = tmp_path / "src/main/java/example/MyDataRestConfig.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "class MyDataRestConfig implements RepositoryRestConfigurer {\n"
+        "  void configureRepositoryRestConfiguration(RepositoryRestConfiguration config) {}\n"
+        "}\n"
+    )
+
+    retryable = _retryable_repaired_recipes(
+        tmp_path,
+        "method does not override or implement a method from a supertype",
+    )
+
+    assert retryable == {
+        "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7"
     }
 
 

@@ -8,11 +8,15 @@ from refinery_ai.migrations.ai_repair import (
     AiMigrationRepairer,
     DeterministicMigrationRepairer,
     configure_boot3_test_compatibility,
+    configure_boot_validation_starter,
     configure_openapi_generator_for_springdoc,
+    make_password_encoder_bean_independent,
+    remove_legacy_global_method_security_inheritance,
     remove_obsolete_junit_platform_surefire_provider,
     repair_springdoc_info_constructor,
     springdoc_repair_applicable,
     springdoc_repair_files,
+    use_explicit_ant_path_request_matchers,
 )
 from refinery_ai.models import RecipeRecommendation, RepairMode, VerificationResult
 
@@ -216,6 +220,413 @@ class SwaggerConfig {
 
     assert result.green
     assert "return new Info()" in source.read_text()
+
+
+def test_boot_27_repair_replaces_bare_validation_api_with_boot_starter(
+    tmp_path: Path,
+) -> None:
+    pom = tmp_path / "pom.xml"
+    pom.write_text(
+        """<project>
+  <dependencies>
+    <dependency>
+      <groupId>javax.validation</groupId>
+      <artifactId>validation-api</artifactId>
+    </dependency>
+  </dependencies>
+</project>
+"""
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "clean", "test"],
+        exit_code=1,
+        stdout="package org.hibernate.validator.constraints does not exist",
+        duration_seconds=0,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert configure_boot_validation_starter(tmp_path, failure)
+    updated = pom.read_text()
+    assert "javax.validation" not in updated
+    assert "<artifactId>validation-api</artifactId>" not in updated
+    assert "<artifactId>spring-boot-starter-validation</artifactId>" in updated
+
+
+def test_deterministic_boot_27_repair_configures_validation_starter(tmp_path: Path) -> None:
+    pom = tmp_path / "pom.xml"
+    pom.write_text(
+        """<project><dependencies>
+  <dependency>
+    <groupId>javax.validation</groupId>
+    <artifactId>validation-api</artifactId>
+  </dependency>
+</dependencies></project>
+"""
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "clean", "test"],
+        exit_code=1,
+        stderr="package org.hibernate.validator.constraints does not exist",
+        duration_seconds=0,
+    )
+
+    result = DeterministicMigrationRepairer().repair(
+        tmp_path,
+        RecipeRecommendation(
+            recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7",
+            reason="upgrade",
+            evidence=["test"],
+            expected_benefit="upgrade",
+            priority="high",
+            confidence=1,
+        ),
+        failure,
+    )
+
+    assert result.green
+    assert "managed validation starter" in result.stdout
+    assert "spring-boot-starter-validation" in pom.read_text()
+
+
+@pytest.mark.parametrize("minor", [3, 4, 5, 6, 7])
+def test_validation_repair_covers_boot_2_bridge_releases(
+    tmp_path: Path, minor: int
+) -> None:
+    pom = tmp_path / "pom.xml"
+    pom.write_text(
+        """<project>
+  <dependencies>
+    <dependency>
+      <groupId>javax.validation</groupId>
+      <artifactId>validation-api</artifactId>
+    </dependency>
+  </dependencies>
+</project>
+"""
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "clean", "test"],
+        exit_code=1,
+        stderr="package org.hibernate.validator.constraints does not exist",
+        duration_seconds=0,
+    )
+
+    result = DeterministicMigrationRepairer().repair(
+        tmp_path,
+        RecipeRecommendation(
+            recipe=f"org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_{minor}",
+            reason="upgrade",
+            evidence=["test"],
+            expected_benefit="upgrade",
+            priority="high",
+            confidence=1,
+        ),
+        failure,
+    )
+
+    assert result.green
+    assert "spring-boot-starter-validation" in pom.read_text()
+
+
+def test_boot_26_repair_breaks_password_encoder_configuration_cycle(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "src/main/java/example/WebSecurityConfig.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        """class WebSecurityConfig {
+    @Bean
+    public BCryptPasswordEncoder bcryptEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+}
+"""
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "clean", "test"],
+        exit_code=1,
+        stderr=(
+            "BeanCurrentlyInCreationException: Error creating bean with name "
+            "'webSecurityConfig'"
+        ),
+        duration_seconds=0,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert make_password_encoder_bean_independent(tmp_path, failure) == (
+        "src/main/java/example/WebSecurityConfig.java",
+    )
+    assert "public static BCryptPasswordEncoder bcryptEncoder()" in source.read_text()
+
+
+def test_deterministic_boot_26_repair_handles_security_configuration_cycle(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "src/main/java/example/WebSecurityConfig.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        """class WebSecurityConfig {
+    @Bean
+    public BCryptPasswordEncoder bcryptEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+}
+"""
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "clean", "test"],
+        exit_code=1,
+        stdout="BeanCurrentlyInCreationException: webSecurityConfig",
+        duration_seconds=0,
+    )
+
+    result = DeterministicMigrationRepairer().repair(
+        tmp_path,
+        RecipeRecommendation(
+            recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_6",
+            reason="upgrade",
+            evidence=["test"],
+            expected_benefit="upgrade",
+            priority="high",
+            confidence=1,
+        ),
+        failure,
+    )
+
+    assert result.green
+    assert "password-encoder bean independent" in result.stdout
+    assert "public static BCryptPasswordEncoder bcryptEncoder()" in source.read_text()
+
+
+def test_security_58_repair_uses_explicit_ant_path_request_matchers(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "src/main/java/example/WebSecurityConfig.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        """package example;
+
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+
+class WebSecurityConfig {
+    void configure(HttpSecurity http) throws Exception {
+        http.authorizeHttpRequests(requests -> requests
+            .requestMatchers("/create/**", "/edit/**").hasRole("USER")
+            .requestMatchers("/**").permitAll());
+    }
+}
+"""
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "clean", "test"],
+        exit_code=1,
+        stderr=(
+            "method requestMatchers cannot be applied; required: RequestMatcher[]; "
+            "java.lang.String cannot be converted to "
+            "org.springframework.security.web.util.matcher.RequestMatcher"
+        ),
+        duration_seconds=0,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert use_explicit_ant_path_request_matchers(tmp_path, failure) == (
+        "src/main/java/example/WebSecurityConfig.java",
+    )
+    updated = source.read_text()
+    assert "import org.springframework.security.web.util.matcher.AntPathRequestMatcher;" in updated
+    assert (
+        '.requestMatchers(new AntPathRequestMatcher("/create/**"), '
+        'new AntPathRequestMatcher("/edit/**"))' in updated
+    )
+    assert '.requestMatchers(new AntPathRequestMatcher("/**"))' in updated
+
+
+def test_deterministic_security_58_repair_is_recipe_scoped(tmp_path: Path) -> None:
+    source = tmp_path / "src/main/java/example/WebSecurityConfig.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        'class WebSecurityConfig { void x() { registry.requestMatchers("/**"); } }\n'
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "test"],
+        exit_code=1,
+        stdout=(
+            "method requestMatchers cannot be applied; "
+            "java.lang.String cannot be converted to "
+            "org.springframework.security.web.util.matcher.RequestMatcher"
+        ),
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.security5.UpgradeSpringSecurity_5_8",
+        reason="upgrade",
+        evidence=["test"],
+        expected_benefit="upgrade",
+        priority="high",
+        confidence=1,
+    )
+
+    result = DeterministicMigrationRepairer().repair(tmp_path, step, failure)
+
+    assert result.green
+    assert "explicit AntPathRequestMatcher" in result.stdout
+    assert 'new AntPathRequestMatcher("/**")' in source.read_text()
+
+
+def test_deterministic_springfox_repair_removes_residual_configuration(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "src/main/java/example/SwaggerConfig.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        """package example;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
+import springfox.documentation.spring.data.rest.configuration.SpringDataRestConfiguration;
+import springfox.documentation.swagger2.annotations.EnableSwagger2WebMvc;
+@Configuration
+@EnableSwagger2WebMvc
+@Import(SpringDataRestConfiguration.class)
+class SwaggerConfig {}
+"""
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "test"],
+        exit_code=1,
+        stdout=(
+            "package springfox.documentation.spring.data.rest.configuration does not exist\n"
+            "package springfox.documentation.swagger2.annotations does not exist"
+        ),
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.springdoc.SpringFoxToSpringDoc",
+        reason="convert",
+        evidence=["springfox"],
+        expected_benefit="springdoc",
+        priority="high",
+        confidence=1,
+    )
+
+    result = DeterministicMigrationRepairer().repair(tmp_path, step, failure)
+
+    assert result.green
+    assert "Removed obsolete Springfox" in result.stdout
+    updated = source.read_text()
+    assert "springfox" not in updated
+    assert "@Import" not in updated
+    assert "annotation.Import" not in updated
+
+
+def test_boot_30_repair_removes_legacy_method_security_superclass(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "src/main/java/example/MethodSecurityConfig.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "package example;\n\n"
+        "import org.springframework.context.annotation.Configuration;\n"
+        "import org.springframework.security.config.annotation.method."
+        "configuration.EnableMethodSecurity;\n"
+        "import org.springframework.security.config.annotation.method."
+        "configuration.GlobalMethodSecurityConfiguration;\n\n"
+        "@Configuration\n"
+        "@EnableMethodSecurity(securedEnabled = true, jsr250Enabled = true)\n"
+        "public class MethodSecurityConfig extends GlobalMethodSecurityConfiguration {\n"
+        "}\n"
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "clean", "test"],
+        exit_code=1,
+        stderr=(
+            "Factory method 'methodSecurityMetadataSource' threw exception: "
+            "EnableGlobalMethodSecurity is required"
+        ),
+        duration_seconds=0,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert remove_legacy_global_method_security_inheritance(tmp_path, failure) == (
+        "src/main/java/example/MethodSecurityConfig.java",
+    )
+    updated = source.read_text()
+    assert "public class MethodSecurityConfig {" in updated
+    assert "GlobalMethodSecurityConfiguration" not in updated
+
+
+def test_deterministic_boot_27_repair_updates_repository_rest_signature(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "src/main/java/example/MyDataRestConfig.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        """package example;
+import org.springframework.data.rest.core.config.RepositoryRestConfiguration;
+import org.springframework.data.rest.webmvc.config.RepositoryRestConfigurer;
+class MyDataRestConfig implements RepositoryRestConfigurer {
+    @Override
+    public void configureRepositoryRestConfiguration(RepositoryRestConfiguration config) {
+    }
+}
+"""
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "test"],
+        exit_code=1,
+        stdout="method does not override or implement a method from a supertype",
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7",
+        reason="upgrade",
+        evidence=["boot"],
+        expected_benefit="Boot 2.7",
+        priority="high",
+        confidence=1,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    result = DeterministicMigrationRepairer().repair(tmp_path, step, failure)
+
+    assert result.green
+    updated = source.read_text()
+    assert "RepositoryRestConfiguration config, CorsRegistry cors" in updated
+    assert "import org.springframework.web.servlet.config.annotation.CorsRegistry;" in updated
+
+
+def test_deterministic_boot_30_repair_finishes_method_security_migration(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "src/main/java/example/MethodSecurityConfig.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "import org.springframework.security.config.annotation.method."
+        "configuration.EnableMethodSecurity;\n"
+        "import org.springframework.security.config.annotation.method."
+        "configuration.GlobalMethodSecurityConfiguration;\n"
+        "@EnableMethodSecurity\n"
+        "class MethodSecurityConfig extends GlobalMethodSecurityConfiguration {}\n"
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "test"],
+        exit_code=1,
+        stdout="EnableGlobalMethodSecurity is required",
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0",
+        reason="upgrade",
+        evidence=["test"],
+        expected_benefit="upgrade",
+        priority="high",
+        confidence=1,
+    )
+
+    result = DeterministicMigrationRepairer().repair(tmp_path, step, failure)
+
+    assert result.green
+    assert "legacy GlobalMethodSecurityConfiguration inheritance" in result.stdout
+    assert "extends GlobalMethodSecurityConfiguration" not in source.read_text()
 
 
 def test_deterministic_repair_removes_obsolete_junit_platform_provider(

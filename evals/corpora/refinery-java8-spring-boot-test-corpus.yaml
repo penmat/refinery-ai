@@ -1,0 +1,64 @@
+schema_version: 1
+corpus:
+  id: refinery-java8-spring-boot
+  name: Refinery Java 8 Spring Boot migration corpus
+  description: >-
+    A regression corpus of moderately sized Spring Boot repositories believed to
+    target Java 8, assembled for testing conservative Java 17 migrations.
+  source_context: Find Older Java Projects
+  generated_on: 2026-08-31
+  caveats:
+    - Repository metadata and default branches can change; verify the Java target after cloning.
+    - Pin a commit after validation to make benchmark runs reproducible.
+    - Some projects need external services, so compile and test expectations may require per-project setup.
+  defaults:
+    source_java: "8"
+    build_system: maven
+    framework: spring-boot
+    migration_goal:
+      target_java: "17"
+      intent: compatibility
+      change_appetite: minimal
+      preserve_architecture: true
+      upgrade_dependencies: only_when_required
+      success_criteria:
+        - project compiles on Java 17
+        - existing tests pass
+        - no unrelated refactoring
+        - application behavior is preserved
+
+projects:
+  - {id: bank-app, name: BankApp, repo_url: "https://github.com/sbathina/BankApp", tier: normal, category: rest-jpa-security, notes: "H2, Swagger, and Lombok; strong general-purpose candidate."}
+  - {id: spring-boot-ecommerce-devrobots, name: spring-boot-ecommerce, repo_url: "https://github.com/devRobots/spring-boot-ecommerce", tier: normal, category: ecommerce-rest, notes: "MySQL backend with React; archived repository and useful stable fixture."}
+  - {id: springboot-ecommerce-hendisantika, name: springboot-ecommerce, repo_url: "https://github.com/hendisantika/springboot-ecommerce", tier: normal, category: ecommerce, notes: "H2 and Angular; moderate, self-contained application."}
+  - {id: fleetms-v1, name: fleetms-v1, repo_url: "https://github.com/KindsonTheGenius/fleetms-v1", tier: normal, category: fleet-management, notes: "JPA, Security, Thymeleaf, MySQL, and Lombok."}
+  - {id: spring-thymeleaf-shop, name: spring-thymeleaf-shop, repo_url: "https://github.com/CharlesFrost/spring-thymeleaf-shop", tier: easy, category: mvc-shop, notes: "Spring Boot 2.1.7, JPA, Security, Thymeleaf, and H2; clean migration fixture."}
+  - {id: education-platform-capstone-project, name: education-platform-capstone-project, repo_url: "https://github.com/Nazariy995/education-platform-capstone-project", tier: older, category: education-platform, notes: "Spring Boot 1.4.1; use after simpler Boot 2.x cases."}
+  - {id: blog-app-rahul, name: BlogApp, repo_url: "https://github.com/Rahul9332935/BlogApp", tier: normal, category: blog-rest, notes: "JWT/Security with users, posts, categories, and comments."}
+  - {id: springboot-security-jwt, name: SpringBoot-Security-JWT, repo_url: "https://github.com/maxwellkimaiyo/SpringBoot-Security-JWT", tier: easy, category: authentication-service, notes: "PostgreSQL and JWT; useful focused Security migration."}
+  - {id: task-management-system, name: TASK-Management-System, repo_url: "https://github.com/ayushman1024/TASK-Management-System", tier: normal, category: task-management-rest, notes: "MySQL and JWT; intentionally ordinary application code."}
+  - {id: ecommerce-api-sanajitjana, name: E-Commerce-API, repo_url: "https://github.com/sanajitjana/E-Commerce-API", tier: normal, category: ecommerce-rest, notes: "MySQL with authentication, cart, and orders."}
+  - {id: spring-rest-ecommerce, name: spring-rest-ecommerce, repo_url: "https://github.com/vatri/spring-rest-ecommerce", tier: older, category: ecommerce-rest, notes: "Hibernate, MySQL, HATEOAS, Springfox Swagger, JWT, and Redis create a broad migration surface."}
+  - {id: library-management-system, name: Library-Management-System, repo_url: "https://github.com/adityakalambe01/Library-Management-System", tier: normal, category: library-rest, notes: "Books, members, transactions, reservations, fines, staff, and branches."}
+  - {id: spring-boot-thymeleaf-heroku-template, name: spring-boot-thymeleaf-heroku-template, repo_url: "https://github.com/chris-bailey/spring-boot-thymeleaf-heroku-template", tier: older, category: mvc-application, notes: "Security, JPA/Hibernate, Liquibase, PostgreSQL/H2, and Thymeleaf."}
+  - {id: spring-batch-rest, name: spring-batch-rest, repo_url: "https://github.com/chrisgleissner/spring-batch-rest", tier: normal, category: batch-rest, notes: "Spring Boot 2.2, HATEOAS, Swagger, and Spring Batch."}
+  - {id: kid-bank, name: kid-bank, repo_url: "https://github.com/tedyoung/kid-bank", tier: normal, category: financial-web-app, notes: "MVC, Data JPA, PostgreSQL, Thymeleaf, and tests."}
+  - {id: community, name: community, repo_url: "https://github.com/zhengguohuang/community", tier: older, category: community-site, notes: "Security, MySQL, MyBatis, Redis, Kafka, and Elasticsearch; dependency-heavy stress case."}
+  - {id: spring-boot-email-tools, name: spring-boot-email-tools, repo_url: "https://github.com/ozimov/spring-boot-email-tools", tier: older, category: email-utility, notes: "Spring Boot 1.5.x with templates, Redis, and email."}
+  - {id: java-backend-authentication-system, name: Java-backend-Spring-boot-MySQL-login-logout-Authentication-System, repo_url: "https://github.com/SDEParag/Java-backend-Spring-boot-MySQL-login-logout-Authentication-System", tier: easy, category: authentication-service, notes: "Security, JWT, JPA, and MySQL; likely a relatively quick migration."}
+  - {id: spring-boot-jpa-auditing, name: spring-boot-jpa-auditing, repo_url: "https://github.com/davidarchanjo/spring-boot-jpa-auditing", tier: easy, category: jpa-rest, notes: "Spring Boot 2.3.1, MVC, JPA, H2, and Lombok; smaller fast-loop case."}
+  - {id: spring-boot-starter-danneleung, name: spring-boot-starter, repo_url: "https://github.com/DanneLeung/spring-boot-starter", tier: easy, category: mvc-starter, notes: "JPA, Security, Thymeleaf, and AdminLTE; smaller fixture."}
+  - {id: journal-application-springboot, name: JournalApplication-SpringBoot, repo_url: "https://github.com/M-Talha-Atif/JournalApplication-SpringBoot", tier: normal, category: journal-rest, notes: "MongoDB, Spring Data, Spring Security, and REST."}
+  - {id: ecommerce-spring-restapi-guisena888, name: ecommerce-spring-restapi, repo_url: "https://github.com/guisena888/ecommerce-spring-restapi", tier: normal, category: ecommerce-rest, notes: "Java 8-tagged e-commerce REST API; verify compiler target after cloning."}
+  - {id: ecommerce-shopping-springboot-restapi, name: ecommerce-shopping-springboot-restapi, repo_url: "https://github.com/mahadev-chaurasiya/ecommerce-shopping-springboot-restapi", tier: normal, category: ecommerce-rest, notes: "JPA, Lombok, catalog, cart, checkout, orders, and reviews."}
+  - {id: ecommerce-api-hustler-abhi, name: E-Commerce-API, repo_url: "https://github.com/hustler-abhi/E-Commerce-API", tier: verify-first, category: ecommerce-rest, notes: "Spring Boot and MySQL; exact Java compiler target should be verified after checkout."}
+  - {id: ms-springboot-272-java-8, name: ms-springboot-272-java-8, repo_url: "https://github.com/arafkarsh/ms-springboot-272-java-8", tier: older, category: microservice-reference, notes: "Boot 2.7.2 with Java EE, JPA, PostgreSQL/H2, JWT, Redis, and Kafka; useful javax/Jakarta boundary case."}
+
+  # Seven repositories carried over from the earlier candidate set.
+  - {id: spring-petclinic-rest, name: spring-petclinic-rest, repo_url: "https://github.com/spring-petclinic/spring-petclinic-rest", tier: baseline, category: veterinary-rest, notes: "Reference-sized REST/JPA application; verify a Java 8 commit or branch before pinning the fixture."}
+  - {id: flight-booking, name: flight-booking, repo_url: "https://github.com/sameerean/flight-booking", tier: easy, category: flight-booking-rest, notes: "Spring Data JPA, H2, Swagger, several domain endpoints, and tests."}
+  - {id: spring-boot-blog-app, name: spring-boot-blog-app, repo_url: "https://github.com/skarware/spring-boot-blog-app", tier: normal, category: blog-web-app, notes: "Boot 2.2.6, Web, JPA, Security, H2, Lombok, and Thymeleaf."}
+  - {id: parking-api, name: parking-api, repo_url: "https://github.com/sg2nr/parking-api", tier: easy, category: parking-rest, notes: "Straightforward REST and H2; fast assessment-plan-rewrite loop target."}
+  - {id: spring-boot-forum, name: spring-boot-forum, repo_url: "https://github.com/mupezzuol/spring-boot-forum", tier: normal, category: forum-rest, notes: "Boot 2.1.6, JPA, Security/JWT, Swagger, validation, caching, Actuator, and pagination."}
+  - {id: spring-boot-blog-rest-api, name: Spring-Boot-Blog-REST-API, repo_url: "https://github.com/osopromadze/Spring-Boot-Blog-REST-API", tier: advanced, category: blog-rest, notes: "Security/JWT, MySQL, JPA/Hibernate, Docker, Swagger/docs, and a longer project history."}
+  - {id: spring-boot-crud-rest, name: spring-boot-crud-rest, repo_url: "https://github.com/davidarchanjo/spring-boot-crud-rest", tier: easy, category: crud-rest, notes: "DTO, service, and repository layers with JPA, H2, ModelMapper, Lombok, and tests."}

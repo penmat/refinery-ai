@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from refinery_ai.build_tools import maven_command_prefix
 from refinery_ai.models import BuildSystem, DiscoverySnapshot, VerificationResult
 from refinery_ai.verification import verify
 
@@ -66,12 +67,11 @@ class OpenRewriteAdapter:
     ) -> list[str]:
         root: Path = snapshot.repository
         if snapshot.build_system is BuildSystem.MAVEN:
-            executable = "./mvnw" if (root / "mvnw").exists() else "mvn"
             goal = OpenRewriteAdapter.MAVEN_PLUGIN
             if apply:
                 goal = goal.removesuffix(":dryRun") + ":run"
             return [
-                executable,
+                *maven_command_prefix(root),
                 "-U",
                 goal,
                 "-Drewrite.recipeArtifactCoordinates="

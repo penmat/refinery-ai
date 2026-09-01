@@ -54,9 +54,14 @@ def test_java_major_and_recipe_targets() -> None:
     assert project_runtime_java("17") == 17
     assert recipe_target_java("org.openrewrite.java.migrate.UpgradeToJava17") == 17
     assert recipe_target_java("example.Java11ToJava17") == 17
-    assert recipe_target_java("example.UpgradeSpringBoot_3_2") is None
+    assert recipe_target_java("example.UpgradeSpringBoot_3_0") == 17
+    assert recipe_target_java("example.UpgradeSpringBoot_3_2") == 17
+    assert recipe_target_java("example.UpgradeSpringBoot_2_7") is None
     assert baseline_java_candidates(
         "1.8", ["example.UpgradeSpringBoot", "example.Java8ToJava11"]
     ) == (11, 8)
     assert baseline_java_candidates("1.8", ["example.UpgradeToJava17"]) == (17, 11, 8)
+    assert baseline_java_candidates(
+        "1.8", ["example.UpgradeSpringBoot_3_0"]
+    ) == (17, 11, 8)
     assert baseline_java_candidates("11", ["example.UpgradeToJava21"]) == (21, 17, 11)

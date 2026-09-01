@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from refinery_ai.build_tools import maven_command_prefix
 from refinery_ai.inspectors.dependencies.models import (
     DependencyAnalysisError,
     DependencyAnalysisTimeout,
@@ -76,11 +77,10 @@ class ResolvedDependencyCollector:
         raise DependencyAnalysisError("No supported Maven or Gradle build was detected")
 
     def _maven(self, repository: Path) -> list[ResolvedDependency]:
-        executable = str(repository / "mvnw") if (repository / "mvnw").is_file() else "mvn"
         with tempfile.TemporaryDirectory(prefix="refinery-dependencies-") as directory:
             output = Path(directory) / "dependencies.json"
             command = [
-                executable,
+                *maven_command_prefix(repository),
                 f"org.apache.maven.plugins:maven-dependency-plugin:{self.maven_plugin_version}:tree",
                 "-DoutputType=json",
                 f"-DoutputFile={output}",

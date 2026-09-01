@@ -25,6 +25,29 @@ _HIBERNATE6_QUERY_FAILURE = "InvalidDataAccessApiUsage"
 _JDBC_QUERY_FAILURE = "BadSqlGrammar"
 _INVALID_INFO_CONSTRUCTOR = "constructor Info in class io.swagger.v3.oas.models.info.Info"
 _SUREFIRE_TESTSET_FAILURE = "org.apache.maven.surefire.api.testset.TestSetFailedException"
+_MISSING_HIBERNATE_VALIDATOR_CONSTRAINTS = (
+    "package org.hibernate.validator.constraints does not exist"
+)
+_CIRCULAR_SECURITY_CONFIGURATION = "BeanCurrentlyInCreationException"
+_REQUEST_MATCHER_SIGNATURE_FAILURE = (
+    "java.lang.String cannot be converted to "
+    "org.springframework.security.web.util.matcher.RequestMatcher"
+)
+_LEGACY_METHOD_SECURITY_CONFIGURATION_FAILURE = (
+    "EnableGlobalMethodSecurity is required"
+)
+_BOOT_26_RECIPE = "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_6"
+_BOOT_27_RECIPE = "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7"
+_BOOT_30_RECIPE = "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"
+_SPRING_SECURITY_58_RECIPE = (
+    "org.openrewrite.java.spring.security5.UpgradeSpringSecurity_5_8"
+)
+_SPRINGFOX_TO_SPRINGDOC_RECIPE = (
+    "org.openrewrite.java.springdoc.SpringFoxToSpringDoc"
+)
+_BOOT_2_UPGRADE_RECIPE = re.compile(
+    r"org\.openrewrite\.java\.spring\.boot2\.UpgradeSpringBoot_2_[3-7]"
+)
 
 
 def _has_legacy_swagger_annotations(content: str) -> bool:
@@ -72,6 +95,94 @@ def springdoc_repair_files(repository: Path) -> tuple[Path, ...]:
         if any(marker in content for marker in _SPRINGFOX_MARKERS):
             files.append(relative)
     return tuple(sorted(files))
+
+
+def remove_obsolete_springfox_configuration(
+    repository: Path, failure: VerificationResult
+) -> tuple[str, ...]:
+    """Remove annotations left behind after Springfox dependencies are replaced."""
+
+    diagnostic = f"{failure.stdout}\n{failure.stderr}"
+    missing_configuration = (
+        "package springfox.documentation.spring.data.rest.configuration does not exist"
+        in diagnostic
+    )
+    missing_annotation = (
+        "package springfox.documentation.swagger2.annotations does not exist"
+        in diagnostic
+    )
+    if not (missing_configuration or missing_annotation):
+        return ()
+    repaired: list[str] = []
+    for path in repository.glob("src/main/java/**/*.java"):
+        content = path.read_text(errors="replace")
+        updated = content
+        if missing_configuration:
+            updated = re.sub(
+                r"(?m)^import\s+springfox\.documentation\.spring\.data\.rest\."
+                r"configuration\.SpringDataRestConfiguration;\s*\n",
+                "",
+                updated,
+            )
+            updated = re.sub(
+                r"(?m)^[ \t]*@Import\(SpringDataRestConfiguration\.class\)[ \t]*\n",
+                "",
+                updated,
+            )
+        if missing_annotation:
+            updated = re.sub(
+                r"(?m)^import\s+springfox\.documentation\.swagger2\.annotations\."
+                r"EnableSwagger2WebMvc;\s*\n",
+                "",
+                updated,
+            )
+            updated = re.sub(
+                r"(?m)^[ \t]*@EnableSwagger2WebMvc[ \t]*\n", "", updated
+            )
+        if "@Import(" not in updated:
+            updated = re.sub(
+                r"(?m)^import\s+org\.springframework\.context\.annotation\.Import;\s*\n",
+                "",
+                updated,
+            )
+        if updated != content:
+            path.write_text(updated)
+            repaired.append(str(path.relative_to(repository)))
+    return tuple(repaired)
+
+
+def update_repository_rest_configurer_signature(
+    repository: Path, failure: VerificationResult
+) -> tuple[str, ...]:
+    """Add Boot 2.7's CorsRegistry argument to RepositoryRestConfigurer."""
+
+    diagnostic = f"{failure.stdout}\n{failure.stderr}"
+    if "method does not override or implement a method from a supertype" not in diagnostic:
+        return ()
+    method = re.compile(
+        r"(?P<prefix>public\s+void\s+configureRepositoryRestConfiguration\s*\(\s*"
+        r"RepositoryRestConfiguration\s+[A-Za-z_$][\w$]*\s*)\)"
+    )
+    repaired: list[str] = []
+    for path in repository.glob("src/main/java/**/*.java"):
+        content = path.read_text(errors="replace")
+        if "implements RepositoryRestConfigurer" not in content:
+            continue
+        updated, replacements = method.subn(
+            r"\g<prefix>, CorsRegistry cors)", content, count=1
+        )
+        if not replacements:
+            continue
+        cors_import = "import org.springframework.web.servlet.config.annotation.CorsRegistry;"
+        if cors_import not in updated:
+            imports = tuple(re.finditer(r"(?m)^import\s+[^;]+;\s*$", updated))
+            if not imports:
+                continue
+            insertion = imports[-1].end()
+            updated = updated[:insertion] + "\n" + cors_import + updated[insertion:]
+        path.write_text(updated)
+        repaired.append(str(path.relative_to(repository)))
+    return tuple(repaired)
 
 
 def configure_openapi_generator_for_springdoc(
@@ -219,6 +330,155 @@ def remove_obsolete_junit_platform_surefire_provider(
         return False
     pom.write_text(content[: match.start()] + updated_plugin + content[match.end() :])
     return True
+
+
+def configure_boot_validation_starter(
+    repository: Path, failure: VerificationResult
+) -> bool:
+    """Replace a bare validation API with Boot's managed validation implementation."""
+
+    diagnostic = f"{failure.stdout}\n{failure.stderr}"
+    if _MISSING_HIBERNATE_VALIDATOR_CONSTRAINTS not in diagnostic:
+        return False
+    pom = repository / "pom.xml"
+    if not pom.is_file():
+        return False
+    content = pom.read_text(errors="replace")
+    validation_api = re.compile(
+        r"(?P<indent>^[ \t]*)<dependency>\s*"
+        r"<groupId>javax\.validation</groupId>\s*"
+        r"<artifactId>validation-api</artifactId>.*?"
+        r"</dependency>[ \t]*(?:\n|$)",
+        flags=re.DOTALL | re.MULTILINE,
+    )
+    match = validation_api.search(content)
+    if match is None:
+        return False
+    if "<artifactId>spring-boot-starter-validation</artifactId>" in content:
+        replacement = ""
+    else:
+        indent = match.group("indent")
+        replacement = (
+            f"{indent}<dependency>\n"
+            f"{indent}    <groupId>org.springframework.boot</groupId>\n"
+            f"{indent}    <artifactId>spring-boot-starter-validation</artifactId>\n"
+            f"{indent}</dependency>\n"
+        )
+    pom.write_text(content[: match.start()] + replacement + content[match.end() :])
+    return True
+
+
+def make_password_encoder_bean_independent(
+    repository: Path, failure: VerificationResult
+) -> tuple[str, ...]:
+    """Break Boot 2.6 security configuration cycles around a stateless encoder bean."""
+
+    diagnostic = f"{failure.stdout}\n{failure.stderr}"
+    if (
+        _CIRCULAR_SECURITY_CONFIGURATION not in diagnostic
+        or "webSecurityConfig" not in diagnostic
+    ):
+        return ()
+    repaired: list[str] = []
+    pattern = re.compile(
+        r"(?P<prefix>@Bean[ \t]*\n[ \t]*public[ \t]+)"
+        r"(?!static\b)"
+        r"(?P<signature>BCryptPasswordEncoder[ \t]+bcryptEncoder[ \t]*\([ \t]*\))"
+    )
+    for path in repository.glob("src/main/java/**/*.java"):
+        content = path.read_text(errors="replace")
+        updated, replacements = pattern.subn(
+            r"\g<prefix>static \g<signature>", content, count=1
+        )
+        if replacements:
+            path.write_text(updated)
+            repaired.append(str(path.relative_to(repository)))
+    return tuple(repaired)
+
+
+def use_explicit_ant_path_request_matchers(
+    repository: Path, failure: VerificationResult
+) -> tuple[str, ...]:
+    """Repair Security 5.8 string matchers when only RequestMatcher[] is available."""
+
+    diagnostic = f"{failure.stdout}\n{failure.stderr}"
+    if (
+        "method requestMatchers" not in diagnostic
+        or _REQUEST_MATCHER_SIGNATURE_FAILURE not in diagnostic
+    ):
+        return ()
+    repaired: list[str] = []
+    matcher_call = re.compile(r"\.requestMatchers\s*\(")
+    string_literal = re.compile(r'"(?:\\.|[^"\\])*"')
+    for path in repository.glob("src/main/java/**/*.java"):
+        content = path.read_text(errors="replace")
+        replacements: list[tuple[int, int, str]] = []
+        for match in matcher_call.finditer(content):
+            opening = content.find("(", match.start(), match.end())
+            closing = _matching_parenthesis(content, opening)
+            if closing is None:
+                continue
+            arguments = _split_java_arguments(content[opening + 1 : closing])
+            if not arguments or not all(
+                string_literal.fullmatch(argument) for argument in arguments
+            ):
+                continue
+            replacement = ", ".join(
+                f"new AntPathRequestMatcher({argument})" for argument in arguments
+            )
+            replacements.append((opening + 1, closing, replacement))
+        if not replacements:
+            continue
+        updated = content
+        for start, end, replacement in reversed(replacements):
+            updated = updated[:start] + replacement + updated[end:]
+        matcher_import = (
+            "import org.springframework.security.web.util.matcher."
+            "AntPathRequestMatcher;"
+        )
+        if matcher_import not in updated:
+            imports = tuple(re.finditer(r"(?m)^import\s+[^;]+;\s*$", updated))
+            if imports:
+                insertion = imports[-1].end()
+                updated = updated[:insertion] + "\n" + matcher_import + updated[insertion:]
+            else:
+                package = re.search(r"(?m)^package\s+[^;]+;\s*$", updated)
+                insertion = package.end() if package else 0
+                prefix = "\n\n" if insertion else ""
+                updated = updated[:insertion] + prefix + matcher_import + "\n" + updated[insertion:]
+        path.write_text(updated)
+        repaired.append(str(path.relative_to(repository)))
+    return tuple(repaired)
+
+
+def remove_legacy_global_method_security_inheritance(
+    repository: Path, failure: VerificationResult
+) -> tuple[str, ...]:
+    """Finish Security 6 annotation migration by removing its legacy superclass."""
+
+    diagnostic = f"{failure.stdout}\n{failure.stderr}"
+    if _LEGACY_METHOD_SECURITY_CONFIGURATION_FAILURE not in diagnostic:
+        return ()
+    repaired: list[str] = []
+    inheritance = re.compile(
+        r"(?P<name>\bclass\s+[A-Za-z_$][\w$]*)\s+"
+        r"extends\s+GlobalMethodSecurityConfiguration\b"
+    )
+    legacy_import = re.compile(
+        r"(?m)^import\s+org\.springframework\.security\.config\.annotation\.method\."
+        r"configuration\.GlobalMethodSecurityConfiguration;\s*\n"
+    )
+    for path in repository.glob("src/main/java/**/*.java"):
+        content = path.read_text(errors="replace")
+        if "@EnableMethodSecurity" not in content:
+            continue
+        updated, replacements = inheritance.subn(r"\g<name>", content, count=1)
+        if not replacements:
+            continue
+        updated = legacy_import.sub("", updated, count=1)
+        path.write_text(updated)
+        repaired.append(str(path.relative_to(repository)))
+    return tuple(repaired)
 
 
 def _matching_parenthesis(content: str, opening: int) -> int | None:
@@ -420,12 +680,54 @@ def springdoc_repair_applicable(
         and pom.is_file()
         and "junit-platform-surefire-provider" in pom.read_text(errors="replace")
     )
+    missing_validation_implementation = (
+        _MISSING_HIBERNATE_VALIDATOR_CONSTRAINTS in diagnostic
+        and pom.is_file()
+        and "<artifactId>validation-api</artifactId>" in pom.read_text(errors="replace")
+    )
+    circular_security_configuration = (
+        _CIRCULAR_SECURITY_CONFIGURATION in diagnostic
+        and "webSecurityConfig" in diagnostic
+        and any(
+            "BCryptPasswordEncoder bcryptEncoder()" in path.read_text(errors="replace")
+            for path in repository.glob("src/main/java/**/*.java")
+        )
+    )
+    request_matcher_signature_failure = (
+        "method requestMatchers" in diagnostic
+        and _REQUEST_MATCHER_SIGNATURE_FAILURE in diagnostic
+        and any(
+            ".requestMatchers(" in path.read_text(errors="replace")
+            for path in repository.glob("src/main/java/**/*.java")
+        )
+    )
+    legacy_method_security_configuration = (
+        _LEGACY_METHOD_SECURITY_CONFIGURATION_FAILURE in diagnostic
+        and any(
+            "@EnableMethodSecurity" in (content := path.read_text(errors="replace"))
+            and "extends GlobalMethodSecurityConfiguration" in content
+            for path in repository.glob("src/main/java/**/*.java")
+        )
+    )
+    repository_rest_signature_failure = (
+        "method does not override or implement a method from a supertype" in diagnostic
+        and any(
+            "implements RepositoryRestConfigurer" in (content := path.read_text(errors="replace"))
+            and "configureRepositoryRestConfiguration(RepositoryRestConfiguration" in content
+            for path in repository.glob("src/main/java/**/*.java")
+        )
+    )
     return (
         bool(springdoc_repair_files(repository))
         or generated_annotation_failure
         or boot3_test_failure
         or invalid_info_constructor
         or obsolete_surefire_provider
+        or missing_validation_implementation
+        or circular_security_configuration
+        or request_matcher_signature_failure
+        or legacy_method_security_configuration
+        or repository_rest_signature_failure
     )
 
 
@@ -438,15 +740,103 @@ class DeterministicMigrationRepairer:
         step: RecipeRecommendation,
         failure: VerificationResult,
     ) -> VerificationResult:
-        del step
         info_repairs = repair_springdoc_info_constructor(repository, failure)
         surefire_repaired = remove_obsolete_junit_platform_surefire_provider(
             repository, failure
         )
         generator_repaired = configure_openapi_generator_for_springdoc(repository, failure)
         boot3_repairs = configure_boot3_test_compatibility(repository, failure)
-        if not (info_repairs or surefire_repaired or generator_repaired or boot3_repairs):
+        validation_repaired = bool(
+            _BOOT_2_UPGRADE_RECIPE.fullmatch(step.recipe)
+        ) and configure_boot_validation_starter(repository, failure)
+        encoder_repairs = (
+            make_password_encoder_bean_independent(repository, failure)
+            if step.recipe == _BOOT_26_RECIPE
+            else ()
+        )
+        request_matcher_repairs = (
+            use_explicit_ant_path_request_matchers(repository, failure)
+            if step.recipe == _SPRING_SECURITY_58_RECIPE
+            else ()
+        )
+        method_security_repairs = (
+            remove_legacy_global_method_security_inheritance(repository, failure)
+            if step.recipe == _BOOT_30_RECIPE
+            else ()
+        )
+        springfox_repairs = (
+            remove_obsolete_springfox_configuration(repository, failure)
+            if step.recipe == _SPRINGFOX_TO_SPRINGDOC_RECIPE
+            else ()
+        )
+        repository_rest_repairs = (
+            update_repository_rest_configurer_signature(repository, failure)
+            if step.recipe == _BOOT_27_RECIPE
+            else ()
+        )
+        if not (
+            info_repairs
+            or surefire_repaired
+            or generator_repaired
+            or boot3_repairs
+            or validation_repaired
+            or encoder_repairs
+            or request_matcher_repairs
+            or method_security_repairs
+            or springfox_repairs
+            or repository_rest_repairs
+        ):
             return _result(1, "No deterministic migration repair matched the failure")
+        if validation_repaired:
+            return _result(
+                0,
+                stdout=(
+                    "Replaced the bare Bean Validation API with Spring Boot's managed "
+                    "validation starter"
+                ),
+            )
+        if encoder_repairs:
+            return _result(
+                0,
+                stdout=(
+                    "Made the BCrypt password-encoder bean independent of its security "
+                    f"configuration: {', '.join(encoder_repairs)}"
+                ),
+            )
+        if request_matcher_repairs:
+            return _result(
+                0,
+                stdout=(
+                    "Replaced incompatible Spring Security string request matchers with "
+                    "explicit AntPathRequestMatcher instances: "
+                    f"{', '.join(request_matcher_repairs)}"
+                ),
+            )
+        if method_security_repairs:
+            return _result(
+                0,
+                stdout=(
+                    "Removed legacy GlobalMethodSecurityConfiguration inheritance from "
+                    "Spring Security 6 configuration: "
+                    f"{', '.join(method_security_repairs)}"
+                ),
+            )
+        if springfox_repairs:
+            return _result(
+                0,
+                stdout=(
+                    "Removed obsolete Springfox annotations and imports after the Springdoc "
+                    f"conversion: {', '.join(springfox_repairs)}"
+                ),
+            )
+        if repository_rest_repairs:
+            return _result(
+                0,
+                stdout=(
+                    "Updated RepositoryRestConfigurer for the Spring Boot 2.7 CorsRegistry "
+                    f"signature: {', '.join(repository_rest_repairs)}"
+                ),
+            )
         details = "; ".join((*info_repairs, *boot3_repairs))
         return _result(
             0,
@@ -478,8 +868,32 @@ class AiMigrationRepairer:
         )
         generator_repaired = configure_openapi_generator_for_springdoc(repository, failure)
         boot3_repairs = configure_boot3_test_compatibility(repository, failure)
+        validation_repaired = bool(
+            _BOOT_2_UPGRADE_RECIPE.fullmatch(step.recipe)
+        ) and configure_boot_validation_starter(repository, failure)
+        encoder_repairs = (
+            make_password_encoder_bean_independent(repository, failure)
+            if step.recipe == _BOOT_26_RECIPE
+            else ()
+        )
         allowed = springdoc_repair_files(repository)
         if not allowed:
+            if validation_repaired:
+                return _result(
+                    0,
+                    stdout=(
+                        "Replaced the bare Bean Validation API with Spring Boot's managed "
+                        "validation starter"
+                    ),
+                )
+            if encoder_repairs:
+                return _result(
+                    0,
+                    stdout=(
+                        "Made the BCrypt password-encoder bean independent of its security "
+                        f"configuration: {', '.join(encoder_repairs)}"
+                    ),
+                )
             if info_repairs or surefire_repaired or generator_repaired or boot3_repairs:
                 details = "; ".join((*info_repairs, *boot3_repairs))
                 return _result(
