@@ -558,6 +558,31 @@ def test_boot27_springfox_failure_is_retryable_after_ordering_rule() -> None:
     }
 
 
+def test_springfox_generated_annotation_failure_is_retryable_after_repair() -> None:
+    retryable = _retryable_repaired_recipes(
+        Path("."),
+        "[ERROR] symbol:   class ApiModelProperty",
+    )
+
+    assert retryable == {
+        "org.openrewrite.java.springdoc.SpringFoxToSpringDoc"
+    }
+
+
+def test_springfox_schema_version_failure_is_retryable_after_repair() -> None:
+    retryable = _retryable_repaired_recipes(
+        Path("."),
+        (
+            "symbol:   method requiredMode()\n"
+            "location: @interface io.swagger.v3.oas.annotations.media.Schema"
+        ),
+    )
+
+    assert retryable == {
+        "org.openrewrite.java.springdoc.SpringFoxToSpringDoc"
+    }
+
+
 def test_boot3_failure_is_retryable_after_generator_repair_is_available(
     tmp_path: Path,
 ) -> None:
@@ -817,6 +842,13 @@ def test_plan_command_runs_ai_planner_and_prints_its_output(
     assert calls == [
         (tmp_path, ModernizationGoal(description="Upgrade Java", target_java=21), True)
     ]
+
+
+def test_run_command_exposes_repair_mode_override() -> None:
+    result = CliRunner().invoke(app, ["run", "--help"])
+
+    assert result.exit_code == 0
+    assert "--repair-mode" in result.stdout
 
 
 def test_plan_command_accepts_repository_as_the_positional_argument(

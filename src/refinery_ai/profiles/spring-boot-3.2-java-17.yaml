@@ -4,6 +4,9 @@ goal: >-
   Reach a verified Java 17 and Spring Boot 3.2 baseline. Use Jakarta APIs and Springdoc 2.5
   when API documentation is present. Stop at Spring Boot 3.2 and Java 17.
 target_java: 17
+evidence:
+  context_graph: "off"
+  sonarqube: "off"
 exclude_recipes:
   - "*UpgradeToJava2[1-9]"
   - "*UpgradeToJava[3-9][0-9]"

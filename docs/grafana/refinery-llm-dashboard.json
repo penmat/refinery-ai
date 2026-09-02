@@ -1,0 +1,310 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "LLM usage emitted by Refinery's short-lived planner and repair processes.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "fixedColor", "fixedColor": "blue"},
+          "decimals": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 5, "w": 5, "x": 0, "y": 0},
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.2.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(last_over_time(gen_ai_client_token_usage_sum{service_name=\"refinery-ai\"}[$__range]))",
+          "instant": true,
+          "legendFormat": "Total tokens",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Total tokens",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "fixedColor", "fixedColor": "purple"}, "decimals": 0, "unit": "short"},
+        "overrides": []
+      },
+      "gridPos": {"h": 5, "w": 5, "x": 5, "y": 0},
+      "id": 2,
+      "options": {
+        "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true
+      },
+      "pluginVersion": "13.2.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(last_over_time(gen_ai_client_token_usage_sum{service_name=\"refinery-ai\",gen_ai_token_type=\"input\"}[$__range]))",
+          "instant": true, "legendFormat": "Input tokens", "range": false, "refId": "A"
+        }
+      ],
+      "title": "Input tokens",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "fixedColor", "fixedColor": "green"}, "decimals": 0, "unit": "short"},
+        "overrides": []
+      },
+      "gridPos": {"h": 5, "w": 5, "x": 10, "y": 0},
+      "id": 3,
+      "options": {
+        "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true
+      },
+      "pluginVersion": "13.2.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(last_over_time(gen_ai_client_token_usage_sum{service_name=\"refinery-ai\",gen_ai_token_type=\"output\"}[$__range]))",
+          "instant": true, "legendFormat": "Output tokens", "range": false, "refId": "A"
+        }
+      ],
+      "title": "Output tokens",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "fixedColor", "fixedColor": "orange"}, "decimals": 0, "unit": "short"},
+        "overrides": []
+      },
+      "gridPos": {"h": 5, "w": 4, "x": 15, "y": 0},
+      "id": 4,
+      "options": {
+        "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true
+      },
+      "pluginVersion": "13.2.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(last_over_time(gen_ai_client_token_usage_count{service_name=\"refinery-ai\",gen_ai_token_type=\"input\"}[$__range]))",
+          "instant": true, "legendFormat": "Model requests", "range": false, "refId": "A"
+        }
+      ],
+      "title": "Model requests",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "fixedColor", "fixedColor": "yellow"}, "decimals": 4, "unit": "currencyUSD"},
+        "overrides": []
+      },
+      "gridPos": {"h": 5, "w": 5, "x": 19, "y": 0},
+      "id": 5,
+      "options": {
+        "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true
+      },
+      "pluginVersion": "13.2.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(last_over_time(operation_cost_sum{service_name=\"refinery-ai\"}[$__range]))",
+          "instant": true, "legendFormat": "Estimated cost", "range": false, "refId": "A"
+        }
+      ],
+      "title": "Estimated cost",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "decimals": 0, "unit": "short"},
+        "overrides": []
+      },
+      "gridPos": {"h": 9, "w": 10, "x": 0, "y": 5},
+      "id": 6,
+      "options": {
+        "displayLabels": ["name", "percent"],
+        "legend": {"displayMode": "table", "placement": "right", "showLegend": true, "values": ["value", "percent"]},
+        "pieType": "donut",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "tooltip": {"hideZeros": false, "mode": "single", "sort": "none"}
+      },
+      "pluginVersion": "13.2.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (gen_ai_token_type) (last_over_time(gen_ai_client_token_usage_sum{service_name=\"refinery-ai\"}[$__range]))",
+          "instant": true, "legendFormat": "{{gen_ai_token_type}}", "range": false, "refId": "A"
+        }
+      ],
+      "title": "Input vs. output tokens",
+      "type": "piechart"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "continuous-GrYlRd"}, "decimals": 0, "unit": "short"},
+        "overrides": []
+      },
+      "gridPos": {"h": 9, "w": 14, "x": 10, "y": 5},
+      "id": 7,
+      "options": {
+        "displayMode": "gradient",
+        "legend": {"calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": false},
+        "maxVizHeight": 300,
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "showUnfilled": true,
+        "sizing": "auto",
+        "text": {},
+        "valueMode": "color"
+      },
+      "pluginVersion": "13.2.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (refinery_phase, refinery_run_id) (last_over_time(refinery_llm_tokens_total{service_name=\"refinery-ai\",refinery_phase=~\"planning|repair\"}[$__range]))",
+          "instant": true,
+          "legendFormat": "{{refinery_phase}} · {{refinery_run_id}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Tokens per workflow run",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "fixedColor", "fixedColor": "blue"}, "decimals": 0, "unit": "short"},
+        "overrides": []
+      },
+      "gridPos": {"h": 5, "w": 8, "x": 0, "y": 14},
+      "id": 9,
+      "options": {
+        "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true
+      },
+      "pluginVersion": "13.2.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(last_over_time(refinery_llm_tokens_total{service_name=\"refinery-ai\",refinery_phase=\"planning\"}[$__range]))",
+          "instant": true, "legendFormat": "Planning tokens", "range": false, "refId": "A"
+        }
+      ],
+      "title": "Planning tokens",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "fixedColor", "fixedColor": "red"}, "decimals": 0, "unit": "short"},
+        "overrides": []
+      },
+      "gridPos": {"h": 5, "w": 8, "x": 8, "y": 14},
+      "id": 10,
+      "options": {
+        "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true
+      },
+      "pluginVersion": "13.2.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(last_over_time(refinery_llm_tokens_total{service_name=\"refinery-ai\",refinery_phase=\"repair\"}[$__range]))",
+          "instant": true, "legendFormat": "Repair tokens", "range": false, "refId": "A"
+        }
+      ],
+      "title": "Repair tokens",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "fixedColor", "fixedColor": "orange"}, "decimals": 0, "unit": "short"},
+        "overrides": []
+      },
+      "gridPos": {"h": 5, "w": 8, "x": 16, "y": 14},
+      "id": 11,
+      "options": {
+        "displayMode": "gradient", "legend": {"showLegend": false}, "orientation": "horizontal",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "showUnfilled": true, "sizing": "auto", "valueMode": "color"
+      },
+      "pluginVersion": "13.2.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (refinery_plan_id, refinery_repair_attempt) (last_over_time(refinery_llm_tokens_total{service_name=\"refinery-ai\",refinery_phase=\"repair\"}[$__range]))",
+          "instant": true,
+          "legendFormat": "plan {{refinery_plan_id}} · attempt {{refinery_repair_attempt}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Repair tokens by attempt",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "line", "fillOpacity": 15, "lineWidth": 2, "showPoints": "never", "spanNulls": true}, "decimals": 0, "unit": "short"},
+        "overrides": []
+      },
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 19},
+      "id": 8,
+      "options": {
+        "legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true},
+        "tooltip": {"hideZeros": false, "mode": "multi", "sort": "desc"}
+      },
+      "pluginVersion": "13.2.0",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (refinery_phase) (last_over_time(refinery_llm_tokens_total{service_name=\"refinery-ai\",refinery_phase=~\"planning|repair\"}[$__range]))",
+          "instant": false,
+          "legendFormat": "{{refinery_phase}} tokens",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Tokens by workflow phase",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 42,
+  "tags": ["refinery", "llm", "opentelemetry"],
+  "templating": {"list": []},
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Refinery LLM Usage",
+  "uid": "refinery-llm-usage",
+  "version": 1
+}

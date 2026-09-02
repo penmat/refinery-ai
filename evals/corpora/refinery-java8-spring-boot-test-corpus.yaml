@@ -30,9 +30,7 @@ corpus:
 projects:
   - {id: spring-boot-ecommerce-devrobots, name: spring-boot-ecommerce, repo_url: "https://github.com/devRobots/spring-boot-ecommerce", tier: normal, category: ecommerce-rest, notes: "MySQL backend with React; archived repository and useful stable fixture."}
   - {id: springboot-ecommerce-hendisantika, name: springboot-ecommerce, repo_url: "https://github.com/hendisantika/springboot-ecommerce", tier: normal, category: ecommerce, notes: "H2 and Angular; moderate, self-contained application."}
-  - {id: fleetms-v1, name: fleetms-v1, repo_url: "https://github.com/KindsonTheGenius/fleetms-v1", tier: normal, category: fleet-management, notes: "JPA, Security, Thymeleaf, MySQL, and Lombok."}
   - {id: spring-thymeleaf-shop, name: spring-thymeleaf-shop, repo_url: "https://github.com/CharlesFrost/spring-thymeleaf-shop", tier: easy, category: mvc-shop, notes: "Spring Boot 2.1.7, JPA, Security, Thymeleaf, and H2; clean migration fixture."}
-  - {id: education-platform-capstone-project, name: education-platform-capstone-project, repo_url: "https://github.com/Nazariy995/education-platform-capstone-project", tier: older, category: education-platform, notes: "Spring Boot 1.4.1; use after simpler Boot 2.x cases."}
   - {id: blog-app-rahul, name: BlogApp, repo_url: "https://github.com/Rahul9332935/BlogApp", tier: normal, category: blog-rest, notes: "JWT/Security with users, posts, categories, and comments."}
   - {id: springboot-security-jwt, name: SpringBoot-Security-JWT, repo_url: "https://github.com/maxwellkimaiyo/SpringBoot-Security-JWT", tier: easy, category: authentication-service, notes: "PostgreSQL and JWT; useful focused Security migration."}
   - {id: task-management-system, name: TASK-Management-System, repo_url: "https://github.com/ayushman1024/TASK-Management-System", tier: normal, category: task-management-rest, notes: "MySQL and JWT; intentionally ordinary application code."}

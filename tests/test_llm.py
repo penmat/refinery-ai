@@ -4,7 +4,7 @@ from typing import Any
 import pytest
 
 from refinery_ai.config import Settings
-from refinery_ai.llm import MaxTurnsExceeded, run_tool_loop, tool_definition
+from refinery_ai.llm import MaxTurnsExceeded, _litellm_completion, run_tool_loop, tool_definition
 
 
 def response(*, content: str | None = None, tool_calls: list[Any] | None = None) -> Any:
@@ -130,3 +130,35 @@ def test_run_tool_loop_enforces_max_turns() -> None:
 def test_run_tool_loop_validates_input() -> None:
     with pytest.raises(ValueError, match="max_turns"):
         run_tool_loop([], max_turns=0)
+
+
+def test_real_completion_uses_configured_telemetry_callbacks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[dict[str, Any]] = []
+    callback = object()
+
+    monkeypatch.setattr("refinery_ai.telemetry.litellm_callbacks", lambda: (callback,))
+    import litellm
+
+    monkeypatch.setattr(litellm, "callbacks", [])
+    monkeypatch.setattr("litellm.completion", lambda **kwargs: requests.append(kwargs) or "ok")
+
+    assert _litellm_completion(model="test", messages=[]) == "ok"
+    assert litellm.callbacks == [callback]
+    assert "success_callback" not in requests[0]
+    assert "failure_callback" not in requests[0]
+
+
+def test_real_completion_does_not_duplicate_global_telemetry_callbacks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    callback = object()
+    import litellm
+
+    monkeypatch.setattr("refinery_ai.telemetry.litellm_callbacks", lambda: (callback,))
+    monkeypatch.setattr(litellm, "callbacks", [callback])
+    monkeypatch.setattr("litellm.completion", lambda **_: "ok")
+
+    assert _litellm_completion(model="test", messages=[]) == "ok"
+    assert litellm.callbacks == [callback]

@@ -9,7 +9,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from refinery_ai.models import MigrationRun, RecipePlan, RunReport, RunStatus
-from refinery_ai.profiles import ModernizationProfile
+from refinery_ai.profiles import EvidenceMode, ModernizationProfile
 
 
 class ProfileRunState(BaseModel):
@@ -112,11 +112,18 @@ class ProfileRunner:
         previous_recipes: tuple[str, ...] | None = None
         for cycle in range(1, self.max_cycles + 1):
             dependency_fingerprint = dependency_inputs_fingerprint(self.repository)
-            run_sonar = state.sonar_dependency_fingerprint != dependency_fingerprint
-            sonar_note = "with SonarQube" if run_sonar else "reusing SonarQube evidence"
+            sonar_enabled = self.profile.evidence.sonarqube is not EvidenceMode.OFF
+            run_sonar = sonar_enabled and (
+                state.sonar_dependency_fingerprint != dependency_fingerprint
+            )
+            sonar_note = (
+                "without SonarQube"
+                if not sonar_enabled
+                else "with SonarQube" if run_sonar else "reusing SonarQube evidence"
+            )
             self.progress(f"Cycle {cycle}: analyzing ({sonar_note}) ...")
             sonar_available = self.analyze(run_sonar)
-            if not run_sonar and not sonar_available:
+            if sonar_enabled and not run_sonar and not sonar_available:
                 self.progress(
                     "Retained SonarQube evidence is unavailable; running a fresh scan ..."
                 )

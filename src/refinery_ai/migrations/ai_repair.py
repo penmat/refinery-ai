@@ -16,6 +16,8 @@ from refinery_ai.models import RecipeRecommendation, RepairMode, VerificationRes
 
 _SPRINGFOX_MARKERS = ("springfox.", "transformation of Docket", "Migrate manually")
 _MISSING_SWAGGER_1_ANNOTATIONS = "package io.swagger.annotations does not exist"
+_MISSING_GENERATED_API_MODEL_PROPERTY = "symbol:   class ApiModelProperty"
+_MISSING_SCHEMA_REQUIRED_MODE = "symbol:   method requiredMode()"
 _MISSING_GENERATED_JAVAX_APIS = (
     "package javax.validation does not exist",
     "package javax.annotation does not exist",
@@ -111,7 +113,11 @@ def remove_obsolete_springfox_configuration(
         "package springfox.documentation.swagger2.annotations does not exist"
         in diagnostic
     )
-    if not (missing_configuration or missing_annotation):
+    missing_handler_providers = (
+        "package springfox.documentation.spring.web.plugins does not exist"
+        in diagnostic
+    )
+    if not (missing_configuration or missing_annotation or missing_handler_providers):
         return ()
     repaired: list[str] = []
     for path in repository.glob("src/main/java/**/*.java"):
@@ -139,6 +145,51 @@ def remove_obsolete_springfox_configuration(
             updated = re.sub(
                 r"(?m)^[ \t]*@EnableSwagger2WebMvc[ \t]*\n", "", updated
             )
+        if missing_handler_providers:
+            updated = re.sub(
+                r"(?m)^import\s+springfox\.documentation\.spring\.web\.plugins\."
+                r"(?:WebFlux|WebMvc)RequestHandlerProvider;\s*\n",
+                "",
+                updated,
+            )
+            method_marker = (
+                "public static BeanPostProcessor "
+                "springfoxHandlerProviderBeanPostProcessor()"
+            )
+            method_start = updated.find(method_marker)
+            if method_start >= 0:
+                annotation_start = updated.rfind("@Bean", 0, method_start)
+                comment_start = updated.rfind("/**", 0, method_start)
+                block_start = max(annotation_start, comment_start)
+                opening = updated.find("{", method_start)
+                closing = _matching_brace(updated, opening) if opening >= 0 else None
+                if closing is not None:
+                    updated = updated[:block_start] + updated[closing + 1 :]
+            for import_name, identifier in (
+                ("org.springframework.beans.BeansException", "BeansException"),
+                (
+                    "org.springframework.beans.factory.config.BeanPostProcessor",
+                    "BeanPostProcessor",
+                ),
+                ("org.springframework.context.annotation.Bean", "@Bean"),
+                ("org.springframework.util.ReflectionUtils", "ReflectionUtils"),
+                (
+                    "org.springframework.web.servlet.mvc.method."
+                    "RequestMappingInfoHandlerMapping",
+                    "RequestMappingInfoHandlerMapping",
+                ),
+                ("java.lang.reflect.Field", "Field"),
+                ("java.util.List", "List"),
+            ):
+                source_without_imports = re.sub(
+                    r"(?m)^import\s+[^;]+;\s*\n", "", updated
+                )
+                if identifier not in source_without_imports:
+                    updated = re.sub(
+                        rf"(?m)^import\s+{re.escape(import_name)};\s*\n",
+                        "",
+                        updated,
+                    )
         if "@Import(" not in updated:
             updated = re.sub(
                 r"(?m)^import\s+org\.springframework\.context\.annotation\.Import;\s*\n",
@@ -191,10 +242,20 @@ def configure_openapi_generator_for_springdoc(
     """Align generated Spring models with Springdoc and the active Boot generation."""
 
     diagnostic = f"{failure.stdout}\n{failure.stderr}"
+    needs_swagger2_annotations = _MISSING_GENERATED_API_MODEL_PROPERTY in diagnostic
+    needs_newer_springdoc = (
+        _MISSING_SCHEMA_REQUIRED_MODE in diagnostic
+        and "io.swagger.v3.oas.annotations.media.Schema" in diagnostic
+    )
     needs_boot3_generator = any(
         marker in diagnostic for marker in _MISSING_GENERATED_JAVAX_APIS
     )
-    if _MISSING_SWAGGER_1_ANNOTATIONS not in diagnostic and not needs_boot3_generator:
+    if (
+        _MISSING_SWAGGER_1_ANNOTATIONS not in diagnostic
+        and not needs_swagger2_annotations
+        and not needs_newer_springdoc
+        and not needs_boot3_generator
+    ):
         return False
     pom = repository / "pom.xml"
     if not pom.is_file():
@@ -202,6 +263,71 @@ def configure_openapi_generator_for_springdoc(
     content = pom.read_text(errors="replace")
     if "openapi-generator-maven-plugin" not in content:
         return False
+    if needs_newer_springdoc:
+        springdoc_dependency = re.compile(
+            r"(?P<prefix><dependency>\s*"
+            r"<groupId>\s*org\.springdoc\s*</groupId>\s*"
+            r"<artifactId>\s*springdoc-openapi-ui\s*</artifactId>\s*"
+            r"<version>)[^<]+(?P<suffix></version>\s*</dependency>)",
+            re.DOTALL,
+        )
+        updated, replacements = springdoc_dependency.subn(
+            r"\g<prefix>1.8.0\g<suffix>", content, count=1
+        )
+        if not replacements or updated == content:
+            return False
+        pom.write_text(updated)
+        return True
+    if needs_swagger2_annotations:
+        original_content = content
+        content, version_property_replacements = re.subn(
+            r"(<openapi-generator-maven-plugin\.version>)[^<]+"
+            r"(</openapi-generator-maven-plugin\.version>)",
+            r"\g<1>6.6.0\g<2>",
+            content,
+            count=1,
+        )
+        plugin_pattern = re.compile(
+            r"(?P<plugin><plugin>\s*.*?"
+            r"<artifactId>\s*openapi-generator-maven-plugin\s*</artifactId>"
+            r".*?</plugin>)",
+            re.DOTALL,
+        )
+        match = plugin_pattern.search(content)
+        if match is None:
+            return False
+        plugin = match.group("plugin")
+        if "<annotationLibrary>" in plugin:
+            updated_plugin = re.sub(
+                r"(<annotationLibrary>)[^<]*(</annotationLibrary>)",
+                r"\g<1>swagger2\g<2>",
+                plugin,
+                count=1,
+            )
+        else:
+            updated_plugin = re.sub(
+                r"^(?P<indent>[ \t]*)<configOptions>[ \t]*$",
+                lambda option: (
+                    f"{option.group('indent')}<configOptions>\n"
+                    f"{option.group('indent')}    "
+                    "<annotationLibrary>swagger2</annotationLibrary>"
+                ),
+                plugin,
+                count=1,
+                flags=re.MULTILINE,
+            )
+        if not version_property_replacements:
+            updated_plugin = re.sub(
+                r"(<version>)[^<]+(</version>)",
+                r"\g<1>6.6.0\g<2>",
+                updated_plugin,
+                count=1,
+            )
+        updated = content[: match.start("plugin")] + updated_plugin + content[match.end("plugin") :]
+        if updated == original_content:
+            return False
+        pom.write_text(updated)
+        return True
     if needs_boot3_generator:
         updated = re.sub(
             r"(<openapi-generator-maven-plugin\.version>)[^<]+(</openapi-generator-maven-plugin\.version>)",
@@ -506,6 +632,20 @@ def _matching_parenthesis(content: str, opening: int) -> int | None:
     return None
 
 
+def _matching_brace(content: str, opening: int) -> int | None:
+    """Return the closing brace paired with ``opening``."""
+
+    depth = 0
+    for index in range(opening, len(content)):
+        if content[index] == "{":
+            depth += 1
+        elif content[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
+
+
 def _split_java_arguments(content: str) -> list[str]:
     arguments: list[str] = []
     start = 0
@@ -655,12 +795,16 @@ def springdoc_repair_applicable(
     generated_annotation_failure = (
         (
             _MISSING_SWAGGER_1_ANNOTATIONS in diagnostic
+            or _MISSING_GENERATED_API_MODEL_PROPERTY in diagnostic
+            or _MISSING_SCHEMA_REQUIRED_MODE in diagnostic
             or any(marker in diagnostic for marker in _MISSING_GENERATED_JAVAX_APIS)
         )
         and pom.is_file()
         and "openapi-generator-maven-plugin" in pom.read_text(errors="replace")
         and (
             any(marker in diagnostic for marker in _MISSING_GENERATED_JAVAX_APIS)
+            or _MISSING_GENERATED_API_MODEL_PROPERTY in diagnostic
+            or _MISSING_SCHEMA_REQUIRED_MODE in diagnostic
             or not _has_legacy_swagger_annotations(pom.read_text(errors="replace"))
         )
     )

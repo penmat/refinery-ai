@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     litellm_model: str = "openai/gpt-5.6-terra"
     litellm_api_base: str | None = None
     openai_api_key: SecretStr | None = Field(default=None, validation_alias="OPENAI_API_KEY")
+    otel_enabled: bool = False
+    otel_service_name: str = "refinery-ai"
+    otel_endpoint: str = "http://localhost:4318"
+    otel_headers: SecretStr | None = None
+    otel_include_content: bool = False
     state_directory: Path = Path(".refinery")
     max_repair_attempts: int = 3
     repair_mode: RepairMode = RepairMode.DISABLED

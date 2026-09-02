@@ -41,6 +41,7 @@ from refinery_ai.profile_run import ProfileRunner
 from refinery_ai.profiles import load_profile
 from refinery_ai.summary import ProjectSummaryService, SummaryError
 from refinery_ai.summary.reporting import summary_markdown
+from refinery_ai.telemetry import configure_telemetry
 from refinery_ai.tools import RepositoryEvidenceTools
 
 app = typer.Typer(help="Safe, auditable Java modernization.", no_args_is_help=True)
@@ -53,6 +54,7 @@ def configure_cli_logging() -> None:
     """Enable progress logging for commands and inspection tools."""
 
     configure_logging()
+    configure_telemetry(Settings())
 
 
 def _print(report: RunReport) -> None:
@@ -151,6 +153,7 @@ def analyze_command(
     ] = False,
     internal_quiet: Annotated[bool, typer.Option(hidden=True)] = False,
     reuse_sonarqube: Annotated[bool, typer.Option(hidden=True)] = False,
+    generate_summary: Annotated[bool, typer.Option(hidden=True)] = True,
 ) -> Assessment:
     """Discover, assess, and summarize a Java repository."""
 
@@ -175,7 +178,7 @@ def analyze_command(
     environment = HarnessRepositoryEnvironment(root)
     snapshot = environment.discover(root)
     graph_path = root / settings.state_directory / "context/context-graph.json"
-    if not graph_path.is_file():
+    if generate_summary and not graph_path.is_file():
         graph_path = environment.build_context(root).graph_path
     retained_results = {}
     if reuse_sonarqube and not enabled:
@@ -219,6 +222,8 @@ def analyze_command(
     _write_output(
         refinery / "assessments" / f"{current.assessment_id}.{report_label}{suffix}", retained
     )
+    if not generate_summary:
+        return current
     try:
         summary = ProjectSummaryService().summarize(
             root,
@@ -557,8 +562,19 @@ def run(
     max_cycles: Annotated[
         int, typer.Option("--max-cycles", min=1, help="Maximum profile migration cycles")
     ] = 20,
+    repair_mode: Annotated[
+        RepairMode | None,
+        typer.Option(
+            "--repair-mode",
+            help="Semantic repair policy: disabled, local, or configured-provider",
+        ),
+    ] = None,
 ) -> None:
     """Run manually, or converge on a named profile through repeated verified migrations."""
+
+    settings = Settings()
+    if repair_mode is not None:
+        settings.repair_mode = repair_mode
 
     if profile_name is not None:
         if not apply:
@@ -566,7 +582,6 @@ def run(
             raise typer.Exit(code=2)
         root = repository.expanduser().resolve()
         profile = load_profile(profile_name)
-        settings = Settings()
         jdk_resolver = JdkResolver()
         effective_target = target_java if target_java is not None else profile.target_java
         goal_description = goal or profile.goal
@@ -597,6 +612,7 @@ def run(
                     include_tests=False,
                     internal_quiet=True,
                     reuse_sonarqube=not run_sonar,
+                    generate_summary=False,
                 )
             sonar = assessment.analyzers.get("sonarqube")
             return sonar is not None and sonar.status in {
@@ -616,6 +632,7 @@ def run(
                     ),
                     use_ai_planner=True,
                     profile=profile,
+                    collect_context_graph=profile.evidence.context_graph != "off",
                 )
 
         def migrate_cycle(plan_id: str) -> MigrationRun:
@@ -655,7 +672,7 @@ def run(
         raise typer.Exit(code=2)
 
     _print(
-        ModernizationFactory().run(
+        ModernizationFactory(settings=settings).run(
             repository,
             ModernizationGoal(description=goal, target_java=target_java),
             apply=apply,

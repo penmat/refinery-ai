@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from fnmatch import fnmatchcase
 from pathlib import Path
 
@@ -11,6 +12,17 @@ from pydantic import BaseModel, Field
 from refinery_ai.models import RecipePlan
 
 
+class EvidenceMode(StrEnum):
+    OFF = "off"
+    AUTO = "auto"
+    REQUIRED = "required"
+
+
+class ProfileEvidencePolicy(BaseModel):
+    context_graph: EvidenceMode = EvidenceMode.AUTO
+    sonarqube: EvidenceMode = EvidenceMode.AUTO
+
+
 class ModernizationProfile(BaseModel):
     name: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$")
     description: str
@@ -18,6 +30,7 @@ class ModernizationProfile(BaseModel):
     target_java: int | None = Field(default=None, ge=8)
     include_recipes: list[str] = Field(default_factory=list)
     exclude_recipes: list[str] = Field(default_factory=list)
+    evidence: ProfileEvidencePolicy = Field(default_factory=ProfileEvidencePolicy)
 
     def permits(self, recipe: str) -> bool:
         included = not self.include_recipes or any(

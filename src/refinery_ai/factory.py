@@ -7,10 +7,16 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
-from refinery_ai.agents.planning import PlanningDependencies, create_planning_agent
+from refinery_ai.agents.planning import (
+    PlanningDependencies,
+    create_planning_agent,
+    planning_payload_metrics,
+)
 from refinery_ai.config import Settings
 from refinery_ai.context_graph.contracts import ContextGraphBuildService
+from refinery_ai.context_graph.models import ContextGraphInfo
 from refinery_ai.harness import AssessmentHarnessPolicy, HarnessRepositoryEnvironment
+from refinery_ai.logging import get_logger
 from refinery_ai.migrations.spring_properties import DEFER_DATASOURCE_INITIALIZATION_RECIPE
 from refinery_ai.migrations.utf8 import UTF8_APPLICATION_PROPERTIES_RECIPE
 from refinery_ai.models import (
@@ -40,6 +46,9 @@ from refinery_ai.recipe_catalog import JavaMigrationCatalog, fetch_java_migratio
 from refinery_ai.recipe_sources import RecipeSource, fetch_recipe_sources
 from refinery_ai.reporting import to_markdown
 from refinery_ai.repository import RepositoryEnvironment
+from refinery_ai.telemetry import run_observed_agent
+
+logger = get_logger(__name__)
 
 
 def _retryable_repaired_recipes(repository: Path, failure_context: str) -> frozenset[str]:
@@ -78,6 +87,13 @@ def _retryable_repaired_recipes(repository: Path, failure_context: str) -> froze
         and "does not exist" in failure_context
     ):
         retryable.add("org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7")
+        retryable.add("org.openrewrite.java.springdoc.SpringFoxToSpringDoc")
+    if "symbol:   class ApiModelProperty" in failure_context:
+        retryable.add("org.openrewrite.java.springdoc.SpringFoxToSpringDoc")
+    if (
+        "symbol:   method requiredMode()" in failure_context
+        and "io.swagger.v3.oas.annotations.media.Schema" in failure_context
+    ):
         retryable.add("org.openrewrite.java.springdoc.SpringFoxToSpringDoc")
     if (
         "method does not override or implement a method from a supertype"
@@ -180,12 +196,21 @@ class ModernizationFactory:
         *,
         use_ai_planner: bool = False,
         profile: ModernizationProfile | None = None,
+        collect_context_graph: bool = True,
     ) -> RunReport:
+        run_id = uuid4().hex
         environment = self._environment(repository)
         snapshot = environment.discover(repository)
         state_dir = snapshot.repository / self.settings.state_directory
         state_dir.mkdir(parents=True, exist_ok=True)
-        graph = environment.build_context(snapshot.repository)
+        graph = (
+            environment.build_context(snapshot.repository)
+            if collect_context_graph
+            else ContextGraphInfo(
+                graph_path=state_dir / "context/context-graph.json",
+                provider="not-collected",
+            )
+        )
         plan: ModernizationPlan | RecipePlan
         if use_ai_planner:
             artifact_context = load_planning_artifacts(
@@ -241,13 +266,17 @@ class ModernizationFactory:
                     cache_directory=state_dir / "cache" / "recipe-sources",
                 )
             )
-            graph_context = environment.query_context(
-                graph.graph_path,
-                (
-                    f"{goal.description} Java version source target release compiler build "
-                    "dependencies imports deprecated APIs Guava OpenJPA Cobertura Scala Jakarta"
-                ),
-            )[: self.settings.max_output_characters]
+            graph_context = (
+                environment.query_context(
+                    graph.graph_path,
+                    (
+                        f"{goal.description} Java version source target release compiler build "
+                        "dependencies imports deprecated APIs Guava OpenJPA Cobertura Scala Jakarta"
+                    ),
+                )[: self.settings.max_output_characters]
+                if collect_context_graph
+                else "Context graph evidence was not collected for this profile."
+            )
             evidence_facts = _planning_evidence_facts(snapshot, goal, artifact_context)
             evidence_corpus = "\n".join(
                 (
@@ -269,45 +298,65 @@ class ModernizationFactory:
                     else None
                 ),
             )
-            result = planner.run_sync(
-                (
-                    "Recommend applicable Java migration recipes for this goal: "
-                    f"{goal.model_dump_json()}. Use only the supplied project artifacts and "
-                    "catalog. Explain evidence, benefit, dependencies/order, and confidence. "
-                    "This is planning only: do not execute anything."
+            planner_prompt = (
+                "Recommend applicable Java migration recipes for this goal: "
+                f"{goal.model_dump_json()}. Use only the supplied project artifacts and "
+                "catalog. Explain evidence, benefit, dependencies/order, and confidence. "
+                "This is planning only: do not execute anything."
+            )
+            planning_deps = PlanningDependencies(
+                snapshot=snapshot,
+                graph_summary=graph.summary(),
+                graph_context=graph_context,
+                artifact_context=artifact_context,
+                planner_rules=planner_rules,
+                evidence_facts=evidence_facts,
+                migration_failure_context=migration_failure_context,
+                failed_recipes=failed_recipes,
+                completed_recipes=migration_failures.completed_recipes,
+                recipe_catalog=(
+                    f"Catalog index: {catalog.source}\n"
+                    "Declarative recipe source array:\n"
+                    + json.dumps(
+                        [source.model_dump(mode="json") for source in recipe_sources],
+                        indent=2,
+                    )
                 ),
-                deps=PlanningDependencies(
-                    snapshot=snapshot,
-                    graph_summary=graph.summary(),
-                    graph_context=graph_context,
-                    artifact_context=artifact_context,
-                    planner_rules=planner_rules,
-                    evidence_facts=evidence_facts,
-                    migration_failure_context=migration_failure_context,
-                    failed_recipes=failed_recipes,
-                    completed_recipes=migration_failures.completed_recipes,
-                    recipe_catalog=(
-                        f"Catalog index: {catalog.source}\n"
-                        "Declarative recipe source array:\n"
-                        + json.dumps(
-                            [source.model_dump(mode="json") for source in recipe_sources],
-                            indent=2,
-                        )
-                    ),
-                    allowed_recipes=frozenset(
-                        source.recipe
-                        for source in recipe_sources
-                        if profile is None or profile.permits(source.recipe)
-                    ),
-                    recipe_artifacts={
-                        source.recipe: (
-                            "org.openrewrite.recipe:"
-                            f"{source.repository.rsplit('/', maxsplit=1)[-1]}:RELEASE"
-                        )
-                        for source in recipe_sources
-                    },
-                    evidence_corpus=evidence_corpus,
+                allowed_recipes=frozenset(
+                    source.recipe
+                    for source in recipe_sources
+                    if profile is None or profile.permits(source.recipe)
                 ),
+                recipe_artifacts={
+                    source.recipe: (
+                        "org.openrewrite.recipe:"
+                        f"{source.repository.rsplit('/', maxsplit=1)[-1]}:RELEASE"
+                    )
+                    for source in recipe_sources
+                },
+                evidence_corpus=evidence_corpus,
+            )
+            payload_metrics = planning_payload_metrics(planner_prompt, planning_deps)
+            component_metrics = ", ".join(
+                f"{key.removesuffix('_bytes')}={value}"
+                for key, value in payload_metrics.items()
+                if key.endswith("_bytes")
+            )
+            logger.info(
+                "Planner request text: %d bytes, %d characters, ~%d tokens; components (bytes): %s",
+                payload_metrics["bytes"],
+                payload_metrics["characters"],
+                payload_metrics["estimated_tokens"],
+                component_metrics,
+            )
+            result = run_observed_agent(
+                planner,
+                planner_prompt,
+                deps=planning_deps,
+                phase="planning",
+                run_id=run_id,
+                plan_id=run_id,
+                model=self.settings.model,
             )
             plan = _with_deterministic_prerequisites(result.output, snapshot)
             if profile is not None:
@@ -316,7 +365,7 @@ class ModernizationFactory:
             plan = rule_based_plan(snapshot, goal)
             validate_plan(plan)
         report = RunReport(
-            run_id=uuid4().hex,
+            run_id=run_id,
             profile=profile.name if profile else None,
             status=RunStatus.PLANNED,
             snapshot=snapshot,

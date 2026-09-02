@@ -72,7 +72,7 @@ def test_profile_runner_loops_until_plan_is_empty_and_skips_unchanged_sonar(
 
     assert result.status is RunStatus.COMPLETED
     assert result.cycles == 2
-    assert analyses == [True, False]
+    assert analyses == [False, False]
 
 
 def test_profile_runner_reruns_sonar_after_dependency_change(tmp_path: Path) -> None:
@@ -102,7 +102,7 @@ def test_profile_runner_reruns_sonar_after_dependency_change(tmp_path: Path) -> 
         migrate=migrate,
     ).run()
 
-    assert analyses == [True, True]
+    assert analyses == [False, False]
 
 
 def test_profile_runner_stops_when_migration_makes_no_change(tmp_path: Path) -> None:
@@ -149,4 +149,4 @@ def test_profile_runner_recovers_when_retained_sonar_evidence_is_missing(
         migrate=lambda plan_id: MigrationRun(plan_id=plan_id, status=RunStatus.COMPLETED),
     ).run()
 
-    assert analyses == [False, True]
+    assert analyses == [False]

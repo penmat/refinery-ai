@@ -339,6 +339,11 @@ Settings use the `REFINERY_` prefix and may be placed in `.env`. See `.env.examp
 | `REFINERY_MODEL` | `openai:gpt-5.6-terra` | Pydantic AI planner model identifier |
 | `REFINERY_LITELLM_MODEL` | `openai/gpt-5.6-terra` | LiteLLM provider and model identifier |
 | `REFINERY_LITELLM_API_BASE` | none | Optional provider base URL; set to `http://localhost:11434` for Ollama |
+| `REFINERY_OTEL_ENABLED` | `false` | Export Pydantic AI and LiteLLM telemetry over OTLP/HTTP |
+| `REFINERY_OTEL_SERVICE_NAME` | `refinery-ai` | OpenTelemetry service name |
+| `REFINERY_OTEL_ENDPOINT` | `http://localhost:4318` | OTLP/HTTP base endpoint; signal paths are added automatically |
+| `REFINERY_OTEL_HEADERS` | none | Comma-separated, URL-encoded OTLP headers such as `Authorization=Basic%20...` |
+| `REFINERY_OTEL_INCLUDE_CONTENT` | `false` | Include prompts, responses, tool arguments, and binary content in spans |
 | `REFINERY_MAX_REPAIR_ATTEMPTS` | `3` | Repair-loop attempt limit |
 | `REFINERY_REPAIR_MODE` | `disabled` | Semantic repair policy: `disabled`, `local`, or `configured-provider` |
 | `REFINERY_COMMAND_TIMEOUT_SECONDS` | `900` | Build command timeout |
@@ -356,6 +361,33 @@ Settings use the `REFINERY_` prefix and may be placed in `.env`. See `.env.examp
 | `REFINERY_SONARQUBE_STARTUP_TIMEOUT_SECONDS` | `180` | Temporary server startup timeout |
 | `REFINERY_SONARQUBE_ANALYSIS_TIMEOUT_SECONDS` | `900` | Scanner and compute-task timeout |
 | `REFINERY_SONARQUBE_GRADLE_SCANNER_VERSION` | `7.2.2.6593` | Pinned temporary Gradle scanner plugin |
+
+### LLM telemetry
+
+Telemetry is disabled by default. Enable it by pointing Refinery at any OTLP/HTTP receiver:
+
+```dotenv
+REFINERY_OTEL_ENABLED=true
+REFINERY_OTEL_ENDPOINT=http://localhost:4318
+REFINERY_OTEL_SERVICE_NAME=refinery-ai
+```
+
+Pydantic AI and direct LiteLLM calls share the same OpenTelemetry trace and meter providers.
+They emit model request spans, latency, errors, token-usage metrics, and cost data when the model
+provider supplies it. Prompt and response content is excluded by default; set
+`REFINERY_OTEL_INCLUDE_CONTENT=true` only when the destination and data-retention policy are
+appropriate for repository content.
+
+Refinery also emits `refinery.llm.tokens` and `refinery.llm.requests` with workflow dimensions
+for `refinery.phase`, `refinery.run.id`, `refinery.plan.id`, and, during AI repair,
+`refinery.repair.attempt`. The bundled
+[`docs/grafana/refinery-llm-dashboard.json`](docs/grafana/refinery-llm-dashboard.json) dashboard
+uses these dimensions to separate planning from repair usage and show repair attempts.
+
+For a hosted OTLP endpoint such as Langfuse, also set `REFINERY_OTEL_HEADERS` to the
+URL-encoded authorization header supplied by that service. Code using Refinery as a library can
+enable the same integration explicitly with `configure_telemetry(Settings())` before running an
+agent or calling `run_tool_loop`.
 
 ## LiteLLM tool loop
 

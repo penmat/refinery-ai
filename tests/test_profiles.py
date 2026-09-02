@@ -11,7 +11,7 @@ from refinery_ai.models import (
     RecipeRecommendation,
 )
 from refinery_ai.planning_artifacts import MigrationPlanStore
-from refinery_ai.profiles import available_profiles, load_profile
+from refinery_ai.profiles import EvidenceMode, available_profiles, load_profile
 
 
 def recommendation(recipe: str, depends_on: list[str] | None = None) -> RecipeRecommendation:
@@ -46,6 +46,8 @@ def test_builtin_profile_limits_versions_and_prunes_dependencies() -> None:
     assert [item.recipe for item in result.recommendations] == [boot32]
     assert result.recommendations[0].depends_on == []
     assert profile.target_java == 17
+    assert profile.evidence.context_graph is EvidenceMode.OFF
+    assert profile.evidence.sonarqube is EvidenceMode.OFF
 
 
 def test_migration_rejects_plan_from_another_profile(tmp_path: Path) -> None:

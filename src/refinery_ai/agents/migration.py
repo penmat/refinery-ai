@@ -42,6 +42,7 @@ from refinery_ai.models import (
     VerificationResult,
 )
 from refinery_ai.planning_artifacts import MigrationPlanStore
+from refinery_ai.telemetry import observe_llm
 from refinery_ai.verification import verification_command, verify
 
 
@@ -303,7 +304,13 @@ class MigrationAgent:
                         f"Attempting local/scoped repair {attempt}/"
                         f"{self.max_repair_attempts}: {label}"
                     )
-                    repair = self.repairer.repair(workspace.path, step, build_result)
+                    with observe_llm(
+                        "repair",
+                        run_id=run_id,
+                        plan_id=plan.plan_id,
+                        repair_attempt=attempt,
+                    ):
+                        repair = self.repairer.repair(workspace.path, step, build_result)
                     repairs.append(repair)
                     if not repair.green:
                         detail = repair.stderr.strip() or "no diagnostic was returned"

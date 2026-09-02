@@ -12,6 +12,7 @@ from typing import Any, Protocol, get_type_hints
 from pydantic import TypeAdapter
 
 from refinery_ai.config import Settings
+from refinery_ai.telemetry import record_llm_usage
 
 Message = Mapping[str, Any]
 Tool = Callable[..., Any]
@@ -27,6 +28,15 @@ def _litellm_completion(**kwargs: Any) -> Any:
     """Import LiteLLM only when making a real provider request."""
 
     litellm = importlib.import_module("litellm")
+    from refinery_ai.telemetry import litellm_callbacks
+
+    callbacks = litellm_callbacks()
+    if callbacks:
+        configured_callbacks = list(getattr(litellm, "callbacks", None) or [])
+        for callback in callbacks:
+            if callback not in configured_callbacks:
+                configured_callbacks.append(callback)
+        litellm.callbacks = configured_callbacks
     return litellm.completion(**kwargs)
 
 
@@ -157,6 +167,10 @@ def run_tool_loop(
         if definitions:
             request["tools"] = definitions
         last_response = completion_fn(**request)
+        record_llm_usage(
+            _message_value(last_response, "usage"),
+            model=_message_value(last_response, "model", config.litellm_model),
+        )
         response_message = last_response.choices[0].message
         content = _message_value(response_message, "content")
         tool_calls = list(_message_value(response_message, "tool_calls") or [])

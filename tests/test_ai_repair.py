@@ -109,6 +109,87 @@ def test_springdoc_repair_configures_generated_openapi_annotations(tmp_path: Pat
     assert not springdoc_repair_applicable(tmp_path, failure)
 
 
+def test_springdoc_repair_uses_swagger2_for_generated_api_model_property(
+    tmp_path: Path,
+) -> None:
+    pom = tmp_path / "pom.xml"
+    pom.write_text(
+        """<project>
+  <properties>
+    <openapi-generator-maven-plugin.version>5.2.1</openapi-generator-maven-plugin.version>
+  </properties>
+  <build>
+    <plugins>
+      <plugin>
+        <artifactId>some-other-plugin</artifactId>
+        <configuration><configOptions/></configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.openapitools</groupId>
+        <artifactId>openapi-generator-maven-plugin</artifactId>
+        <configuration>
+          <configOptions>
+            <dateLibrary>java8</dateLibrary>
+          </configOptions>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+"""
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "test"],
+        exit_code=1,
+        stdout="[ERROR] symbol:   class ApiModelProperty",
+        duration_seconds=0,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert configure_openapi_generator_for_springdoc(tmp_path, failure)
+    updated = pom.read_text()
+    assert "<annotationLibrary>swagger2</annotationLibrary>" in updated
+    assert "<openapi-generator-maven-plugin.version>6.6.0" in updated
+    assert "<groupId>io.swagger</groupId>" not in updated
+    assert updated.index("<annotationLibrary>swagger2</annotationLibrary>") > updated.index(
+        "<artifactId>openapi-generator-maven-plugin</artifactId>"
+    )
+
+
+def test_springdoc_repair_aligns_annotations_for_schema_required_mode(
+    tmp_path: Path,
+) -> None:
+    pom = tmp_path / "pom.xml"
+    pom.write_text(
+        """<project>
+  <dependencies>
+    <dependency>
+      <groupId>org.springdoc</groupId>
+      <artifactId>springdoc-openapi-ui</artifactId>
+      <version>1.5.13</version>
+    </dependency>
+  </dependencies>
+  <build><plugins><plugin>
+    <artifactId>openapi-generator-maven-plugin</artifactId>
+  </plugin></plugins></build>
+</project>
+"""
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "test"],
+        exit_code=1,
+        stdout=(
+            "symbol:   method requiredMode()\n"
+            "location: @interface io.swagger.v3.oas.annotations.media.Schema"
+        ),
+        duration_seconds=0,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert configure_openapi_generator_for_springdoc(tmp_path, failure)
+    assert "<version>1.8.0</version>" in pom.read_text()
+
+
 def test_springdoc_repair_preserves_v1_annotations_alongside_v3(tmp_path: Path) -> None:
     pom = tmp_path / "pom.xml"
     pom.write_text(
@@ -514,6 +595,71 @@ class SwaggerConfig {}
     assert "Removed obsolete Springfox" in result.stdout
     updated = source.read_text()
     assert "springfox" not in updated
+
+
+def test_deterministic_springfox_repair_removes_handler_provider_workaround(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "src/main/java/example/ApplicationSwaggerConfig.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        """package example;
+import org.springframework.beans.BeansException;
+import org.springframework.beans.factory.config.BeanPostProcessor;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.util.ReflectionUtils;
+import org.springframework.web.servlet.mvc.method.RequestMappingInfoHandlerMapping;
+import springfox.documentation.spring.web.plugins.WebFluxRequestHandlerProvider;
+import springfox.documentation.spring.web.plugins.WebMvcRequestHandlerProvider;
+import java.lang.reflect.Field;
+import java.util.List;
+
+@Configuration
+class ApplicationSwaggerConfig {
+    /** Springfox workaround required by Spring Boot 2.6 */
+    @Bean
+    public static BeanPostProcessor springfoxHandlerProviderBeanPostProcessor() {
+        return new BeanPostProcessor() {
+            public Object postProcessAfterInitialization(Object bean, String name)
+                    throws BeansException {
+                if (bean instanceof WebMvcRequestHandlerProvider
+                        || bean instanceof WebFluxRequestHandlerProvider) {
+                    Field field = ReflectionUtils.findField(bean.getClass(), "handlerMappings");
+                    List<RequestMappingInfoHandlerMapping> mappings = null;
+                }
+                return bean;
+            }
+        };
+    }
+}
+"""
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "test"],
+        exit_code=1,
+        stdout=(
+            "package springfox.documentation.spring.web.plugins does not exist"
+        ),
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.springdoc.SpringFoxToSpringDoc",
+        reason="Replace Springfox.",
+        evidence=["springfox"],
+        expected_benefit="Modern documentation.",
+        priority="high",
+        confidence=1,
+    )
+
+    result = DeterministicMigrationRepairer().repair(tmp_path, step, failure)
+
+    assert result.green
+    updated = source.read_text()
+    assert "springfoxHandlerProviderBeanPostProcessor" not in updated
+    assert "springfox.documentation.spring.web.plugins" not in updated
+    assert "BeanPostProcessor" not in updated
+    assert "@Configuration" in updated
     assert "@Import" not in updated
     assert "annotation.Import" not in updated
 

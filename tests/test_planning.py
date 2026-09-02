@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from refinery_ai.agents.planning import PlanningDependencies, planning_payload_metrics
 from refinery_ai.models import (
     BuildSystem,
     DiscoverySnapshot,
@@ -11,6 +12,22 @@ from refinery_ai.models import (
     StepStrategy,
 )
 from refinery_ai.planning import rule_based_plan, validate_plan
+
+
+def test_planning_payload_metrics_include_catalog_and_estimated_tokens() -> None:
+    dependencies = PlanningDependencies(
+        snapshot=DiscoverySnapshot(
+            repository=Path("/repo"), build_system=BuildSystem.MAVEN
+        ),
+        graph_summary="graph",
+        recipe_catalog="catalog recipe",
+    )
+
+    metrics = planning_payload_metrics("plan this", dependencies)
+
+    assert metrics["bytes"] > metrics["recipe_catalog_bytes"]
+    assert metrics["recipe_catalog_bytes"] == len("catalog recipe")
+    assert metrics["estimated_tokens"] == (metrics["characters"] + 3) // 4
 
 
 def test_rule_plan_prefers_rewrite() -> None:
