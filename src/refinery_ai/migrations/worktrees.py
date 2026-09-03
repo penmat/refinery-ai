@@ -71,6 +71,18 @@ class GitWorktreeManager:
         self._git(self.repository, "worktree", "add", "--detach", str(path), base_revision)
         return StepWorkspace(path=path, artifact_directory=artifacts, base_revision=base_revision)
 
+    def create_baseline(self, base_revision: str) -> StepWorkspace:
+        """Create a disposable checkout so baseline tests cannot dirty the source checkout."""
+
+        path = self.worktree_root / "baseline"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._git(self.repository, "worktree", "add", "--detach", str(path), base_revision)
+        return StepWorkspace(
+            path=path,
+            artifact_directory=self.artifact_root / "baseline",
+            base_revision=base_revision,
+        )
+
     def record_baseline(
         self,
         verification: VerificationResult,
@@ -117,7 +129,7 @@ class GitWorktreeManager:
     ) -> str:
         """Commit a green step in its isolated worktree and persist its exact patch."""
 
-        self._git(workspace.path, "add", "-A")
+        self._stage_source_changes(workspace.path)
         patch = self._git(workspace.path, "diff", "--cached", "--binary", workspace.base_revision)
         changed = self._git_result(workspace.path, "diff", "--cached", "--quiet")
         if changed.returncode == 0:
@@ -170,7 +182,7 @@ class GitWorktreeManager:
     ) -> Path:
         """Capture the failing step before safely removing only its owned worktree."""
 
-        self._git(workspace.path, "add", "-A")
+        self._stage_source_changes(workspace.path)
         patch = self._git(workspace.path, "diff", "--cached", "--binary", workspace.base_revision)
         (workspace.artifact_directory / "changes.patch").write_text(
             patch, errors="surrogateescape"
@@ -298,6 +310,27 @@ class GitWorktreeManager:
             raise MigrationWorkspaceError(
                 "Migration apply requires a clean source checkout; dirty paths: " + preview
             )
+
+    def _stage_source_changes(self, workspace: Path) -> None:
+        """Stage migration sources while excluding generated build and Refinery output."""
+
+        self._git(workspace, "add", "-A", "--", ".")
+        generated_parts = {
+            "target",
+            "build",
+            ".gradle",
+            ".refinery",
+            ".codegraph",
+            "graphify-out",
+        }
+        staged = self._git(workspace, "diff", "--cached", "--name-only")
+        generated = [
+            path
+            for path in staged.splitlines()
+            if generated_parts.intersection(Path(path).parts)
+        ]
+        if generated:
+            self._git(workspace, "reset", "-q", "--", *generated)
 
     @staticmethod
     def _write_json(path: Path, payload: object) -> None:

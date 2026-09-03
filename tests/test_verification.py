@@ -30,6 +30,47 @@ def test_executable_maven_wrapper_runs_directly(tmp_path: Path) -> None:
     assert verification_command(snapshot) == ["./mvnw", "clean", "test"]
 
 
+def test_maven_wrapper_missing_required_jar_falls_back_to_maven(tmp_path: Path) -> None:
+    (tmp_path / "mvnw").write_text(
+        "java org.apache.maven.wrapper.MavenWrapperMain \"$@\"\n"
+    )
+    snapshot = DiscoverySnapshot(repository=tmp_path, build_system=BuildSystem.MAVEN)
+
+    assert verification_command(snapshot) == ["mvn", "clean", "test"]
+
+
+def test_nested_maven_project_is_verified_from_its_module_root(tmp_path: Path) -> None:
+    backend = tmp_path / "backend"
+    backend.mkdir()
+    (backend / "pom.xml").touch()
+    snapshot = DiscoverySnapshot(
+        repository=tmp_path,
+        build_system=BuildSystem.MAVEN,
+        build_files=[Path("backend/pom.xml")],
+    )
+
+    assert verification_command(snapshot) == [
+        "mvn",
+        "-f",
+        "backend/pom.xml",
+        "clean",
+        "test",
+    ]
+
+
+def test_nested_gradle_project_is_verified_from_its_module_root(tmp_path: Path) -> None:
+    backend = tmp_path / "backend"
+    backend.mkdir()
+    (backend / "build.gradle").touch()
+    snapshot = DiscoverySnapshot(
+        repository=tmp_path,
+        build_system=BuildSystem.GRADLE,
+        build_files=[Path("backend/build.gradle")],
+    )
+
+    assert verification_command(snapshot) == ["gradle", "-p", "backend", "test"]
+
+
 def test_successful_command_omits_benign_macos_java_home_probe_warning() -> None:
     assert _clean_stderr(MACOS_JAVA_HOME_PROBE_WARNING, 0, 20_000) == ""
 

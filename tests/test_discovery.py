@@ -27,6 +27,26 @@ def test_discovers_maven_repository(tmp_path: Path) -> None:
     assert result.frameworks == ["Spring"]
 
 
+def test_discovers_repository_beneath_ignored_parent_directory(tmp_path: Path) -> None:
+    repository = tmp_path / ".refinery/corpus-runs/run/repositories/example"
+    repository.mkdir(parents=True)
+    (repository / "pom.xml").write_text(
+        """<project><modelVersion>4.0.0</modelVersion>
+        <properties><java.version>8</java.version></properties></project>"""
+    )
+    ignored = repository / ".refinery/copied-project"
+    ignored.mkdir(parents=True)
+    (ignored / "pom.xml").write_text(
+        "<project><modelVersion>4.0.0</modelVersion></project>"
+    )
+
+    result = discover(repository)
+
+    assert result.build_system is BuildSystem.MAVEN
+    assert result.build_files == [Path("pom.xml")]
+    assert result.java_version == "8"
+
+
 def test_discovers_spring_boot_parent_version(tmp_path: Path) -> None:
     (tmp_path / "pom.xml").write_text(
         """<project><modelVersion>4.0.0</modelVersion><parent>

@@ -57,6 +57,14 @@ def _retryable_repaired_recipes(repository: Path, failure_context: str) -> froze
     retryable: set[str] = set()
     if "org/springframework/http/HttpStatusCode" in failure_context:
         retryable.add("org.openrewrite.java.springdoc.UpgradeSpringDoc_2")
+    if "org/springframework/aot/AotDetector" in failure_context:
+        retryable.add(
+            "org.openrewrite.java.spring.boot3.UpgradeMyBatisToSpringBoot_3_0"
+        )
+    if 'NULL not allowed for column "COMMENT_ID"' in failure_context:
+        retryable.add("org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_0")
+    if "ObjectReaderProvider cannot be converted to" in failure_context:
+        retryable.add("org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0")
     if (
         "Status expected:<400> but was:<201>" in failure_context
         or "InvalidDataAccessApiUsage" in failure_context
@@ -568,12 +576,119 @@ def _with_datasource_initialization_prerequisite(
 def _with_deterministic_prerequisites(
     plan: RecipePlan, snapshot: DiscoverySnapshot
 ) -> RecipePlan:
+    plan = _with_boot_bridge_before_java17(plan, snapshot)
+    plan = _with_boot_minor_staging(plan, snapshot)
     plan = _with_springfox_before_boot27(plan, snapshot)
     plan = _with_boot3_before_jakarta(plan, snapshot)
     plan = _with_boot3_before_springdoc2(plan, snapshot)
+    plan = _with_boot3_before_mybatis3(plan, snapshot)
     plan = _with_boot2_before_validation_starter(plan)
     plan = _with_datasource_initialization_prerequisite(plan, snapshot)
     return _with_utf8_prerequisite(plan, snapshot)
+
+
+def _with_boot_bridge_before_java17(
+    plan: RecipePlan, snapshot: DiscoverySnapshot
+) -> RecipePlan:
+    """Replace a premature Java 17 upgrade with the next old-Boot bridge."""
+
+    match = re.match(r"\s*(\d+)\.(\d+)", snapshot.spring_boot_version or "")
+    if match is None:
+        return plan
+    major, minor = (int(part) for part in match.groups())
+    if major > 2 or (major == 2 and minor >= 7):
+        return plan
+    java17 = next(
+        (
+            item
+            for item in plan.recommendations
+            if item.recipe == "org.openrewrite.java.migrate.UpgradeToJava17"
+        ),
+        None,
+    )
+    has_boot_upgrade = any("UpgradeSpringBoot" in item.recipe for item in plan.recommendations)
+    if java17 is None or has_boot_upgrade:
+        return plan
+    next_minor = 0 if major < 2 else minor + 1
+    return RecipePlan(
+        recommendations=[
+            java17.model_copy(
+                update={
+                    "recipe": (
+                        "org.openrewrite.java.spring.boot2."
+                        f"UpgradeSpringBoot_2_{next_minor}"
+                    ),
+                    "recipe_artifact": "org.openrewrite.recipe:rewrite-spring:RELEASE",
+                    "reason": (
+                        f"Spring Boot {snapshot.spring_boot_version} must advance through "
+                        f"the Spring Boot 2.{next_minor} compatibility boundary before Java 17."
+                    ),
+                    "expected_benefit": (
+                        "Keeps Spring Framework bytecode support compatible while staging "
+                        "the application toward Java 17."
+                    ),
+                    "depends_on": [],
+                    "confidence": 1,
+                }
+            )
+        ]
+    )
+
+
+def _with_boot_minor_staging(
+    plan: RecipePlan, snapshot: DiscoverySnapshot
+) -> RecipePlan:
+    """Advance Spring Boot applications one compatibility boundary per profile cycle."""
+
+    match = re.match(r"\s*(\d+)\.(\d+)", snapshot.spring_boot_version or "")
+    if match is None:
+        return plan
+    major, minor = (int(part) for part in match.groups())
+    if major > 3 or (major == 3 and minor >= 2):
+        return plan
+    requested = next(
+        (
+            item
+            for item in plan.recommendations
+            if re.fullmatch(
+                r"org\.openrewrite\.java\.spring\.boot[23]\.UpgradeSpringBoot_[23]_[0-7]",
+                item.recipe,
+            )
+        ),
+        None,
+    )
+    if requested is None:
+        return plan
+    if major < 2:
+        bridge_major, bridge_minor = 2, 0
+    elif major == 2 and minor < 7:
+        bridge_major, bridge_minor = 2, minor + 1
+    elif major == 2:
+        bridge_major, bridge_minor = 3, 0
+    else:
+        bridge_major, bridge_minor = 3, minor + 1
+    bridge_recipe = (
+        f"org.openrewrite.java.spring.boot{bridge_major}."
+        f"UpgradeSpringBoot_{bridge_major}_{bridge_minor}"
+    )
+    if requested.recipe == bridge_recipe and len(plan.recommendations) == 1:
+        return plan
+    bridge = requested.model_copy(
+        update={
+            "recipe": bridge_recipe,
+            "recipe_artifact": "org.openrewrite.recipe:rewrite-spring:RELEASE",
+            "reason": (
+                f"Spring Boot {snapshot.spring_boot_version} must advance through "
+                f"the Spring Boot {bridge_major}.{bridge_minor} compatibility boundary first."
+            ),
+            "expected_benefit": (
+                "Applies a bounded Spring Boot bridge before later profile upgrades."
+            ),
+            "depends_on": [],
+            "confidence": 1,
+        }
+    )
+    return RecipePlan(recommendations=[bridge])
 
 
 def _with_springfox_before_boot27(
@@ -791,4 +906,56 @@ def _with_boot3_before_springdoc2(
         index for index, item in enumerate(ordered) if item.recipe == boot3_recipe
     )
     ordered.insert(boot3_index + 1, springdoc)
+    return RecipePlan(recommendations=ordered)
+
+
+def _with_boot3_before_mybatis3(
+    plan: RecipePlan, snapshot: DiscoverySnapshot
+) -> RecipePlan:
+    """Keep the MyBatis 3 starter behind its Spring Boot 3 prerequisite."""
+
+    mybatis_recipe = "org.openrewrite.java.spring.boot3.UpgradeMyBatisToSpringBoot_3_0"
+    boot3_recipe = "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"
+    recommendations = list(plan.recommendations)
+    mybatis = next(
+        (item for item in recommendations if item.recipe == mybatis_recipe), None
+    )
+    if mybatis is None:
+        return plan
+    boot3 = next((item for item in recommendations if item.recipe == boot3_recipe), None)
+    already_boot3 = bool(
+        snapshot.spring_boot_version
+        and snapshot.spring_boot_version.lstrip().startswith("3.")
+    )
+    if boot3 is None:
+        return (
+            plan
+            if already_boot3
+            else RecipePlan(
+                recommendations=[item for item in recommendations if item is not mybatis]
+            )
+        )
+    boot3 = boot3.model_copy(
+        update={
+            "depends_on": [
+                dependency
+                for dependency in boot3.depends_on
+                if dependency != mybatis_recipe
+            ]
+        }
+    )
+    mybatis = mybatis.model_copy(
+        update={
+            "depends_on": list(dict.fromkeys([boot3_recipe, *mybatis.depends_on]))
+        }
+    )
+    ordered = [
+        boot3 if item.recipe == boot3_recipe else item
+        for item in recommendations
+        if item.recipe != mybatis_recipe
+    ]
+    boot3_index = next(
+        index for index, item in enumerate(ordered) if item.recipe == boot3_recipe
+    )
+    ordered.insert(boot3_index + 1, mybatis)
     return RecipePlan(recommendations=ordered)

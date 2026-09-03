@@ -78,6 +78,9 @@ def test_worktrees_chain_green_checkpoint_and_rollback_only_failed_step(
     reports = second.path / "target/surefire-reports"
     reports.mkdir(parents=True)
     (reports / "TEST-example.xml").write_text("<testsuite failures=\"1\"/>\n")
+    generated = second.path / "build/generated.txt"
+    generated.parent.mkdir(parents=True)
+    generated.write_text("generated output\n")
     artifacts = manager.record_failure(
         second,
         2,
@@ -89,7 +92,9 @@ def test_worktrees_chain_green_checkpoint_and_rollback_only_failed_step(
 
     assert not second.path.exists()
     assert first.path.is_dir()
-    assert "broken migration two" in (artifacts / "changes.patch").read_text()
+    failure_patch = (artifacts / "changes.patch").read_text()
+    assert "broken migration two" in failure_patch
+    assert "build/generated.txt" not in failure_patch
     assert (artifacts / "failure-summary.md").is_file()
     assert (artifacts / "surefire-reports/TEST-example.xml").is_file()
     assert git(tmp_path, "status", "--porcelain") == ""
@@ -109,6 +114,19 @@ def test_worktrees_record_failed_baseline_separately(tmp_path: Path) -> None:
     assert artifacts.name == "baseline"
     assert '"status": "failed"' in (artifacts / "baseline.json").read_text()
     assert "not a migration regression" in (artifacts / "failure-summary.md").read_text()
+
+
+def test_baseline_build_mutations_are_isolated_from_source_checkout(tmp_path: Path) -> None:
+    initialize(tmp_path)
+    manager = GitWorktreeManager(tmp_path, Path(".refinery"), "run1", "plan1")
+    starting = manager.start()
+
+    baseline = manager.create_baseline(starting)
+    (baseline.path / "app.txt").write_text("changed by tests\n")
+    manager.rollback(baseline)
+
+    assert (tmp_path / "app.txt").read_text() == "initial\n"
+    assert git(tmp_path, "status", "--porcelain") == ""
 
 
 def test_checkpoint_preserves_patch_with_legacy_encoded_bytes(tmp_path: Path) -> None:

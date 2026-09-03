@@ -29,14 +29,16 @@ def _git(root: Path, *args: str) -> str | None:
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def _is_source_file(path: Path) -> bool:
-    return not IGNORED_DIRECTORIES.intersection(path.parts)
+def _is_source_file(path: Path, root: Path) -> bool:
+    """Check ignored directories within the repository, not in its parent path."""
+
+    return not IGNORED_DIRECTORIES.intersection(path.relative_to(root).parts)
 
 
 def non_utf8_application_properties(root: Path) -> list[Path]:
     invalid: list[Path] = []
     for path in sorted(root.glob("**/resources/application*.properties")):
-        if not _is_source_file(path):
+        if not _is_source_file(path, root):
             continue
         try:
             path.read_text(encoding="utf-8")
@@ -60,7 +62,7 @@ def deferred_datasource_initialization_properties(
         return []
     targets: list[Path] = []
     for data_sql in sorted(root.glob("**/resources/data.sql")):
-        if not _is_source_file(data_sql):
+        if not _is_source_file(data_sql, root):
             continue
         resources = data_sql.parent
         configured = False
@@ -288,11 +290,13 @@ def discover(repository: Path) -> DiscoverySnapshot:
     if not root.is_dir():
         raise ValueError(f"Repository does not exist: {root}")
 
-    pom_files = [path for path in sorted(root.glob("**/pom.xml")) if _is_source_file(path)]
+    pom_files = [
+        path for path in sorted(root.glob("**/pom.xml")) if _is_source_file(path, root)
+    ]
     gradle_files = [
         path
         for path in sorted([*root.glob("**/build.gradle"), *root.glob("**/build.gradle.kts")])
-        if _is_source_file(path)
+        if _is_source_file(path, root)
     ]
     root_has_gradle_marker = any(
         (root / name).is_file()

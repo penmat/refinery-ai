@@ -38,9 +38,7 @@ def test_springdoc_repair_scope_contains_only_residual_java(tmp_path: Path) -> N
     other = tmp_path / "src/main/java/Controller.java"
     other.write_text("class Controller {}\n")
 
-    assert springdoc_repair_files(tmp_path) == (
-        Path("src/main/java/SwaggerConfiguration.java"),
-    )
+    assert springdoc_repair_files(tmp_path) == (Path("src/main/java/SwaggerConfiguration.java"),)
 
 
 def test_ai_repair_uses_scoped_full_file_replacement(tmp_path: Path, monkeypatch) -> None:
@@ -57,9 +55,7 @@ def test_ai_repair_uses_scoped_full_file_replacement(tmp_path: Path, monkeypatch
     monkeypatch.setattr(
         "refinery_ai.migrations.ai_repair.run_tool_loop", lambda *args, **kwargs: response
     )
-    repairer = AiMigrationRepairer(
-        Settings(repair_mode=RepairMode.CONFIGURED_PROVIDER)
-    )
+    repairer = AiMigrationRepairer(Settings(repair_mode=RepairMode.CONFIGURED_PROVIDER))
     step = RecipeRecommendation(
         recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7",
         reason="Upgrade Boot.",
@@ -223,7 +219,7 @@ def test_springdoc_repair_converts_invalid_info_constructor(tmp_path: Path) -> N
     source = tmp_path / "src/main/java/example/SwaggerConfig.java"
     source.parent.mkdir(parents=True)
     source.write_text(
-        '''package example;
+        """package example;
 
 import java.util.Collections;
 import io.swagger.v3.oas.models.info.Contact;
@@ -242,7 +238,7 @@ class SwaggerConfig {
             Collections.emptyList());
     }
 }
-'''
+"""
     )
     failure = VerificationResult(
         command=["./mvnw", "test"],
@@ -270,14 +266,14 @@ class SwaggerConfig {
 def test_deterministic_repair_handles_info_constructor_without_ai(tmp_path: Path) -> None:
     source = tmp_path / "SwaggerConfig.java"
     source.write_text(
-        '''import io.swagger.v3.oas.models.info.Info;
+        """import io.swagger.v3.oas.models.info.Info;
 class SwaggerConfig {
     Info info() {
         return new Info("title", "description", "1", "terms", null,
             "license", "license-url", java.util.Collections.emptyList());
     }
 }
-'''
+"""
     )
     failure = VerificationResult(
         command=["mvn", "test"],
@@ -370,9 +366,7 @@ def test_deterministic_boot_27_repair_configures_validation_starter(tmp_path: Pa
 
 
 @pytest.mark.parametrize("minor", [3, 4, 5, 6, 7])
-def test_validation_repair_covers_boot_2_bridge_releases(
-    tmp_path: Path, minor: int
-) -> None:
+def test_validation_repair_covers_boot_2_bridge_releases(tmp_path: Path, minor: int) -> None:
     pom = tmp_path / "pom.xml"
     pom.write_text(
         """<project>
@@ -427,8 +421,7 @@ def test_boot_26_repair_breaks_password_encoder_configuration_cycle(
         command=["./mvnw", "clean", "test"],
         exit_code=1,
         stderr=(
-            "BeanCurrentlyInCreationException: Error creating bean with name "
-            "'webSecurityConfig'"
+            "BeanCurrentlyInCreationException: Error creating bean with name 'webSecurityConfig'"
         ),
         duration_seconds=0,
     )
@@ -525,9 +518,7 @@ class WebSecurityConfig {
 def test_deterministic_security_58_repair_is_recipe_scoped(tmp_path: Path) -> None:
     source = tmp_path / "src/main/java/example/WebSecurityConfig.java"
     source.parent.mkdir(parents=True)
-    source.write_text(
-        'class WebSecurityConfig { void x() { registry.requestMatchers("/**"); } }\n'
-    )
+    source.write_text('class WebSecurityConfig { void x() { registry.requestMatchers("/**"); } }\n')
     failure = VerificationResult(
         command=["./mvnw", "test"],
         exit_code=1,
@@ -597,6 +588,45 @@ class SwaggerConfig {}
     assert "springfox" not in updated
 
 
+def test_deterministic_springfox_repair_deletes_unconverted_docket_config(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "src/main/java/example/MySwaggerConfig.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        """package example;
+import org.springframework.context.annotation.Configuration;
+import springfox.documentation.builders.PathSelectors;
+import springfox.documentation.spring.web.plugins.Docket;
+@Configuration
+class MySwaggerConfig {
+    // TODO: transformation of Docket bean to OpenAPI
+    Docket api() { return null; }
+}
+"""
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "test"],
+        exit_code=1,
+        stdout="package springfox.documentation.builders does not exist",
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.springdoc.SpringFoxToSpringDoc",
+        reason="Replace Springfox.",
+        evidence=["springfox"],
+        expected_benefit="Modern API documentation.",
+        priority="high",
+        confidence=1,
+    )
+
+    result = DeterministicMigrationRepairer().repair(tmp_path, step, failure)
+
+    assert result.green
+    assert "Removed obsolete Springfox" in result.stdout
+    assert not source.exists()
+
+
 def test_deterministic_springfox_repair_removes_handler_provider_workaround(
     tmp_path: Path,
 ) -> None:
@@ -638,9 +668,7 @@ class ApplicationSwaggerConfig {
     failure = VerificationResult(
         command=["./mvnw", "test"],
         exit_code=1,
-        stdout=(
-            "package springfox.documentation.spring.web.plugins does not exist"
-        ),
+        stdout=("package springfox.documentation.spring.web.plugins does not exist"),
         duration_seconds=0,
     )
     step = RecipeRecommendation(
@@ -740,6 +768,47 @@ class MyDataRestConfig implements RepositoryRestConfigurer {
     assert "import org.springframework.web.servlet.config.annotation.CorsRegistry;" in updated
 
 
+def test_deterministic_repair_replaces_removed_spring_data_find_one_id(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "src/main/java/example/ProductService.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "class ProductService {\n"
+        "    Product get(long id) { return repository.findOne(id); }\n"
+        "    Product find(Product probe) { return repository.findOne(probe); }\n"
+        "}\n"
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stderr=(
+            f"{source}:[2,47] method findOne in interface "
+            "org.springframework.data.repository.query."
+            "QueryByExampleExecutor<T> cannot be applied to given types; "
+            "argument mismatch; long cannot be converted to "
+            "org.springframework.data.domain.Example<S>"
+        ),
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_0",
+        reason="upgrade",
+        evidence=["boot"],
+        expected_benefit="Boot 2.0",
+        priority="high",
+        confidence=1,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    result = DeterministicMigrationRepairer().repair(tmp_path, step, failure)
+
+    assert result.green
+    updated = source.read_text()
+    assert "repository.findById(id).orElse(null)" in updated
+    assert "repository.findOne(probe)" in updated
+
+
 def test_deterministic_boot_30_repair_finishes_method_security_migration(
     tmp_path: Path,
 ) -> None:
@@ -818,6 +887,166 @@ def test_deterministic_repair_removes_obsolete_junit_platform_provider(
     assert "<version>3.2.5</version>" in updated
 
 
+def test_deterministic_repair_handles_surefire_console_logger_failure(
+    tmp_path: Path,
+) -> None:
+    pom = tmp_path / "pom.xml"
+    pom.write_text(
+        """<project>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+        <dependencies>
+          <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-surefire-provider</artifactId>
+            <version>1.1.0</version>
+          </dependency>
+        </dependencies>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+"""
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "clean", "test"],
+        exit_code=1,
+        stdout=(
+            "java.lang.NoClassDefFoundError: "
+            "org/apache/maven/plugin/surefire/log/api/ConsoleLogger\n"
+            "Caused by: java.lang.ClassNotFoundException: "
+            "org.apache.maven.plugin.surefire.log.api.ConsoleLogger"
+        ),
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_1",
+        reason="Upgrade Spring Boot.",
+        evidence=["spring boot"],
+        expected_benefit="Spring Boot 3.1.",
+        priority="high",
+        confidence=1,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    result = DeterministicMigrationRepairer().repair(tmp_path, step, failure)
+
+    assert result.green
+    assert "junit-platform-surefire-provider" not in pom.read_text()
+
+
+def test_deterministic_repair_makes_private_bean_method_public(tmp_path: Path) -> None:
+    source = tmp_path / "src/main/java/example/SecurityConfig.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        """class SecurityConfig {
+    @Bean
+    private PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+}
+"""
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "test"],
+        exit_code=1,
+        stdout="@Bean method 'passwordEncoder' must not be private or final",
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7",
+        reason="Upgrade Spring Boot.",
+        evidence=["spring boot"],
+        expected_benefit="Spring Boot 2.7.",
+        priority="high",
+        confidence=1,
+    )
+
+    result = DeterministicMigrationRepairer().repair(tmp_path, step, failure)
+
+    assert result.green
+    assert "public PasswordEncoder passwordEncoder()" in source.read_text()
+
+
+def test_deterministic_repair_adds_ids_to_h2_comment_seed_rows(tmp_path: Path) -> None:
+    seed = tmp_path / "src/main/resources/sql/import-h2.sql"
+    seed.parent.mkdir(parents=True)
+    seed.write_text(
+        "INSERT INTO COMMENT (post_id, user_id, body, create_date)\n"
+        "VALUES (1, 2, 'first', CURRENT_TIMESTAMP());\n"
+        "INSERT INTO COMMENT (post_id, user_id, body, create_date)\n"
+        "VALUES (3, 4, 'second', CURRENT_TIMESTAMP());\n"
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stdout='NULL not allowed for column "COMMENT_ID"',
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_0",
+        reason="Upgrade Spring Boot.",
+        evidence=["spring boot"],
+        expected_benefit="Spring Boot 2.",
+        priority="high",
+        confidence=1,
+    )
+
+    result = DeterministicMigrationRepairer().repair(tmp_path, step, failure)
+
+    assert result.green
+    updated = seed.read_text()
+    assert "COMMENT (comment_id, post_id" in updated
+    assert "VALUES (1, 1, 2" in updated
+    assert "VALUES (2, 3, 4" in updated
+
+
+def test_deterministic_repair_restores_fastjson1_redis_configuration(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "src/main/java/example/CacheConfig.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        """import com.alibaba.fastjson.support.spring.FastJsonRedisSerializer;
+import com.alibaba.fastjson2.reader.ObjectReaderProvider;
+class CacheConfig {
+  Object value() {
+    ObjectReaderProvider globalInstance = ObjectReaderProvider.getGlobalInstance();
+    return Feature.WriteClassName;
+  }
+}
+"""
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stdout=(
+            "ObjectReaderProvider cannot be converted to com.alibaba.fastjson.parser.ParserConfig"
+        ),
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0",
+        reason="Upgrade Spring Boot.",
+        evidence=["spring boot"],
+        expected_benefit="Spring Boot 3.",
+        priority="high",
+        confidence=1,
+    )
+
+    result = DeterministicMigrationRepairer().repair(tmp_path, step, failure)
+
+    assert result.green
+    updated = source.read_text()
+    assert "ParserConfig globalInstance = ParserConfig.getGlobalInstance()" in updated
+    assert "SerializerFeature.WriteClassName" in updated
+    assert "ObjectReaderProvider" not in updated
+
+
 def test_boot3_repair_upgrades_openapi_generator_to_jakarta_mode(tmp_path: Path) -> None:
     pom = tmp_path / "pom.xml"
     pom.write_text(
@@ -836,8 +1065,7 @@ def test_boot3_repair_upgrades_openapi_generator_to_jakarta_mode(tmp_path: Path)
         command=["./mvnw", "test"],
         exit_code=1,
         stdout=(
-            "target/generated-sources/openapi/Dto.java: "
-            "package javax.validation does not exist"
+            "target/generated-sources/openapi/Dto.java: package javax.validation does not exist"
         ),
         duration_seconds=0,
     )
@@ -909,8 +1137,7 @@ def test_boot3_repair_preserves_generated_validation_and_updates_legacy_jpql(
         command=["./mvnw", "test"],
         exit_code=1,
         stdout=(
-            "Status expected:<400> but was:<201>\n"
-            "shouldDeletePet:213 » InvalidDataAccessApiUsage"
+            "Status expected:<400> but was:<201>\nshouldDeletePet:213 » InvalidDataAccessApiUsage"
         ),
         duration_seconds=0,
     )
@@ -955,8 +1182,7 @@ def test_boot3_repair_requires_nonempty_openapi_request_fields(tmp_path: Path) -
         command=["./mvnw", "test"],
         exit_code=1,
         stdout=(
-            "PetTypeRestControllerTests.testCreatePetTypeError "
-            "Status expected:<400> but was:<201>"
+            "PetTypeRestControllerTests.testCreatePetTypeError Status expected:<400> but was:<201>"
         ),
         duration_seconds=0,
     )

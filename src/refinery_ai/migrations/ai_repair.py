@@ -27,6 +27,7 @@ _HIBERNATE6_QUERY_FAILURE = "InvalidDataAccessApiUsage"
 _JDBC_QUERY_FAILURE = "BadSqlGrammar"
 _INVALID_INFO_CONSTRUCTOR = "constructor Info in class io.swagger.v3.oas.models.info.Info"
 _SUREFIRE_TESTSET_FAILURE = "org.apache.maven.surefire.api.testset.TestSetFailedException"
+_SUREFIRE_CONSOLE_LOGGER_FAILURE = "org.apache.maven.plugin.surefire.log.api.ConsoleLogger"
 _MISSING_HIBERNATE_VALIDATOR_CONSTRAINTS = (
     "package org.hibernate.validator.constraints does not exist"
 )
@@ -35,18 +36,18 @@ _REQUEST_MATCHER_SIGNATURE_FAILURE = (
     "java.lang.String cannot be converted to "
     "org.springframework.security.web.util.matcher.RequestMatcher"
 )
-_LEGACY_METHOD_SECURITY_CONFIGURATION_FAILURE = (
-    "EnableGlobalMethodSecurity is required"
+_LEGACY_METHOD_SECURITY_CONFIGURATION_FAILURE = "EnableGlobalMethodSecurity is required"
+_PRIVATE_BEAN_METHOD_FAILURE = "@Bean method"
+_H2_MISSING_COMMENT_ID = 'NULL not allowed for column "COMMENT_ID"'
+_BROKEN_FASTJSON2_CACHE_CONFIG = "ObjectReaderProvider cannot be converted to"
+_SPRING_DATA_FIND_ONE_ID_FAILURE = (
+    "method findOne in interface org.springframework.data.repository.query.QueryByExampleExecutor"
 )
 _BOOT_26_RECIPE = "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_6"
 _BOOT_27_RECIPE = "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7"
 _BOOT_30_RECIPE = "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"
-_SPRING_SECURITY_58_RECIPE = (
-    "org.openrewrite.java.spring.security5.UpgradeSpringSecurity_5_8"
-)
-_SPRINGFOX_TO_SPRINGDOC_RECIPE = (
-    "org.openrewrite.java.springdoc.SpringFoxToSpringDoc"
-)
+_SPRING_SECURITY_58_RECIPE = "org.openrewrite.java.spring.security5.UpgradeSpringSecurity_5_8"
+_SPRINGFOX_TO_SPRINGDOC_RECIPE = "org.openrewrite.java.springdoc.SpringFoxToSpringDoc"
 _BOOT_2_UPGRADE_RECIPE = re.compile(
     r"org\.openrewrite\.java\.spring\.boot2\.UpgradeSpringBoot_2_[3-7]"
 )
@@ -99,6 +100,84 @@ def springdoc_repair_files(repository: Path) -> tuple[Path, ...]:
     return tuple(sorted(files))
 
 
+def make_bean_methods_non_private(repository: Path, failure: VerificationResult) -> tuple[str, ...]:
+    """Expose only @Bean methods rejected by newer Spring Framework versions."""
+
+    diagnostic = f"{failure.stdout}\n{failure.stderr}"
+    if (
+        _PRIVATE_BEAN_METHOD_FAILURE not in diagnostic
+        or "must not be private or final" not in diagnostic
+    ):
+        return ()
+    repaired: list[str] = []
+    for path in repository.glob("src/main/java/**/*.java"):
+        content = path.read_text(errors="replace")
+        updated = re.sub(
+            r"(?m)^(\s*@Bean(?:\([^\n]*\))?\s*\n\s*)private(\s+)",
+            r"\1public\2",
+            content,
+        )
+        if updated != content:
+            path.write_text(updated)
+            repaired.append(str(path.relative_to(repository)))
+    return tuple(repaired)
+
+
+def add_missing_h2_seed_ids(repository: Path, failure: VerificationResult) -> tuple[str, ...]:
+    """Give legacy COMMENT seed rows explicit IDs after Hibernate schema changes."""
+
+    diagnostic = f"{failure.stdout}\n{failure.stderr}"
+    if _H2_MISSING_COMMENT_ID not in diagnostic:
+        return ()
+    repaired: list[str] = []
+    for path in repository.glob("src/main/resources/**/*.sql"):
+        content = path.read_text(errors="replace")
+        counter = 0
+
+        def replace(match: re.Match[str]) -> str:
+            nonlocal counter
+            counter += 1
+            return f"INSERT INTO COMMENT (comment_id, {match.group(1)})\nVALUES ({counter}, "
+
+        updated = re.sub(
+            r"INSERT INTO COMMENT \((post_id, user_id, body, create_date)\)\s*\nVALUES \(",
+            replace,
+            content,
+        )
+        if updated != content:
+            path.write_text(updated)
+            repaired.append(str(path.relative_to(repository)))
+    return tuple(repaired)
+
+
+def restore_fastjson1_cache_configuration(
+    repository: Path, failure: VerificationResult
+) -> tuple[str, ...]:
+    """Undo an invalid mixed Fastjson 1/2 rewrite in Redis configuration."""
+
+    diagnostic = f"{failure.stdout}\n{failure.stderr}"
+    if _BROKEN_FASTJSON2_CACHE_CONFIG not in diagnostic:
+        return ()
+    repaired: list[str] = []
+    for path in repository.glob("src/main/java/**/*CacheConfig.java"):
+        content = path.read_text(errors="replace")
+        if "FastJsonRedisSerializer" not in content or "ObjectReaderProvider" not in content:
+            continue
+        updated = content.replace(
+            "import com.alibaba.fastjson2.reader.ObjectReaderProvider;",
+            "import com.alibaba.fastjson.parser.ParserConfig;\n"
+            "import com.alibaba.fastjson.serializer.SerializerFeature;",
+        )
+        updated = updated.replace(
+            "ObjectReaderProvider globalInstance = ObjectReaderProvider.getGlobalInstance();",
+            "ParserConfig globalInstance = ParserConfig.getGlobalInstance();",
+        ).replace("Feature.WriteClassName", "SerializerFeature.WriteClassName")
+        if updated != content:
+            path.write_text(updated)
+            repaired.append(str(path.relative_to(repository)))
+    return tuple(repaired)
+
+
 def remove_obsolete_springfox_configuration(
     repository: Path, failure: VerificationResult
 ) -> tuple[str, ...]:
@@ -110,18 +189,34 @@ def remove_obsolete_springfox_configuration(
         in diagnostic
     )
     missing_annotation = (
-        "package springfox.documentation.swagger2.annotations does not exist"
-        in diagnostic
+        "package springfox.documentation.swagger2.annotations does not exist" in diagnostic
     )
     missing_handler_providers = (
-        "package springfox.documentation.spring.web.plugins does not exist"
-        in diagnostic
+        "package springfox.documentation.spring.web.plugins does not exist" in diagnostic
     )
-    if not (missing_configuration or missing_annotation or missing_handler_providers):
+    missing_springfox = (
+        "package springfox.documentation" in diagnostic and "does not exist" in diagnostic
+    )
+    if not (
+        missing_configuration
+        or missing_annotation
+        or missing_handler_providers
+        or missing_springfox
+    ):
         return ()
     repaired: list[str] = []
     for path in repository.glob("src/main/java/**/*.java"):
         content = path.read_text(errors="replace")
+        dedicated_swagger_config = (
+            missing_springfox
+            and "@Configuration" in content
+            and re.search(r"class\s+\w*Swagger\w*Config\w*", content) is not None
+            and ("Docket" in content or "transformation of Docket" in content)
+        )
+        if dedicated_swagger_config:
+            path.unlink()
+            repaired.append(str(path.relative_to(repository)))
+            continue
         updated = content
         if missing_configuration:
             updated = re.sub(
@@ -142,9 +237,7 @@ def remove_obsolete_springfox_configuration(
                 "",
                 updated,
             )
-            updated = re.sub(
-                r"(?m)^[ \t]*@EnableSwagger2WebMvc[ \t]*\n", "", updated
-            )
+            updated = re.sub(r"(?m)^[ \t]*@EnableSwagger2WebMvc[ \t]*\n", "", updated)
         if missing_handler_providers:
             updated = re.sub(
                 r"(?m)^import\s+springfox\.documentation\.spring\.web\.plugins\."
@@ -153,8 +246,7 @@ def remove_obsolete_springfox_configuration(
                 updated,
             )
             method_marker = (
-                "public static BeanPostProcessor "
-                "springfoxHandlerProviderBeanPostProcessor()"
+                "public static BeanPostProcessor springfoxHandlerProviderBeanPostProcessor()"
             )
             method_start = updated.find(method_marker)
             if method_start >= 0:
@@ -174,16 +266,13 @@ def remove_obsolete_springfox_configuration(
                 ("org.springframework.context.annotation.Bean", "@Bean"),
                 ("org.springframework.util.ReflectionUtils", "ReflectionUtils"),
                 (
-                    "org.springframework.web.servlet.mvc.method."
-                    "RequestMappingInfoHandlerMapping",
+                    "org.springframework.web.servlet.mvc.method.RequestMappingInfoHandlerMapping",
                     "RequestMappingInfoHandlerMapping",
                 ),
                 ("java.lang.reflect.Field", "Field"),
                 ("java.util.List", "List"),
             ):
-                source_without_imports = re.sub(
-                    r"(?m)^import\s+[^;]+;\s*\n", "", updated
-                )
+                source_without_imports = re.sub(r"(?m)^import\s+[^;]+;\s*\n", "", updated)
                 if identifier not in source_without_imports:
                     updated = re.sub(
                         rf"(?m)^import\s+{re.escape(import_name)};\s*\n",
@@ -219,9 +308,7 @@ def update_repository_rest_configurer_signature(
         content = path.read_text(errors="replace")
         if "implements RepositoryRestConfigurer" not in content:
             continue
-        updated, replacements = method.subn(
-            r"\g<prefix>, CorsRegistry cors)", content, count=1
-        )
+        updated, replacements = method.subn(r"\g<prefix>, CorsRegistry cors)", content, count=1)
         if not replacements:
             continue
         cors_import = "import org.springframework.web.servlet.config.annotation.CorsRegistry;"
@@ -247,9 +334,7 @@ def configure_openapi_generator_for_springdoc(
         _MISSING_SCHEMA_REQUIRED_MODE in diagnostic
         and "io.swagger.v3.oas.annotations.media.Schema" in diagnostic
     )
-    needs_boot3_generator = any(
-        marker in diagnostic for marker in _MISSING_GENERATED_JAVAX_APIS
-    )
+    needs_boot3_generator = any(marker in diagnostic for marker in _MISSING_GENERATED_JAVAX_APIS)
     if (
         _MISSING_SWAGGER_1_ANNOTATIONS not in diagnostic
         and not needs_swagger2_annotations
@@ -425,7 +510,10 @@ def remove_obsolete_junit_platform_surefire_provider(
     """Remove the retired JUnit Platform provider from a modern Surefire plugin."""
 
     diagnostic = f"{failure.stdout}\n{failure.stderr}"
-    if _SUREFIRE_TESTSET_FAILURE not in diagnostic:
+    if not any(
+        marker in diagnostic
+        for marker in (_SUREFIRE_TESTSET_FAILURE, _SUREFIRE_CONSOLE_LOGGER_FAILURE)
+    ):
         return False
     pom = repository / "pom.xml"
     if not pom.is_file():
@@ -449,18 +537,14 @@ def remove_obsolete_junit_platform_surefire_provider(
         count=1,
         flags=re.DOTALL,
     )
-    updated_plugin = re.sub(
-        r"\s*<dependencies>\s*</dependencies>", "", updated_plugin, count=1
-    )
+    updated_plugin = re.sub(r"\s*<dependencies>\s*</dependencies>", "", updated_plugin, count=1)
     if updated_plugin == plugin:
         return False
     pom.write_text(content[: match.start()] + updated_plugin + content[match.end() :])
     return True
 
 
-def configure_boot_validation_starter(
-    repository: Path, failure: VerificationResult
-) -> bool:
+def configure_boot_validation_starter(repository: Path, failure: VerificationResult) -> bool:
     """Replace a bare validation API with Boot's managed validation implementation."""
 
     diagnostic = f"{failure.stdout}\n{failure.stderr}"
@@ -500,10 +584,7 @@ def make_password_encoder_bean_independent(
     """Break Boot 2.6 security configuration cycles around a stateless encoder bean."""
 
     diagnostic = f"{failure.stdout}\n{failure.stderr}"
-    if (
-        _CIRCULAR_SECURITY_CONFIGURATION not in diagnostic
-        or "webSecurityConfig" not in diagnostic
-    ):
+    if _CIRCULAR_SECURITY_CONFIGURATION not in diagnostic or "webSecurityConfig" not in diagnostic:
         return ()
     repaired: list[str] = []
     pattern = re.compile(
@@ -513,12 +594,57 @@ def make_password_encoder_bean_independent(
     )
     for path in repository.glob("src/main/java/**/*.java"):
         content = path.read_text(errors="replace")
-        updated, replacements = pattern.subn(
-            r"\g<prefix>static \g<signature>", content, count=1
-        )
+        updated, replacements = pattern.subn(r"\g<prefix>static \g<signature>", content, count=1)
         if replacements:
             path.write_text(updated)
             repaired.append(str(path.relative_to(repository)))
+    return tuple(repaired)
+
+
+def replace_spring_data_find_one_by_id(
+    repository: Path, failure: VerificationResult
+) -> tuple[str, ...]:
+    """Replace the removed Spring Data ``findOne(id)`` API after a Boot upgrade."""
+
+    diagnostic = f"{failure.stdout}\n{failure.stderr}"
+    if (
+        _SPRING_DATA_FIND_ONE_ID_FAILURE not in diagnostic
+        or "cannot be converted to org.springframework.data.domain.Example" not in diagnostic
+    ):
+        return ()
+    failure_locations: dict[str, set[int]] = {}
+    for match in re.finditer(
+        r"(?m)^(?:\[ERROR\]\s+)?(?P<path>.+\.java):\[(?P<line>\d+),\d+\] "
+        r"method findOne in interface",
+        diagnostic,
+    ):
+        failure_locations.setdefault(Path(match.group("path")).name, set()).add(
+            int(match.group("line"))
+        )
+    if not failure_locations:
+        return ()
+    repaired: list[str] = []
+    pattern = re.compile(r"\.findOne\s*\(\s*(?P<id>[A-Za-z_$][\w$]*)\s*\)")
+    for path in repository.rglob("*.java"):
+        relative = path.relative_to(repository)
+        if ".refinery" in relative.parts or "target" in relative.parts:
+            continue
+        affected_lines = failure_locations.get(path.name)
+        if not affected_lines:
+            continue
+        content = path.read_text(errors="replace")
+        lines = content.splitlines(keepends=True)
+        replacements = 0
+        for line_number in affected_lines:
+            if line_number > len(lines):
+                continue
+            lines[line_number - 1], count = pattern.subn(
+                r".findById(\g<id>).orElse(null)", lines[line_number - 1]
+            )
+            replacements += count
+        if replacements:
+            path.write_text("".join(lines))
+            repaired.append(str(relative))
     return tuple(repaired)
 
 
@@ -559,8 +685,7 @@ def use_explicit_ant_path_request_matchers(
         for start, end, replacement in reversed(replacements):
             updated = updated[:start] + replacement + updated[end:]
         matcher_import = (
-            "import org.springframework.security.web.util.matcher."
-            "AntPathRequestMatcher;"
+            "import org.springframework.security.web.util.matcher.AntPathRequestMatcher;"
         )
         if matcher_import not in updated:
             imports = tuple(re.finditer(r"(?m)^import\s+[^;]+;\s*$", updated))
@@ -705,17 +830,12 @@ def configure_boot3_test_compatibility(
             "WHERE pet_id=": "WHERE visit.pet.id=",
             "WHERE type_id=": "WHERE pet.type.id=",
         }
-        jpa_roots = (
-            repository / "src/main/java",
-        )
+        jpa_roots = (repository / "src/main/java",)
         paths = (
             path
             for root in jpa_roots
             for path in root.glob("**/*RepositoryImpl.java")
-            if any(
-                part.lower().endswith("jpa")
-                for part in path.relative_to(root).parts[:-1]
-            )
+            if any(part.lower().endswith("jpa") for part in path.relative_to(root).parts[:-1])
         )
         for path in paths:
             content = path.read_text(errors="replace")
@@ -741,9 +861,7 @@ def configure_boot3_test_compatibility(
     return tuple(repairs)
 
 
-def _require_nonempty_openapi_fields(
-    repository: Path, diagnostic: str
-) -> tuple[str, ...]:
+def _require_nonempty_openapi_fields(repository: Path, diagnostic: str) -> tuple[str, ...]:
     """Make non-empty request fields explicit when newer generators honor readOnly."""
 
     controllers = set(re.findall(r"([A-Z][A-Za-z0-9]+)RestControllerTests", diagnostic))
@@ -777,17 +895,13 @@ def _require_nonempty_openapi_fields(
                 count=1,
             )
             updated = updated[: match.start("body")] + body + updated[match.end("body") :]
-            repairs.append(
-                f"required non-empty {schema} fields in {path.relative_to(repository)}"
-            )
+            repairs.append(f"required non-empty {schema} fields in {path.relative_to(repository)}")
         if updated != content:
             path.write_text(updated)
     return tuple(repairs)
 
 
-def springdoc_repair_applicable(
-    repository: Path, failure: VerificationResult
-) -> bool:
+def springdoc_repair_applicable(repository: Path, failure: VerificationResult) -> bool:
     """Return whether a failed build has a known, scoped Springdoc repair."""
 
     diagnostic = f"{failure.stdout}\n{failure.stderr}"
@@ -820,7 +934,10 @@ def springdoc_repair_applicable(
         and "target" not in path.relative_to(repository).parts
     )
     obsolete_surefire_provider = (
-        _SUREFIRE_TESTSET_FAILURE in diagnostic
+        any(
+            marker in diagnostic
+            for marker in (_SUREFIRE_TESTSET_FAILURE, _SUREFIRE_CONSOLE_LOGGER_FAILURE)
+        )
         and pom.is_file()
         and "junit-platform-surefire-provider" in pom.read_text(errors="replace")
     )
@@ -861,6 +978,10 @@ def springdoc_repair_applicable(
             for path in repository.glob("src/main/java/**/*.java")
         )
     )
+    spring_data_find_one_id_failure = (
+        _SPRING_DATA_FIND_ONE_ID_FAILURE in diagnostic
+        and "cannot be converted to org.springframework.data.domain.Example" in diagnostic
+    )
     return (
         bool(springdoc_repair_files(repository))
         or generated_annotation_failure
@@ -872,6 +993,13 @@ def springdoc_repair_applicable(
         or request_matcher_signature_failure
         or legacy_method_security_configuration
         or repository_rest_signature_failure
+        or spring_data_find_one_id_failure
+        or (
+            _PRIVATE_BEAN_METHOD_FAILURE in diagnostic
+            and "must not be private or final" in diagnostic
+        )
+        or _H2_MISSING_COMMENT_ID in diagnostic
+        or _BROKEN_FASTJSON2_CACHE_CONFIG in diagnostic
     )
 
 
@@ -885,9 +1013,7 @@ class DeterministicMigrationRepairer:
         failure: VerificationResult,
     ) -> VerificationResult:
         info_repairs = repair_springdoc_info_constructor(repository, failure)
-        surefire_repaired = remove_obsolete_junit_platform_surefire_provider(
-            repository, failure
-        )
+        surefire_repaired = remove_obsolete_junit_platform_surefire_provider(repository, failure)
         generator_repaired = configure_openapi_generator_for_springdoc(repository, failure)
         boot3_repairs = configure_boot3_test_compatibility(repository, failure)
         validation_repaired = bool(
@@ -918,6 +1044,10 @@ class DeterministicMigrationRepairer:
             if step.recipe == _BOOT_27_RECIPE
             else ()
         )
+        spring_data_find_one_repairs = replace_spring_data_find_one_by_id(repository, failure)
+        bean_method_repairs = make_bean_methods_non_private(repository, failure)
+        h2_seed_repairs = add_missing_h2_seed_ids(repository, failure)
+        fastjson_repairs = restore_fastjson1_cache_configuration(repository, failure)
         if not (
             info_repairs
             or surefire_repaired
@@ -929,6 +1059,10 @@ class DeterministicMigrationRepairer:
             or method_security_repairs
             or springfox_repairs
             or repository_rest_repairs
+            or spring_data_find_one_repairs
+            or bean_method_repairs
+            or h2_seed_repairs
+            or fastjson_repairs
         ):
             return _result(1, "No deterministic migration repair matched the failure")
         if validation_repaired:
@@ -981,13 +1115,35 @@ class DeterministicMigrationRepairer:
                     f"signature: {', '.join(repository_rest_repairs)}"
                 ),
             )
+        if spring_data_find_one_repairs:
+            return _result(
+                0,
+                stdout=(
+                    "Replaced removed Spring Data findOne(id) calls with findById(id): "
+                    f"{', '.join(spring_data_find_one_repairs)}"
+                ),
+            )
+        if bean_method_repairs:
+            return _result(
+                0,
+                stdout=(f"Made Spring @Bean methods non-private: {', '.join(bean_method_repairs)}"),
+            )
+        if h2_seed_repairs:
+            return _result(0, stdout=f"Added explicit H2 seed IDs: {', '.join(h2_seed_repairs)}")
+        if fastjson_repairs:
+            return _result(
+                0,
+                stdout=(
+                    "Restored compatible Fastjson Redis configuration: "
+                    f"{', '.join(fastjson_repairs)}"
+                ),
+            )
         details = "; ".join((*info_repairs, *boot3_repairs))
         return _result(
             0,
             stdout=(
                 "Updated OpenAPI Generator compatibility and migrated OpenAPI models for the "
-                "documentation and framework stack"
-                + (f"; {details}" if details else "")
+                "documentation and framework stack" + (f"; {details}" if details else "")
             ),
         )
 
@@ -1007,9 +1163,7 @@ class AiMigrationRepairer:
         failure: VerificationResult,
     ) -> VerificationResult:
         info_repairs = repair_springdoc_info_constructor(repository, failure)
-        surefire_repaired = remove_obsolete_junit_platform_surefire_provider(
-            repository, failure
-        )
+        surefire_repaired = remove_obsolete_junit_platform_surefire_provider(repository, failure)
         generator_repaired = configure_openapi_generator_for_springdoc(repository, failure)
         boot3_repairs = configure_boot3_test_compatibility(repository, failure)
         validation_repaired = bool(
@@ -1020,6 +1174,9 @@ class AiMigrationRepairer:
             if step.recipe == _BOOT_26_RECIPE
             else ()
         )
+        bean_method_repairs = make_bean_methods_non_private(repository, failure)
+        h2_seed_repairs = add_missing_h2_seed_ids(repository, failure)
+        fastjson_repairs = restore_fastjson1_cache_configuration(repository, failure)
         allowed = springdoc_repair_files(repository)
         if not allowed:
             if validation_repaired:
@@ -1036,6 +1193,25 @@ class AiMigrationRepairer:
                     stdout=(
                         "Made the BCrypt password-encoder bean independent of its security "
                         f"configuration: {', '.join(encoder_repairs)}"
+                    ),
+                )
+            if bean_method_repairs:
+                return _result(
+                    0,
+                    stdout=(
+                        f"Made Spring @Bean methods non-private: {', '.join(bean_method_repairs)}"
+                    ),
+                )
+            if h2_seed_repairs:
+                return _result(
+                    0, stdout=f"Added explicit H2 seed IDs: {', '.join(h2_seed_repairs)}"
+                )
+            if fastjson_repairs:
+                return _result(
+                    0,
+                    stdout=(
+                        "Restored compatible Fastjson Redis configuration: "
+                        f"{', '.join(fastjson_repairs)}"
                     ),
                 )
             if info_repairs or surefire_repaired or generator_repaired or boot3_repairs:
@@ -1095,9 +1271,7 @@ class AiMigrationRepairer:
             (repository / replacement.path).write_text(replacement.content)
         summary = proposal.summary
         if generator_repaired:
-            summary = (
-                "Preserved generated DTO annotation compatibility. " + summary
-            )
+            summary = "Preserved generated DTO annotation compatibility. " + summary
         return _result(0, stdout=summary)
 
 

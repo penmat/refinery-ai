@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import time
@@ -35,11 +36,39 @@ def _clean_stderr(value: str, exit_code: int, limit: int) -> str:
 
 def verification_command(snapshot: DiscoverySnapshot) -> list[str] | None:
     root = snapshot.repository
+    build_directory = _build_directory(snapshot)
     if snapshot.build_system is BuildSystem.MAVEN:
-        return [*maven_command_prefix(root), "clean", "test"]
+        if build_directory == Path("."):
+            return [*maven_command_prefix(root), "clean", "test"]
+        module_root = root / build_directory
+        wrapper = module_root / "mvnw"
+        build_file = build_directory / "pom.xml"
+        if not wrapper.is_file():
+            prefix = ["mvn"]
+        else:
+            wrapper_path = f"./{wrapper.relative_to(root).as_posix()}"
+            prefix = [wrapper_path] if os.access(wrapper, os.X_OK) else ["sh", wrapper_path]
+        return [*prefix, "-f", build_file.as_posix(), "clean", "test"]
     if snapshot.build_system is BuildSystem.GRADLE:
-        return ["./gradlew", "test"] if (root / "gradlew").exists() else ["gradle", "test"]
+        if build_directory == Path("."):
+            return ["./gradlew", "test"] if (root / "gradlew").exists() else ["gradle", "test"]
+        module_wrapper = root / build_directory / "gradlew"
+        executable = (
+            f"./{module_wrapper.relative_to(root).as_posix()}"
+            if module_wrapper.is_file()
+            else "gradle"
+        )
+        return [executable, "-p", build_directory.as_posix(), "test"]
     return None
+
+
+def _build_directory(snapshot: DiscoverySnapshot) -> Path:
+    """Select the nearest authoritative build root represented by discovery."""
+
+    if not snapshot.build_files:
+        return Path(".")
+    build_file = min(snapshot.build_files, key=lambda path: (len(path.parts), path.as_posix()))
+    return build_file.parent
 
 
 def verify(

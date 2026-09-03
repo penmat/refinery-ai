@@ -18,6 +18,7 @@ from refinery_ai.assessment.models import AnalyzerStatus, Assessment
 from refinery_ai.assessment.reporting import assessment_text, comparison_text
 from refinery_ai.assessment.storage import AssessmentStore
 from refinery_ai.config import Settings
+from refinery_ai.corpus_run import CorpusRunner, load_corpus, load_failed_project_ids
 from refinery_ai.factory import ModernizationFactory
 from refinery_ai.harness import HarnessRepositoryEnvironment
 from refinery_ai.jdks import JdkResolver, project_runtime_java, selected_jdk
@@ -47,6 +48,113 @@ from refinery_ai.tools import RepositoryEvidenceTools
 app = typer.Typer(help="Safe, auditable Java modernization.", no_args_is_help=True)
 assessment_app = typer.Typer(help="Inspect and compare saved assessments.", no_args_is_help=True)
 app.add_typer(assessment_app, name="assessment")
+
+
+@app.command("run-corpus")
+def run_corpus(
+    corpus_file: Annotated[
+        Path, typer.Argument(exists=True, dir_okay=False, help="YAML corpus to run")
+    ],
+    output_directory: Annotated[
+        Path | None,
+        typer.Option("--output-directory", "-o", help="Directory for clones, logs, and summary"),
+    ] = None,
+    profile_name: Annotated[str, typer.Option("--profile")] = "spring-boot-3.2-java-17",
+    ai_patching: Annotated[
+        bool,
+        typer.Option(
+            "--ai-patching/--no-ai-patching",
+            help="Use the configured AI provider for semantic build repairs",
+        ),
+    ] = True,
+    project_ids: Annotated[
+        list[str] | None,
+        typer.Option("--project", help="Run only this project ID; repeat to select several"),
+    ] = None,
+    rerun_failed_from: Annotated[
+        Path | None,
+        typer.Option(
+            "--rerun-failed-from",
+            exists=True,
+            help="Run only unsuccessful projects from a prior summary or run directory",
+        ),
+    ] = None,
+    tiers: Annotated[
+        list[str] | None,
+        typer.Option("--tier", help="Run only this tier; repeat to select several"),
+    ] = None,
+    include_test_configuration_needed: Annotated[
+        bool,
+        typer.Option(
+            "--include-test-configuration-needed",
+            help="Include projects that require external test setup",
+        ),
+    ] = False,
+    limit: Annotated[int | None, typer.Option("--limit", min=1)] = None,
+    max_cycles: Annotated[int, typer.Option("--max-cycles", min=1)] = 20,
+    timeout_seconds: Annotated[
+        int, typer.Option("--project-timeout", min=60, help="Maximum seconds per conversion")
+    ] = 14_400,
+) -> None:
+    """Clone and convert every selected project in an evaluation corpus."""
+
+    corpus = load_corpus(corpus_file)
+    load_profile(profile_name)
+    selected = corpus.projects
+    if project_ids:
+        wanted = set(project_ids)
+        known = {project.id for project in selected}
+        if missing := wanted - known:
+            typer.echo(f"Unknown project ID(s): {', '.join(sorted(missing))}", err=True)
+            raise typer.Exit(code=2)
+        selected = [project for project in selected if project.id in wanted]
+    if tiers:
+        wanted_tiers = set(tiers)
+        selected = [project for project in selected if project.tier in wanted_tiers]
+    if rerun_failed_from is not None:
+        try:
+            failed_ids = load_failed_project_ids(rerun_failed_from)
+        except ValueError as error:
+            typer.echo(str(error), err=True)
+            raise typer.Exit(code=2) from error
+        selected = [project for project in selected if project.id in failed_ids]
+        typer.echo(
+            f"Selected {len(selected)} unsuccessful project(s) from the prior run."
+        )
+    if not include_test_configuration_needed:
+        skipped = [project for project in selected if project.test_configuration_needed]
+        selected = [project for project in selected if not project.test_configuration_needed]
+        if skipped:
+            typer.echo(
+                f"Skipping {len(skipped)} project(s) that need test configuration; "
+                "pass --include-test-configuration-needed to include them."
+            )
+    if limit is not None:
+        selected = selected[:limit]
+    if not selected:
+        typer.echo("No corpus projects matched the selection.", err=True)
+        raise typer.Exit(code=2)
+
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    destination = output_directory or Path(".refinery") / "corpus-runs" / timestamp
+    typer.echo(
+        f"Running {len(selected)} project(s) with AI patching "
+        f"{'enabled' if ai_patching else 'disabled'}."
+    )
+    result = CorpusRunner(
+        corpus,
+        destination,
+        profile=profile_name,
+        ai_patching=ai_patching,
+        max_cycles=max_cycles,
+        timeout_seconds=timeout_seconds,
+        progress=typer.echo,
+    ).run(selected)
+    completed = sum(project.status == "completed" for project in result.projects)
+    summary_path = Path(destination).resolve() / "summary.json"
+    typer.echo(f"Completed {completed}/{len(result.projects)}. Summary: {summary_path}")
+    if completed != len(result.projects):
+        raise typer.Exit(code=1)
 
 
 @app.callback()
@@ -511,7 +619,11 @@ def migrate(
         output_limit=settings.max_output_characters,
         progress=None if json_output else typer.echo,
         repairer=repairer,
-        max_repair_attempts=settings.max_repair_attempts,
+        max_repair_attempts=(
+            settings.max_deterministic_repair_attempts
+            if settings.repair_mode is RepairMode.DISABLED
+            else settings.max_repair_attempts
+        ),
         jdk_resolver=JdkResolver(),
     ).run(
         plan_id,
@@ -647,7 +759,11 @@ def run(
                 output_limit=settings.max_output_characters,
                 progress=typer.echo,
                 repairer=repairer,
-                max_repair_attempts=settings.max_repair_attempts,
+                max_repair_attempts=(
+                    settings.max_deterministic_repair_attempts
+                    if settings.repair_mode is RepairMode.DISABLED
+                    else settings.max_repair_attempts
+                ),
                 jdk_resolver=jdk_resolver,
             ).run(plan_id, apply=True, publish=True, expected_profile=profile.name)
 

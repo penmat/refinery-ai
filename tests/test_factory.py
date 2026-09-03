@@ -15,8 +15,11 @@ from refinery_ai.factory import (
     _retryable_repaired_recipes,
     _with_boot2_before_validation_starter,
     _with_boot3_before_jakarta,
+    _with_boot3_before_mybatis3,
     _with_boot3_before_springdoc2,
+    _with_boot_minor_staging,
     _with_datasource_initialization_prerequisite,
+    _with_deterministic_prerequisites,
     _with_springfox_before_boot27,
     _with_utf8_prerequisite,
 )
@@ -80,8 +83,15 @@ RECIPE_SOURCES = [
 ]
 
 
-def test_planner_defaults_to_openai_terra() -> None:
-    assert Settings().model == "openai:gpt-5.6-terra"
+def test_planner_uses_supported_openai_model() -> None:
+    assert Settings().model in {"openai:gpt-5.6-terra", "openai:gpt-5.6-luna"}
+
+
+def test_deterministic_repairs_get_one_more_attempt_than_ai() -> None:
+    settings = Settings()
+
+    assert settings.max_deterministic_repair_attempts == 4
+    assert settings.max_repair_attempts == 3
 
 
 def test_planner_rules_capture_spring_boot_java_17_ordering() -> None:
@@ -306,6 +316,133 @@ def test_planning_evidence_facts_include_goal_and_retained_warnings(tmp_path: Pa
         "src/main/resources/application.properties"
     ) in facts
     assert "- [warning] Legacy javax imports remain." in facts
+
+
+def test_boot_1_upgrade_is_staged_through_boot_20(tmp_path: Path) -> None:
+    requested = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7",
+        reason="Upgrade Boot.",
+        evidence=["discovery.spring_boot_version=1.3.0.RELEASE"],
+        expected_benefit="Boot 2.7 support.",
+        priority="high",
+        confidence=0.9,
+    )
+    java = requested.model_copy(
+        update={"recipe": "org.openrewrite.java.migrate.UpgradeToJava17"}
+    )
+    snapshot = DiscoverySnapshot(
+        repository=tmp_path,
+        build_system="maven",
+        spring_boot_version="1.3.0.RELEASE",
+    )
+
+    result = _with_boot_minor_staging(
+        RecipePlan(recommendations=[requested, java]), snapshot
+    )
+
+    assert [item.recipe for item in result.recommendations] == [
+        "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_0"
+    ]
+    assert result.recommendations[0].depends_on == []
+
+
+def test_java17_only_plan_for_old_boot_is_replaced_by_next_boot_bridge(
+    tmp_path: Path,
+) -> None:
+    java = RecipeRecommendation(
+        recipe="org.openrewrite.java.migrate.UpgradeToJava17",
+        reason="Upgrade Java after Boot.",
+        evidence=["discovery.java_version=1.8"],
+        expected_benefit="Java 17.",
+        priority="high",
+        confidence=0.9,
+    )
+    snapshot = DiscoverySnapshot(
+        repository=tmp_path,
+        build_system="maven",
+        spring_boot_version="2.2.6.RELEASE",
+    )
+
+    result = _with_deterministic_prerequisites(
+        RecipePlan(recommendations=[java]), snapshot
+    )
+
+    assert [item.recipe for item in result.recommendations] == [
+        "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_3"
+    ]
+    assert result.recommendations[0].depends_on == []
+
+
+def test_boot_23_upgrade_advances_only_to_next_minor(tmp_path: Path) -> None:
+    requested = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7",
+        reason="Upgrade Boot.",
+        evidence=["discovery.spring_boot_version=2.3.4.RELEASE"],
+        expected_benefit="Boot 2.7 support.",
+        priority="high",
+        confidence=0.9,
+    )
+    snapshot = DiscoverySnapshot(
+        repository=tmp_path,
+        build_system="maven",
+        spring_boot_version="2.3.4.RELEASE",
+    )
+
+    result = _with_boot_minor_staging(
+        RecipePlan(recommendations=[requested]), snapshot
+    )
+
+    assert [item.recipe for item in result.recommendations] == [
+        "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_4"
+    ]
+
+
+def test_boot_26_does_not_jump_directly_to_boot_31(tmp_path: Path) -> None:
+    requested = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_1",
+        reason="Upgrade Boot.",
+        evidence=["discovery.spring_boot_version=2.6.15"],
+        expected_benefit="Boot 3.1 support.",
+        priority="high",
+        confidence=0.9,
+    )
+
+    result = _with_boot_minor_staging(
+        RecipePlan(recommendations=[requested]),
+        DiscoverySnapshot(
+            repository=tmp_path,
+            build_system="maven",
+            spring_boot_version="2.6.15",
+        ),
+    )
+
+    assert [item.recipe for item in result.recommendations] == [
+        "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7"
+    ]
+
+
+def test_boot_27_does_not_jump_directly_to_boot_31(tmp_path: Path) -> None:
+    requested = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_1",
+        reason="Upgrade Boot.",
+        evidence=["discovery.spring_boot_version=2.7.18"],
+        expected_benefit="Boot 3.1 support.",
+        priority="high",
+        confidence=0.9,
+    )
+
+    result = _with_boot_minor_staging(
+        RecipePlan(recommendations=[requested]),
+        DiscoverySnapshot(
+            repository=tmp_path,
+            build_system="maven",
+            spring_boot_version="2.7.18",
+        ),
+    )
+
+    assert [item.recipe for item in result.recommendations] == [
+        "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"
+    ]
 
 
 def test_utf8_conversion_is_planned_before_spring_boot_upgrade(tmp_path: Path) -> None:
@@ -533,6 +670,53 @@ def test_boot3_is_enforced_before_springdoc2_migration(tmp_path: Path) -> None:
     ]
     assert result.recommendations[0].depends_on == ["boot2"]
     assert result.recommendations[1].depends_on == [boot3_recipe, "boot2"]
+
+
+def test_mybatis3_is_deferred_until_spring_boot3_is_planned(tmp_path: Path) -> None:
+    mybatis_recipe = "org.openrewrite.java.spring.boot3.UpgradeMyBatisToSpringBoot_3_0"
+    mybatis = RecipeRecommendation(
+        recipe=mybatis_recipe,
+        reason="Upgrade MyBatis.",
+        evidence=["mybatis"],
+        expected_benefit="MyBatis 3.",
+        priority="high",
+        confidence=1,
+    )
+
+    result = _with_boot3_before_mybatis3(
+        RecipePlan(recommendations=[mybatis]),
+        DiscoverySnapshot(
+            repository=tmp_path,
+            build_system="maven",
+            spring_boot_version="2.7.5",
+        ),
+    )
+
+    assert result.recommendations == []
+
+
+def test_mybatis3_failure_is_retryable_after_ordering_repair() -> None:
+    retryable = _retryable_repaired_recipes(
+        Path("."),
+        "NoClassDefFoundError: org/springframework/aot/AotDetector",
+    )
+
+    assert retryable == {
+        "org.openrewrite.java.spring.boot3.UpgradeMyBatisToSpringBoot_3_0"
+    }
+
+
+def test_boot_failures_are_retryable_after_h2_and_fastjson_repairs() -> None:
+    retryable = _retryable_repaired_recipes(
+        Path("."),
+        'NULL not allowed for column "COMMENT_ID"\n'
+        "ObjectReaderProvider cannot be converted to ParserConfig",
+    )
+
+    assert retryable == {
+        "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_0",
+        "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0",
+    }
 
 
 def test_springdoc2_failure_is_retryable_after_ordering_repair_is_available(

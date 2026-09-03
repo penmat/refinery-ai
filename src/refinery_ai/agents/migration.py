@@ -133,16 +133,21 @@ class MigrationAgent:
             self.progress("Preparing isolated migration worktrees ...")
             starting_revision = worktrees.start()
             current_revision = starting_revision
-            command = self.build_command(plan.snapshot)
+            baseline_workspace = worktrees.create_baseline(starting_revision)
+            baseline_snapshot = plan.snapshot.model_copy(
+                update={"repository": baseline_workspace.path}
+            )
+            command = self.build_command(baseline_snapshot)
             if command is None:
                 self.progress("Baseline cannot be verified: unknown build system")
+                worktrees.rollback(baseline_workspace)
                 status = RunStatus.FAILED
             else:
                 attempts: list[tuple[int, VerificationResult]] = []
                 if self.jdk_resolver is None or not baseline_candidates:
                     self.progress("Verifying baseline before Migration 1 ...")
                     baseline_verification = self.build_verifier(
-                        Path(plan.snapshot.repository),
+                        baseline_workspace.path,
                         command,
                         timeout=self.timeout,
                         output_limit=self.output_limit,
@@ -159,7 +164,7 @@ class MigrationAgent:
                             f"Verifying baseline before Migration 1 with installed JDK {major} ..."
                         )
                         candidate = self.build_verifier(
-                            Path(plan.snapshot.repository),
+                            baseline_workspace.path,
                             command,
                             timeout=self.timeout,
                             output_limit=self.output_limit,
@@ -179,6 +184,7 @@ class MigrationAgent:
                 baseline_artifacts = worktrees.record_baseline(
                     baseline_verification, attempts or None
                 )
+                worktrees.rollback(baseline_workspace)
                 if not baseline_verification.green:
                     self.progress(
                         "Baseline build failed; no migrations were run. "
