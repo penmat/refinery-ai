@@ -47,7 +47,6 @@ projects:
   category: task-management-rest
   test_configuration_needed: true
   notes: Nested Maven backend whose context-load test requires access to a configured MySQL database.
-  notes: MySQL and JWT; intentionally ordinary application code.
 - id: ecommerce-api-sanajitjana
   name: E-Commerce-API
   repo_url: https://github.com/sanajitjana/E-Commerce-API
