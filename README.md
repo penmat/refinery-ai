@@ -262,6 +262,22 @@ installations are discovered beneath
 `$SDKMAN_DIR/candidates/java` (or `~/.sdkman/candidates/java`). If a required major version is not
 installed, the profile run stops with an actionable error.
 
+To run only corpus projects whose IDs have never appeared in an earlier run summary:
+
+```bash
+uv run refinery run-corpus \
+  evals/corpora/refinery-java8-spring-boot-test-corpus.yaml \
+  --only-new \
+  --no-ai-patching \
+  --jobs 3
+```
+
+By default, history is read from `.refinery/corpus-runs` and projects marked as requiring test
+configuration remain skipped. Use `--run-history /path/to/corpus-runs` for another history location,
+or `--include-test-configuration-needed` to include those projects.
+Use `--jobs` to run isolated projects concurrently; it defaults to `1`. Start with `2` or `3`
+because Maven/Gradle processes still share CPU, memory, disk, and dependency caches.
+
 The earlier goal-first form remains supported with `--repository /path/to/java-project`.
 
 The catalog connection verifies TLS using the bundled CA roots. In a development environment

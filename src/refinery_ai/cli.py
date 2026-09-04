@@ -18,17 +18,21 @@ from refinery_ai.assessment.models import AnalyzerStatus, Assessment
 from refinery_ai.assessment.reporting import assessment_text, comparison_text
 from refinery_ai.assessment.storage import AssessmentStore
 from refinery_ai.config import Settings
-from refinery_ai.corpus_run import CorpusRunner, load_corpus, load_failed_project_ids
+from refinery_ai.corpus_run import (
+    CorpusRunner,
+    load_attempted_project_ids,
+    load_corpus,
+    load_failed_project_ids,
+)
 from refinery_ai.factory import ModernizationFactory
 from refinery_ai.harness import HarnessRepositoryEnvironment
 from refinery_ai.jdks import JdkResolver, project_runtime_java, selected_jdk
 from refinery_ai.llm import run_tool_loop
 from refinery_ai.logging import configure_logging, get_logger
 from refinery_ai.mcp import run_mcp_server
-from refinery_ai.migrations.ai_repair import (
-    AiMigrationRepairer,
-    DeterministicMigrationRepairer,
-)
+from refinery_ai.migrations.ai_repair import AiMigrationRepairer
+from refinery_ai.migrations.deterministic_repair import DeterministicMigrationRepairer
+from refinery_ai.migrations.repair import MigrationRepairChain
 from refinery_ai.models import (
     MigrationRun,
     ModernizationGoal,
@@ -38,7 +42,7 @@ from refinery_ai.models import (
     RunStatus,
 )
 from refinery_ai.planning_artifacts import MigrationPlanStore
-from refinery_ai.profile_run import ProfileRunner
+from refinery_ai.profile_run import ProfileRunner, VerifiedCheckpoint
 from refinery_ai.profiles import load_profile
 from refinery_ai.summary import ProjectSummaryService, SummaryError
 from refinery_ai.summary.reporting import summary_markdown
@@ -79,6 +83,20 @@ def run_corpus(
             help="Run only unsuccessful projects from a prior summary or run directory",
         ),
     ] = None,
+    only_new: Annotated[
+        bool,
+        typer.Option(
+            "--only-new",
+            help="Run only project IDs absent from all prior corpus summaries",
+        ),
+    ] = False,
+    run_history: Annotated[
+        Path,
+        typer.Option(
+            "--run-history",
+            help="Directory containing prior corpus runs used by --only-new",
+        ),
+    ] = Path(".refinery/corpus-runs"),
     tiers: Annotated[
         list[str] | None,
         typer.Option("--tier", help="Run only this tier; repeat to select several"),
@@ -95,11 +113,18 @@ def run_corpus(
     timeout_seconds: Annotated[
         int, typer.Option("--project-timeout", min=60, help="Maximum seconds per conversion")
     ] = 14_400,
+    jobs: Annotated[
+        int,
+        typer.Option("--jobs", "-j", min=1, help="Number of projects to run concurrently"),
+    ] = 1,
 ) -> None:
     """Clone and convert every selected project in an evaluation corpus."""
 
     corpus = load_corpus(corpus_file)
     load_profile(profile_name)
+    if only_new and rerun_failed_from is not None:
+        typer.echo("--only-new cannot be combined with --rerun-failed-from.", err=True)
+        raise typer.Exit(code=2)
     selected = corpus.projects
     if project_ids:
         wanted = set(project_ids)
@@ -118,8 +143,17 @@ def run_corpus(
             typer.echo(str(error), err=True)
             raise typer.Exit(code=2) from error
         selected = [project for project in selected if project.id in failed_ids]
+        typer.echo(f"Selected {len(selected)} unsuccessful project(s) from the prior run.")
+    if only_new:
+        try:
+            attempted_ids = load_attempted_project_ids(run_history)
+        except ValueError as error:
+            typer.echo(str(error), err=True)
+            raise typer.Exit(code=2) from error
+        selected = [project for project in selected if project.id not in attempted_ids]
         typer.echo(
-            f"Selected {len(selected)} unsuccessful project(s) from the prior run."
+            f"Selected {len(selected)} new project(s); found "
+            f"{len(attempted_ids)} previously attempted project ID(s)."
         )
     if not include_test_configuration_needed:
         skipped = [project for project in selected if project.test_configuration_needed]
@@ -139,7 +173,7 @@ def run_corpus(
     destination = output_directory or Path(".refinery") / "corpus-runs" / timestamp
     typer.echo(
         f"Running {len(selected)} project(s) with AI patching "
-        f"{'enabled' if ai_patching else 'disabled'}."
+        f"{'enabled' if ai_patching else 'disabled'} using {jobs} concurrent job(s)."
     )
     result = CorpusRunner(
         corpus,
@@ -148,6 +182,7 @@ def run_corpus(
         ai_patching=ai_patching,
         max_cycles=max_cycles,
         timeout_seconds=timeout_seconds,
+        jobs=jobs,
         progress=typer.echo,
     ).run(selected)
     completed = sum(project.status == "completed" for project in result.projects)
@@ -497,9 +532,7 @@ def mcp(
 
 @app.command()
 def plan(
-    subject: Annotated[
-        str, typer.Argument(help="Java repository path, or a modernization goal")
-    ],
+    subject: Annotated[str, typer.Argument(help="Java repository path, or a modernization goal")],
     repository: Annotated[Path, typer.Option("--repository", "-r")] = Path("."),
     target_java: Annotated[int | None, typer.Option("--target-java")] = None,
     goal: Annotated[
@@ -528,17 +561,15 @@ def plan(
         goal_description = goal or subject
     settings = Settings()
     settings.recipe_catalog_verify_ssl = (
-        settings.recipe_catalog_verify_ssl
-        if catalog_verify_ssl is None
-        else catalog_verify_ssl
+        settings.recipe_catalog_verify_ssl if catalog_verify_ssl is None else catalog_verify_ssl
     )
     if not settings.recipe_catalog_verify_ssl:
         typer.echo(
             "Warning: OpenRewrite catalog TLS certificate verification is disabled.", err=True
         )
     profile = load_profile(profile_name) if profile_name else None
-    effective_target_java = target_java if target_java is not None else (
-        profile.target_java if profile else None
+    effective_target_java = (
+        target_java if target_java is not None else (profile.target_java if profile else None)
     )
     if profile is not None:
         goal_description = f"{goal_description}. Profile target: {profile.goal}"
@@ -611,7 +642,7 @@ def migrate(
     repairer = (
         DeterministicMigrationRepairer()
         if settings.repair_mode is RepairMode.DISABLED
-        else AiMigrationRepairer(settings)
+        else MigrationRepairChain(DeterministicMigrationRepairer(), AiMigrationRepairer(settings))
     )
     result = MigrationAgent(
         MigrationPlanStore(root, settings.state_directory),
@@ -640,9 +671,7 @@ def migrate(
         outcome = "completed" if result.status is RunStatus.COMPLETED else "stopped"
         typer.echo(f"Migration plan {outcome}. Details: {log_path}")
         if result.published_revision:
-            typer.echo(
-                f"Applied verified result to {root}: {result.published_revision[:12]}"
-            )
+            typer.echo(f"Applied verified result to {root}: {result.published_revision[:12]}")
         if (
             result.baseline_artifacts
             and result.baseline_verification
@@ -747,11 +776,13 @@ def run(
                     collect_context_graph=profile.evidence.context_graph != "off",
                 )
 
-        def migrate_cycle(plan_id: str) -> MigrationRun:
+        def migrate_cycle(plan_id: str, checkpoint: VerifiedCheckpoint | None) -> MigrationRun:
             repairer = (
                 DeterministicMigrationRepairer()
                 if settings.repair_mode is RepairMode.DISABLED
-                else AiMigrationRepairer(settings)
+                else MigrationRepairChain(
+                    DeterministicMigrationRepairer(), AiMigrationRepairer(settings)
+                )
             )
             return MigrationAgent(
                 MigrationPlanStore(root, settings.state_directory),
@@ -765,7 +796,14 @@ def run(
                     else settings.max_repair_attempts
                 ),
                 jdk_resolver=jdk_resolver,
-            ).run(plan_id, apply=True, publish=True, expected_profile=profile.name)
+            ).run(
+                plan_id,
+                apply=True,
+                publish=True,
+                expected_profile=profile.name,
+                trusted_baseline_revision=checkpoint.revision if checkpoint else None,
+                trusted_baseline_java=checkpoint.java if checkpoint else None,
+            )
 
         result = ProfileRunner(
             root,

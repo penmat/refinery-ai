@@ -17,12 +17,10 @@ from refinery_ai.jdks import (
     project_runtime_java,
     recipe_target_java,
 )
-from refinery_ai.migrations.ai_repair import (
-    MigrationRepairer,
-    springdoc_repair_applicable,
-)
 from refinery_ai.migrations.contracts import MigrationTypeRunner
+from refinery_ai.migrations.deterministic_repair import springdoc_repair_applicable
 from refinery_ai.migrations.openrewrite import OpenRewriteMigrationRunner
+from refinery_ai.migrations.repair import MigrationRepairer
 from refinery_ai.migrations.spring_properties import (
     DEFER_DATASOURCE_INITIALIZATION_RECIPE,
     SpringPropertiesMigrationRunner,
@@ -88,6 +86,8 @@ class MigrationAgent:
         apply: bool = False,
         publish: bool = True,
         expected_profile: str | None = None,
+        trusted_baseline_revision: str | None = None,
+        trusted_baseline_java: int | None = None,
     ) -> MigrationRun:
         plan = self.store.load(plan_id)
         if expected_profile is not None and plan.profile != expected_profile:
@@ -133,64 +133,85 @@ class MigrationAgent:
             self.progress("Preparing isolated migration worktrees ...")
             starting_revision = worktrees.start()
             current_revision = starting_revision
-            baseline_workspace = worktrees.create_baseline(starting_revision)
-            baseline_snapshot = plan.snapshot.model_copy(
-                update={"repository": baseline_workspace.path}
+            reuse_verified_baseline = (
+                trusted_baseline_revision == starting_revision and trusted_baseline_java is not None
             )
-            command = self.build_command(baseline_snapshot)
-            if command is None:
-                self.progress("Baseline cannot be verified: unknown build system")
-                worktrees.rollback(baseline_workspace)
-                status = RunStatus.FAILED
+            if reuse_verified_baseline:
+                current_java = trusted_baseline_java
+                baseline_verification = VerificationResult(
+                    command=["refinery", "verified-checkpoint"],
+                    exit_code=0,
+                    stdout=(
+                        f"Reused verified checkpoint {starting_revision} with JDK {current_java}"
+                    ),
+                    duration_seconds=0,
+                )
+                self.progress(
+                    "Reusing the previous cycle's verified checkpoint; skipping baseline build ..."
+                )
             else:
-                attempts: list[tuple[int, VerificationResult]] = []
-                if self.jdk_resolver is None or not baseline_candidates:
-                    self.progress("Verifying baseline before Migration 1 ...")
-                    baseline_verification = self.build_verifier(
-                        baseline_workspace.path,
-                        command,
-                        timeout=self.timeout,
-                        output_limit=self.output_limit,
-                        environment=self._jdk_environment(current_java),
-                    )
+                baseline_workspace = worktrees.create_baseline(starting_revision)
+                baseline_snapshot = plan.snapshot.model_copy(
+                    update={"repository": baseline_workspace.path}
+                )
+                command = self.build_command(baseline_snapshot)
+                if command is None:
+                    self.progress("Baseline cannot be verified: unknown build system")
+                    worktrees.rollback(baseline_workspace)
+                    status = RunStatus.FAILED
                 else:
-                    for major in baseline_candidates:
-                        try:
-                            environment = self._jdk_environment(major)
-                        except RuntimeError as error:
-                            self.progress(f"Cannot try baseline with JDK {major}: {error}")
-                            continue
-                        self.progress(
-                            f"Verifying baseline before Migration 1 with installed JDK {major} ..."
-                        )
-                        candidate = self.build_verifier(
+                    attempts: list[tuple[int, VerificationResult]] = []
+                    if self.jdk_resolver is None or not baseline_candidates:
+                        self.progress("Verifying baseline before Migration 1 ...")
+                        baseline_verification = self.build_verifier(
                             baseline_workspace.path,
                             command,
                             timeout=self.timeout,
                             output_limit=self.output_limit,
-                            environment=environment,
+                            environment=self._jdk_environment(current_java),
                         )
-                        attempts.append((major, candidate))
-                        baseline_verification = candidate
-                        if candidate.green:
-                            current_java = major
+                    else:
+                        for major in baseline_candidates:
+                            try:
+                                environment = self._jdk_environment(major)
+                            except RuntimeError as error:
+                                self.progress(f"Cannot try baseline with JDK {major}: {error}")
+                                continue
                             self.progress(
-                                f"Baseline verified with JDK {major}; using it for migrations ..."
+                                "Verifying baseline before Migration 1 with installed "
+                                f"JDK {major} ..."
                             )
-                            break
-                        self.progress(f"Baseline failed with JDK {major}.")
-                if baseline_verification is None:
-                    raise RuntimeError("No installed JDK was available for baseline verification")
-                baseline_artifacts = worktrees.record_baseline(
-                    baseline_verification, attempts or None
-                )
-                worktrees.rollback(baseline_workspace)
-                if not baseline_verification.green:
-                    self.progress(
-                        "Baseline build failed; no migrations were run. "
-                        "This is not a migration regression."
+                            candidate = self.build_verifier(
+                                baseline_workspace.path,
+                                command,
+                                timeout=self.timeout,
+                                output_limit=self.output_limit,
+                                environment=environment,
+                            )
+                            attempts.append((major, candidate))
+                            baseline_verification = candidate
+                            if candidate.green:
+                                current_java = major
+                                self.progress(
+                                    f"Baseline verified with JDK {major}; "
+                                    "using it for migrations ..."
+                                )
+                                break
+                            self.progress(f"Baseline failed with JDK {major}.")
+                    if baseline_verification is None:
+                        raise RuntimeError(
+                            "No installed JDK was available for baseline verification"
+                        )
+                    baseline_artifacts = worktrees.record_baseline(
+                        baseline_verification, attempts or None
                     )
-                    status = RunStatus.FAILED
+                    worktrees.rollback(baseline_workspace)
+                    if not baseline_verification.green:
+                        self.progress(
+                            "Baseline build failed; no migrations were run. "
+                            "This is not a migration regression."
+                        )
+                        status = RunStatus.FAILED
         runnable_steps = plan.steps if status is not RunStatus.FAILED else []
         for index, step in enumerate(runnable_steps, start=1):
             runner = self.runners.get(step.execution_type)
@@ -213,9 +234,7 @@ class MigrationAgent:
             if worktrees is not None:
                 assert current_revision is not None
                 workspace = worktrees.create_step(index, current_revision)
-                step_snapshot = plan.snapshot.model_copy(
-                    update={"repository": workspace.path}
-                )
+                step_snapshot = plan.snapshot.model_copy(update={"repository": workspace.path})
             execution = runner.run(
                 step_snapshot,
                 step,
@@ -280,8 +299,7 @@ class MigrationAgent:
                             step_id=step_id,
                             status=RunStatus.FAILED,
                             message=(
-                                "Cannot verify migration for unknown build system: "
-                                f"{step.recipe}"
+                                f"Cannot verify migration for unknown build system: {step.recipe}"
                             ),
                             execution=execution,
                             attempts=1,
@@ -414,6 +432,7 @@ class MigrationAgent:
             starting_revision=starting_revision,
             final_revision=current_revision,
             published_revision=published_revision,
+            verified_java=current_java if status is RunStatus.COMPLETED else None,
             baseline_verification=baseline_verification,
             baseline_artifacts=baseline_artifacts,
             steps=results,

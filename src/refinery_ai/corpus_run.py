@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
@@ -58,6 +60,7 @@ class CorpusRunResult(BaseModel):
     corpus_id: str
     profile: str
     ai_patching: bool
+    jobs: int = 1
     started_at: datetime
     finished_at: datetime | None = None
     projects: list[CorpusProjectResult] = Field(default_factory=list)
@@ -94,6 +97,37 @@ def load_failed_project_ids(path: Path) -> frozenset[str]:
     return frozenset(failed)
 
 
+def load_attempted_project_ids(path: Path) -> frozenset[str]:
+    """Load every project ID recorded beneath a prior-run history path."""
+
+    history = path.expanduser().resolve()
+    if history.is_file():
+        summaries = [history]
+    elif (history / "summary.json").is_file():
+        summaries = [history / "summary.json"]
+    elif history.is_dir():
+        summaries = sorted(history.glob("*/summary.json"))
+    else:
+        raise ValueError(f"Corpus run history does not exist: {history}")
+    if not summaries:
+        return frozenset()
+    attempted: set[str] = set()
+    for summary in summaries:
+        try:
+            document = json.loads(summary.read_text())
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError(f"Unable to read prior corpus summary {summary}: {error}") from error
+        projects = document.get("projects") if isinstance(document, dict) else None
+        if not isinstance(projects, list):
+            raise ValueError(f"Prior corpus summary has no projects list: {summary}")
+        attempted.update(
+            project["id"]
+            for project in projects
+            if isinstance(project, dict) and isinstance(project.get("id"), str)
+        )
+    return frozenset(attempted)
+
+
 class CorpusRunner:
     """Clone each selected project and invoke the isolated profile-run command."""
 
@@ -106,15 +140,22 @@ class CorpusRunner:
         ai_patching: bool = True,
         max_cycles: int = 20,
         timeout_seconds: int = 14_400,
+        jobs: int = 1,
         progress: Any = None,
     ) -> None:
+        if jobs < 1:
+            raise ValueError("jobs must be at least 1")
         self.corpus = corpus
         self.output_directory = output_directory.expanduser().resolve()
         self.profile = profile
         self.ai_patching = ai_patching
         self.max_cycles = max_cycles
         self.timeout_seconds = timeout_seconds
+        self.jobs = jobs
         self.progress = progress or (lambda _message: None)
+        self._cancelled = threading.Event()
+        self._process_lock = threading.Lock()
+        self._active_processes: set[subprocess.Popen[str]] = set()
 
     def run(self, projects: list[CorpusProject]) -> CorpusRunResult:
         started_at = datetime.now(UTC)
@@ -122,10 +163,20 @@ class CorpusRunner:
             corpus_id=str(self.corpus.corpus.get("id", "unnamed-corpus")),
             profile=self.profile,
             ai_patching=self.ai_patching,
+            jobs=self.jobs,
             started_at=started_at,
         )
         self.output_directory.mkdir(parents=True, exist_ok=True)
         self._save(result)
+        if self.jobs == 1:
+            self._run_sequential(projects, result)
+        else:
+            self._run_parallel(projects, result)
+        result.finished_at = datetime.now(UTC)
+        self._save(result)
+        return result
+
+    def _run_sequential(self, projects: list[CorpusProject], result: CorpusRunResult) -> None:
         for index, project in enumerate(projects, start=1):
             self.progress(f"[{index}/{len(projects)}] {project.id}: cloning and converting ...")
             project_result = self._run_project(project)
@@ -135,9 +186,49 @@ class CorpusRunner:
                 f"[{index}/{len(projects)}] {project.id}: {project_result.status} "
                 f"({project_result.elapsed_seconds:.1f}s)"
             )
-        result.finished_at = datetime.now(UTC)
-        self._save(result)
-        return result
+
+    def _run_parallel(self, projects: list[CorpusProject], result: CorpusRunResult) -> None:
+        completed: dict[int, CorpusProjectResult] = {}
+        next_index = 0
+        futures: dict[Future[CorpusProjectResult], tuple[int, CorpusProject]] = {}
+        executor = ThreadPoolExecutor(max_workers=self.jobs, thread_name_prefix="corpus")
+        try:
+            while next_index < len(projects) and len(futures) < self.jobs:
+                next_index = self._submit_project(executor, futures, projects, next_index)
+            while futures:
+                done, _ = wait(futures, return_when=FIRST_COMPLETED)
+                for future in done:
+                    index, project = futures.pop(future)
+                    project_result = future.result()
+                    completed[index] = project_result
+                    result.projects = [completed[key] for key in sorted(completed)]
+                    self._save(result)
+                    self.progress(
+                        f"[{index + 1}/{len(projects)}] {project.id}: "
+                        f"{project_result.status} ({project_result.elapsed_seconds:.1f}s)"
+                    )
+                    if next_index < len(projects):
+                        next_index = self._submit_project(executor, futures, projects, next_index)
+        except KeyboardInterrupt:
+            self._cancelled.set()
+            self._terminate_active_processes()
+            for future in futures:
+                future.cancel()
+            raise
+        finally:
+            executor.shutdown(wait=True, cancel_futures=True)
+
+    def _submit_project(
+        self,
+        executor: ThreadPoolExecutor,
+        futures: dict[Future[CorpusProjectResult], tuple[int, CorpusProject]],
+        projects: list[CorpusProject],
+        index: int,
+    ) -> int:
+        project = projects[index]
+        self.progress(f"[{index + 1}/{len(projects)}] {project.id}: cloning and converting ...")
+        futures[executor.submit(self._run_project, project)] = (index, project)
+        return index + 1
 
     def _run_project(self, project: CorpusProject) -> CorpusProjectResult:
         started_at = datetime.now(UTC)
@@ -220,12 +311,21 @@ class CorpusRunner:
             profile_completed=profile_completed,
         )
 
-    @staticmethod
-    def _execute(command: list[str], log: TextIO, *, timeout: int) -> tuple[int | None, str | None]:
+    def _execute(
+        self, command: list[str], log: TextIO, *, timeout: int
+    ) -> tuple[int | None, str | None]:
         CorpusRunner._log(log, f"\n$ {' '.join(command)}\n")
+        if self._cancelled.is_set():
+            return 130, "Corpus run cancelled"
         try:
             process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, text=True)
-            return process.wait(timeout=timeout), None
+            with self._process_lock:
+                self._active_processes.add(process)
+            try:
+                return process.wait(timeout=timeout), None
+            finally:
+                with self._process_lock:
+                    self._active_processes.discard(process)
         except subprocess.TimeoutExpired:
             process.terminate()
             try:
@@ -239,6 +339,13 @@ class CorpusRunner:
         except OSError as exc:
             CorpusRunner._log(log, f"\nUnable to start command: {exc}\n")
             return 127, str(exc)
+
+    def _terminate_active_processes(self) -> None:
+        with self._process_lock:
+            processes = tuple(self._active_processes)
+        for process in processes:
+            if process.poll() is None:
+                process.terminate()
 
     @staticmethod
     def _revision(repository: Path) -> str | None:

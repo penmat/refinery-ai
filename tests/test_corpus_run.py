@@ -1,10 +1,19 @@
+import threading
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from typer.testing import CliRunner
 
 from refinery_ai.cli import app
-from refinery_ai.corpus_run import CorpusRunner, load_corpus, load_failed_project_ids
+from refinery_ai.corpus_run import (
+    CorpusProjectResult,
+    CorpusRunner,
+    load_attempted_project_ids,
+    load_corpus,
+    load_failed_project_ids,
+)
 
 
 def _corpus(path: Path) -> Path:
@@ -52,6 +61,46 @@ def test_corpus_runner_uses_ai_repair_by_default(tmp_path: Path, monkeypatch: An
     assert "--repair-mode" in commands[2]
     assert commands[2][commands[2].index("--repair-mode") + 1] == "configured-provider"
     assert (tmp_path / "run" / "summary.json").is_file()
+
+
+def test_corpus_runner_runs_projects_concurrently_and_preserves_order(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    corpus = load_corpus(_corpus(tmp_path / "corpus.yaml"))
+    active = 0
+    maximum_active = 0
+    lock = threading.Lock()
+
+    def run_project(self: CorpusRunner, project: Any) -> CorpusProjectResult:
+        nonlocal active, maximum_active
+        with lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+        time.sleep(0.04 if project.id == "first" else 0.01)
+        with lock:
+            active -= 1
+        now = datetime.now(UTC)
+        return CorpusProjectResult(
+            id=project.id,
+            name=project.name,
+            repo_url=str(project.repo_url),
+            status="completed",
+            ai_patching=self.ai_patching,
+            elapsed_seconds=0.01,
+            started_at=now,
+            finished_at=now,
+            repository=str(tmp_path / project.id),
+            log=str(tmp_path / f"{project.id}.log"),
+        )
+
+    monkeypatch.setattr(CorpusRunner, "_run_project", run_project)
+    result = CorpusRunner(corpus, tmp_path / "parallel-run", profile="profile", jobs=2).run(
+        corpus.projects
+    )
+
+    assert maximum_active == 2
+    assert [project.id for project in result.projects] == ["first", "second"]
+    assert result.jobs == 2
 
 
 def test_run_corpus_can_disable_ai_and_select_projects(tmp_path: Path, monkeypatch: Any) -> None:
@@ -138,10 +187,70 @@ def test_load_failed_project_ids_accepts_run_directory(tmp_path: Path) -> None:
         '{"id": "first", "status": "failed"},'
         '{"id": "second", "status": "completed"},'
         '{"id": "third", "status": "timed-out"}'
-        ']}\n'
+        "]}\n"
     )
 
     assert load_failed_project_ids(run) == {"first", "third"}
+
+
+def test_load_attempted_project_ids_combines_run_history(tmp_path: Path) -> None:
+    history = tmp_path / "corpus-runs"
+    for name, project_ids in (("run-1", ("first",)), ("run-2", ("second", "third"))):
+        run = history / name
+        run.mkdir(parents=True)
+        projects = ",".join(
+            f'{{"id": "{project_id}", "status": "failed"}}' for project_id in project_ids
+        )
+        (run / "summary.json").write_text(f'{{"projects": [{projects}]}}\n')
+
+    assert load_attempted_project_ids(history) == {"first", "second", "third"}
+
+
+def test_run_corpus_can_select_only_new_projects(tmp_path: Path, monkeypatch: Any) -> None:
+    corpus_path = _corpus(tmp_path / "corpus.yaml")
+    history = tmp_path / "history"
+    prior = history / "prior"
+    prior.mkdir(parents=True)
+    (prior / "summary.json").write_text('{"projects": [{"id": "first", "status": "failed"}]}\n')
+    calls: list[list[str]] = []
+
+    class FakeRunner:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def run(self, projects: Any) -> Any:
+            calls.append([project.id for project in projects])
+            return type("Result", (), {"projects": []})()
+
+    monkeypatch.setattr("refinery_ai.cli.CorpusRunner", FakeRunner)
+    result = CliRunner().invoke(
+        app,
+        ["run-corpus", str(corpus_path), "--only-new", "--run-history", str(history)],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [["second"]]
+    assert "Selected 1 new project(s)" in result.output
+
+
+def test_run_corpus_rejects_only_new_with_rerun_failed(tmp_path: Path) -> None:
+    corpus_path = _corpus(tmp_path / "corpus.yaml")
+    prior = tmp_path / "summary.json"
+    prior.write_text('{"projects": []}\n')
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-corpus",
+            str(corpus_path),
+            "--only-new",
+            "--rerun-failed-from",
+            str(prior),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "cannot be combined" in result.output
 
 
 def test_run_corpus_reruns_failures_but_still_skips_test_configuration(
@@ -150,10 +259,7 @@ def test_run_corpus_reruns_failures_but_still_skips_test_configuration(
     corpus_path = _corpus(tmp_path / "corpus.yaml")
     prior_summary = tmp_path / "prior-summary.json"
     prior_summary.write_text(
-        '{"projects": ['
-        '{"id": "first", "status": "failed"},'
-        '{"id": "second", "status": "failed"}'
-        ']}\n'
+        '{"projects": [{"id": "first", "status": "failed"},{"id": "second", "status": "failed"}]}\n'
     )
     calls: list[list[str]] = []
 

@@ -63,7 +63,7 @@ def test_profile_runner_loops_until_plan_is_empty_and_skips_unchanged_sonar(
         load_profile("spring-boot-3.2-java-17"),
         analyze=lambda run_sonar: not analyses.append(run_sonar),
         plan=lambda: next(plans),
-        migrate=lambda plan_id: MigrationRun(
+        migrate=lambda plan_id, checkpoint: MigrationRun(
             plan_id=plan_id,
             status=RunStatus.COMPLETED,
             published_revision="abc123",
@@ -73,6 +73,42 @@ def test_profile_runner_loops_until_plan_is_empty_and_skips_unchanged_sonar(
     assert result.status is RunStatus.COMPLETED
     assert result.cycles == 2
     assert analyses == [False, False]
+
+
+def test_profile_runner_carries_verified_checkpoint_to_next_migration_cycle(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pom.xml").write_text("<project />")
+    plans = iter(
+        [
+            report(tmp_path, "plan-1", ["example.One"]),
+            report(tmp_path, "plan-2", ["example.Two"]),
+            report(tmp_path, "complete", []),
+        ]
+    )
+    checkpoints = []
+
+    def migrate(plan_id, checkpoint):
+        checkpoints.append(checkpoint)
+        return MigrationRun(
+            plan_id=plan_id,
+            status=RunStatus.COMPLETED,
+            published_revision=f"revision-{plan_id}",
+            verified_java=8,
+        )
+
+    result = ProfileRunner(
+        tmp_path,
+        load_profile("spring-boot-3.2-java-17"),
+        analyze=lambda run_sonar: True,
+        plan=lambda: next(plans),
+        migrate=migrate,
+    ).run()
+
+    assert result.status is RunStatus.COMPLETED
+    assert checkpoints[0] is None
+    assert checkpoints[1].revision == "revision-plan-1"
+    assert checkpoints[1].java == 8
 
 
 def test_profile_runner_reruns_sonar_after_dependency_change(tmp_path: Path) -> None:
@@ -86,7 +122,8 @@ def test_profile_runner_reruns_sonar_after_dependency_change(tmp_path: Path) -> 
         ]
     )
 
-    def migrate(plan_id: str) -> MigrationRun:
+    def migrate(plan_id: str, checkpoint) -> MigrationRun:
+        del checkpoint
         pom.write_text("<project><dependency /></project>")
         return MigrationRun(
             plan_id=plan_id,
@@ -111,7 +148,7 @@ def test_profile_runner_stops_when_migration_makes_no_change(tmp_path: Path) -> 
         load_profile("spring-boot-3.2-java-17"),
         analyze=lambda run_sonar: True,
         plan=lambda: report(tmp_path, "plan-1", ["example.Upgrade"]),
-        migrate=lambda plan_id: MigrationRun(
+        migrate=lambda plan_id, checkpoint: MigrationRun(
             plan_id=plan_id,
             status=RunStatus.COMPLETED,
         ),
@@ -131,7 +168,9 @@ def test_profile_runner_recovers_when_retained_sonar_evidence_is_missing(
         profile,
         analyze=lambda run_sonar: True,
         plan=lambda: report(tmp_path, "complete", []),
-        migrate=lambda plan_id: MigrationRun(plan_id=plan_id, status=RunStatus.COMPLETED),
+        migrate=lambda plan_id, checkpoint: MigrationRun(
+            plan_id=plan_id, status=RunStatus.COMPLETED
+        ),
     )
     first.run()
 
@@ -146,7 +185,9 @@ def test_profile_runner_recovers_when_retained_sonar_evidence_is_missing(
         profile,
         analyze=analyze,
         plan=lambda: report(tmp_path, "complete-again", []),
-        migrate=lambda plan_id: MigrationRun(plan_id=plan_id, status=RunStatus.COMPLETED),
+        migrate=lambda plan_id, checkpoint: MigrationRun(
+            plan_id=plan_id, status=RunStatus.COMPLETED
+        ),
     ).run()
 
     assert analyses == [False]

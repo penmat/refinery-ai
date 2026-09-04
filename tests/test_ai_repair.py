@@ -4,20 +4,23 @@ from types import SimpleNamespace
 import pytest
 
 from refinery_ai.config import Settings
-from refinery_ai.migrations.ai_repair import (
-    AiMigrationRepairer,
+from refinery_ai.migrations.ai_repair import AiMigrationRepairer
+from refinery_ai.migrations.deterministic_repair import (
     DeterministicMigrationRepairer,
     configure_boot3_test_compatibility,
     configure_boot_validation_starter,
     configure_openapi_generator_for_springdoc,
     make_password_encoder_bean_independent,
+    migrate_removed_hibernate6_apis,
     remove_legacy_global_method_security_inheritance,
+    remove_legacy_hibernate4_integrations,
     remove_obsolete_junit_platform_surefire_provider,
     repair_springdoc_info_constructor,
     springdoc_repair_applicable,
     springdoc_repair_files,
     use_explicit_ant_path_request_matchers,
 )
+from refinery_ai.migrations.repair import MigrationRepairChain
 from refinery_ai.models import RecipeRecommendation, RepairMode, VerificationResult
 
 
@@ -29,6 +32,44 @@ def test_local_repair_requires_loopback_endpoint() -> None:
                 litellm_api_base="https://models.example.com/v1",
             )
         )
+
+
+def test_repair_chain_uses_ai_after_deterministic_rules_do_not_match(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "src/main/java/SwaggerConfiguration.java"
+    source.parent.mkdir(parents=True)
+    source.write_text("import springfox.documentation.spring.web.plugins.Docket;\n")
+    response = SimpleNamespace(
+        content=(
+            '{"diagnosis":"Springfox remains","summary":"Converted Docket",'
+            '"files":[{"path":"src/main/java/SwaggerConfiguration.java",'
+            '"content":"class SwaggerConfiguration {}\\n"}]}'
+        )
+    )
+    monkeypatch.setattr(
+        "refinery_ai.migrations.ai_repair.run_tool_loop", lambda *args, **kwargs: response
+    )
+    repairer = MigrationRepairChain(
+        DeterministicMigrationRepairer(),
+        AiMigrationRepairer(Settings(repair_mode=RepairMode.CONFIGURED_PROVIDER)),
+    )
+
+    result = repairer.repair(
+        tmp_path,
+        RecipeRecommendation(
+            recipe="org.openrewrite.java.springdoc.SpringFoxToSpringDoc",
+            reason="convert",
+            evidence=["springfox"],
+            expected_benefit="springdoc",
+            priority="high",
+            confidence=1,
+        ),
+        VerificationResult(command=["mvn", "test"], exit_code=1, duration_seconds=0),
+    )
+
+    assert result.green
+    assert result.stdout == "Converted Docket"
 
 
 def test_springdoc_repair_scope_contains_only_residual_java(tmp_path: Path) -> None:
@@ -363,6 +404,188 @@ def test_deterministic_boot_27_repair_configures_validation_starter(tmp_path: Pa
     assert result.green
     assert "managed validation starter" in result.stdout
     assert "spring-boot-starter-validation" in pom.read_text()
+
+
+def test_deterministic_boot_23_repair_adds_missing_validation_starter(
+    tmp_path: Path,
+) -> None:
+    pom = tmp_path / "pom.xml"
+    pom.write_text(
+        "<project><dependencies>\n"
+        "  <dependency>\n"
+        "    <groupId>org.springframework.boot</groupId>\n"
+        "    <artifactId>spring-boot-starter-web</artifactId>\n"
+        "  </dependency>\n"
+        "</dependencies></project>\n"
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "clean", "test"],
+        exit_code=1,
+        stderr="package javax.validation does not exist\nsymbol: class Valid",
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_3",
+        reason="upgrade",
+        evidence=["boot"],
+        expected_benefit="Boot 2.3",
+        priority="high",
+        confidence=1,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    result = DeterministicMigrationRepairer().repair(tmp_path, step, failure)
+    assert result.green
+    assert "spring-boot-starter-validation" in pom.read_text()
+
+
+def test_validation_starter_is_added_to_project_dependencies_not_dependency_management(
+    tmp_path: Path,
+) -> None:
+    pom = tmp_path / "pom.xml"
+    pom.write_text(
+        """<project>
+  <dependencyManagement>
+    <dependencies>
+      <dependency><groupId>com.example</groupId><artifactId>managed</artifactId></dependency>
+    </dependencies>
+  </dependencyManagement>
+  <dependencies>
+    <dependency><groupId>com.example</groupId><artifactId>used</artifactId></dependency>
+  </dependencies>
+</project>
+"""
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "test"],
+        exit_code=1,
+        stderr="package javax.validation does not exist",
+        duration_seconds=0,
+    )
+
+    assert configure_boot_validation_starter(tmp_path, failure)
+    updated = pom.read_text()
+    management, dependencies = updated.split("</dependencyManagement>", maxsplit=1)
+    assert "spring-boot-starter-validation" not in management
+    assert "spring-boot-starter-validation" in dependencies
+
+
+def test_hibernate5_runtime_repair_removes_unused_hibernate4_user_type_bridges(
+    tmp_path: Path,
+) -> None:
+    pom = tmp_path / "pom.xml"
+    pom.write_text(
+        """<project><dependencies>
+  <dependency>
+    <groupId>org.jadira.usertype</groupId>
+    <artifactId>usertype.core</artifactId>
+    <version>3.2.0.GA</version>
+  </dependency>
+  <dependency>
+    <groupId>joda-time</groupId>
+    <artifactId>joda-time-hibernate</artifactId>
+    <version>1.3</version>
+  </dependency>
+  <dependency>
+    <groupId>joda-time</groupId>
+    <artifactId>joda-time</artifactId>
+  </dependency>
+</dependencies></project>
+"""
+    )
+    source = tmp_path / "src/main/java/example/Example.java"
+    source.parent.mkdir(parents=True)
+    source.write_text("package example; class Example {}\n")
+    failure = VerificationResult(
+        command=["./mvnw", "test"],
+        exit_code=1,
+        stderr=(
+            "java.lang.AbstractMethodError\n"
+            "at org.hibernate.internal.SessionFactoryImpl.<init>(SessionFactoryImpl.java:281)"
+        ),
+        duration_seconds=0,
+    )
+
+    removed = remove_legacy_hibernate4_integrations(tmp_path, failure)
+
+    assert removed == (
+        "org.jadira.usertype:usertype.core",
+        "joda-time:joda-time-hibernate",
+    )
+    updated = pom.read_text()
+    assert "usertype.core" not in updated
+    assert "joda-time-hibernate" not in updated
+    assert "<artifactId>joda-time</artifactId>" in updated
+
+
+def test_hibernate5_runtime_failure_is_routed_to_deterministic_repair(tmp_path: Path) -> None:
+    pom = tmp_path / "pom.xml"
+    pom.write_text(
+        """<project><dependencies><dependency>
+  <groupId>org.jadira.usertype</groupId>
+  <artifactId>usertype.core</artifactId>
+</dependency></dependencies></project>
+"""
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "test"],
+        exit_code=1,
+        stderr=(
+            "java.lang.AbstractMethodError\n"
+            "at org.hibernate.internal.SessionFactoryImpl.<init>(SessionFactoryImpl.java:281)"
+        ),
+        duration_seconds=0,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+
+
+def test_boot3_repair_migrates_removed_hibernate_session_factory_and_query_setter(
+    tmp_path: Path,
+) -> None:
+    application = tmp_path / "src/main/java/example/Application.java"
+    application.parent.mkdir(parents=True)
+    application.write_text(
+        """package example;
+import org.springframework.orm.jpa.vendor.HibernateJpaSessionFactoryBean;
+class Application {
+    public HibernateJpaSessionFactoryBean sessionFactory() {
+        return new HibernateJpaSessionFactoryBean();
+    }
+}
+"""
+    )
+    controller = tmp_path / "src/main/java/example/ProductController.java"
+    controller.write_text(
+        """package example;
+class ProductController {
+    void find(org.hibernate.query.Query query) {
+        query.setLong("product_id", 1L);
+    }
+}
+"""
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "test"],
+        exit_code=1,
+        stderr=(
+            "cannot find symbol\n"
+            "symbol:   class HibernateJpaSessionFactoryBean\n"
+            "symbol:   method setLong(java.lang.String,long)"
+        ),
+        duration_seconds=0,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert migrate_removed_hibernate6_apis(tmp_path, failure) == (
+        "src/main/java/example/Application.java",
+        "src/main/java/example/ProductController.java",
+    )
+    updated_application = application.read_text()
+    assert "import jakarta.persistence.EntityManagerFactory;" in updated_application
+    assert "public SessionFactory sessionFactory(EntityManagerFactory" in updated_application
+    assert "entityManagerFactory.unwrap(SessionFactory.class)" in updated_application
+    assert '.setParameter("product_id", 1L)' in controller.read_text()
 
 
 @pytest.mark.parametrize("minor", [3, 4, 5, 6, 7])
@@ -809,6 +1032,487 @@ def test_deterministic_repair_replaces_removed_spring_data_find_one_id(
     assert "repository.findOne(probe)" in updated
 
 
+def test_deterministic_repair_replaces_removed_boot_2_apis(tmp_path: Path) -> None:
+    config = tmp_path / "src/main/java/example/DatabaseConfiguration.java"
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        "import org.springframework.boot.bind.RelaxedPropertyResolver;\n"
+        "import org.springframework.core.env.Environment;\n"
+        "class DatabaseConfiguration {\n"
+        " private RelaxedPropertyResolver propertyResolver;\n"
+        " void setEnvironment(Environment env) {\n"
+        '  this.propertyResolver = new RelaxedPropertyResolver(env, "spring.datasource.");\n'
+        " }\n"
+        ' String url() { return propertyResolver.getProperty("url"); }\n'
+        "}\n"
+    )
+    application = tmp_path / "src/main/java/example/Application.java"
+    application.write_text("app.setShowBanner(false);\n")
+    initializer = tmp_path / "src/main/java/example/ApplicationWebXml.java"
+    initializer.write_text(
+        "import org.springframework.boot.context.web.SpringBootServletInitializer;\n"
+        "class ApplicationWebXml extends SpringBootServletInitializer {\n"
+        " Object configure(Object application) {\n"
+        "  return application.showBanner(false);\n"
+        " }\n"
+        "}\n"
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stderr=(
+            "package org.springframework.boot.bind does not exist\n"
+            "package org.springframework.boot.context.web does not exist\n"
+            "symbol:   method setShowBanner(boolean)\n"
+            "symbol:   method showBanner(boolean)"
+        ),
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_0",
+        reason="upgrade",
+        evidence=["boot"],
+        expected_benefit="Boot 2.0",
+        priority="high",
+        confidence=1,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert DeterministicMigrationRepairer().repair(tmp_path, step, failure).green
+    updated_config = config.read_text()
+    assert "RelaxedPropertyResolver" not in updated_config
+    assert "private Environment propertyResolver;" in updated_config
+    assert "this.propertyResolver = env;" in updated_config
+    assert 'getProperty("spring.datasource.url")' in updated_config
+    assert "setBannerMode(org.springframework.boot.Banner.Mode.OFF)" in application.read_text()
+    updated_initializer = initializer.read_text()
+    assert (
+        "org.springframework.boot.web.servlet.support.SpringBootServletInitializer"
+        in updated_initializer
+    )
+    assert "bannerMode(org.springframework.boot.Banner.Mode.OFF)" in updated_initializer
+
+
+def test_deterministic_repair_preserves_legacy_mockito_null_matching(tmp_path: Path) -> None:
+    source = tmp_path / "src/test/java/example/RedisCacheTest.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "import static org.mockito.Mockito.*;\n"
+        "class RedisCacheTest {\n"
+        " void setup() { when(mapper.readValue(anyString(), any())).thenReturn(value); }\n"
+        "}\n"
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stderr=(
+            "Tests run: 1, Failures: 0, Errors: 1\n"
+            "java.lang.NullPointerException\n"
+            " at example.RedisCacheTest.testGetItem(RedisCacheTest.java:8)"
+        ),
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_0",
+        reason="upgrade",
+        evidence=["boot"],
+        expected_benefit="Boot 2.0",
+        priority="high",
+        confidence=1,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert DeterministicMigrationRepairer().repair(tmp_path, step, failure).green
+    assert "nullable(String.class)" in source.read_text()
+
+
+@pytest.mark.parametrize("artifact", ["mockito-all", "mockito-core"])
+def test_deterministic_repair_removes_conflicting_explicit_mockito(
+    tmp_path: Path, artifact: str
+) -> None:
+    pom = tmp_path / "pom.xml"
+    pom.write_text(
+        "<project><dependencies>\n"
+        "  <dependency>\n"
+        "    <groupId>org.mockito</groupId>\n"
+        f"    <artifactId>{artifact}</artifactId>\n"
+        "    <version>2.0.2-beta</version>\n"
+        "    <scope>test</scope>\n"
+        "  </dependency>\n"
+        "</dependencies></project>\n"
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stderr="java.lang.NoClassDefFoundError: net/bytebuddy/utility/GraalImageCode",
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_4",
+        reason="upgrade",
+        evidence=["boot"],
+        expected_benefit="Boot 2.4",
+        priority="high",
+        confidence=1,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert DeterministicMigrationRepairer().repair(tmp_path, step, failure).green
+    assert artifact not in pom.read_text()
+
+
+def test_deterministic_repair_migrates_security_adapter(tmp_path: Path) -> None:
+    source = tmp_path / "src/main/java/example/WebSecurityConfig.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "import org.springframework.context.annotation.Bean;\n"
+        "import org.springframework.security.config.annotation.authentication.builders."
+        "AuthenticationManagerBuilder;\n"
+        "import org.springframework.security.config.annotation.web.builders.HttpSecurity;\n"
+        "import org.springframework.security.config.annotation.web.configuration."
+        "WebSecurityConfigurerAdapter;\n"
+        "class WebSecurityConfig extends WebSecurityConfigurerAdapter {\n"
+        " /*~~(Migrate manually)~~>*/@Override\n"
+        " protected void configure(AuthenticationManagerBuilder auth) throws Exception {\n"
+        "  auth.userDetailsService(userDetailsService);\n"
+        " }\n"
+        " @Override\n"
+        " protected void configure(HttpSecurity http) throws Exception {\n"
+        '  http.authorizeRequests().antMatchers("/").permitAll();\n'
+        " }\n"
+        "}\n"
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stderr="cannot find symbol\n  symbol: class WebSecurityConfigurerAdapter",
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0",
+        reason="upgrade",
+        evidence=["boot"],
+        expected_benefit="Boot 3.0",
+        priority="high",
+        confidence=1,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert DeterministicMigrationRepairer().repair(tmp_path, step, failure).green
+    updated = source.read_text()
+    assert "WebSecurityConfigurerAdapter" not in updated
+    assert "SecurityFilterChain securityFilterChain" in updated
+    assert 'authorizeHttpRequests().requestMatchers("/")' in updated
+    assert "return http.build();" in updated
+
+
+def test_deterministic_repair_finishes_security_6_authentication_manager(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "src/main/java/example/SecurityConfig.java"
+    source.parent.mkdir(parents=True)
+    marker = "/*~~(Migrate manually based on migration guide)~~>*/"
+    source.write_text(
+        "import org.springframework.context.annotation.Bean;\n"
+        "import org.springframework.security.authentication.AuthenticationManager;\n"
+        "import org.springframework.security.config.BeanIds;\n"
+        "import org.springframework.security.config.annotation.authentication.builders."
+        "AuthenticationManagerBuilder;\n"
+        "import org.springframework.security.web.SecurityFilterChain;\n"
+        "class SecurityConfig {\n"
+        f" {marker}{marker}public void configure(AuthenticationManagerBuilder auth) "
+        "throws Exception {\n"
+        "  auth.userDetailsService(userDetailsService);\n"
+        " }\n"
+        f" {marker}{marker}@Bean(BeanIds.AUTHENTICATION_MANAGER)\n"
+        " public AuthenticationManager authenticationManagerBean() throws Exception {\n"
+        "  return super.authenticationManagerBean();\n"
+        " }\n"
+        "}\n"
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stderr="cannot find symbol\n  symbol:   class AuthenticationManagerBuilder",
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0",
+        reason="upgrade",
+        evidence=["boot"],
+        expected_benefit="Boot 3.0",
+        priority="high",
+        confidence=1,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert DeterministicMigrationRepairer().repair(tmp_path, step, failure).green
+    updated = source.read_text()
+    assert "AuthenticationManagerBuilder" not in updated
+    assert "BeanIds" not in updated
+    assert "AuthenticationConfiguration" in updated
+    assert "configuration.getAuthenticationManager()" in updated
+
+
+def test_deterministic_repair_allows_legacy_circular_references(tmp_path: Path) -> None:
+    properties = tmp_path / "module/src/test/resources/application.properties"
+    properties.parent.mkdir(parents=True)
+    properties.write_text("spring.jpa.show-sql=false\n")
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stderr=(
+            "BeanCurrentlyInCreationException: Requested bean is currently in creation: "
+            "Is there an unresolvable circular reference?"
+        ),
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_6",
+        reason="upgrade",
+        evidence=["boot"],
+        expected_benefit="Boot 2.6",
+        priority="high",
+        confidence=1,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert DeterministicMigrationRepairer().repair(tmp_path, step, failure).green
+    assert "spring.main.allow-circular-references=true" in properties.read_text()
+
+
+def test_deterministic_repair_migrates_removed_boot_test_annotations(tmp_path: Path) -> None:
+    source = tmp_path / "src/test/java/example/HomeControllerTest.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "import org.springframework.boot.test.IntegrationTest;\n"
+        "import org.springframework.boot.test.SpringApplicationConfiguration;\n"
+        "import org.junit.Test;\n"
+        "@SpringApplicationConfiguration(classes = Application.class)\n"
+        "@IntegrationTest\n"
+        "class HomeControllerTest {}\n"
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stderr="cannot find symbol\n  symbol: class SpringApplicationConfiguration",
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_0",
+        reason="upgrade",
+        evidence=["boot"],
+        expected_benefit="Boot 2.0",
+        priority="high",
+        confidence=1,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert DeterministicMigrationRepairer().repair(tmp_path, step, failure).green
+    updated = source.read_text()
+    assert "import org.springframework.boot.test.context.SpringBootTest;" in updated
+    assert "@SpringBootTest(classes = Application.class)" in updated
+    assert "IntegrationTest" not in updated
+
+
+def test_deterministic_repair_migrates_hateoas_1_apis(tmp_path: Path) -> None:
+    resource = tmp_path / "src/main/java/example/ProductResource.java"
+    resource.parent.mkdir(parents=True)
+    resource.write_text(
+        "import org.springframework.hateoas.ResourceSupport;\n"
+        "class ProductResource extends ResourceSupport {}\n"
+    )
+    controller = tmp_path / "src/main/java/example/ProductController.java"
+    controller.write_text(
+        "import static org.springframework.hateoas.mvc.ControllerLinkBuilder.linkTo;\n"
+        "class ProductController { ResourceSupport view() { return null; } }\n"
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stderr=(
+            "package org.springframework.hateoas.mvc does not exist\nsymbol: class ResourceSupport"
+        ),
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_2",
+        reason="upgrade",
+        evidence=["boot"],
+        expected_benefit="Boot 2.2",
+        priority="high",
+        confidence=1,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert DeterministicMigrationRepairer().repair(tmp_path, step, failure).green
+    assert "extends RepresentationModel" in resource.read_text()
+    assert "hateoas.server.mvc.WebMvcLinkBuilder.linkTo" in controller.read_text()
+    assert "RepresentationModel view()" in controller.read_text()
+
+
+def test_deterministic_repair_adds_swagger_3_annotations_to_affected_module(
+    tmp_path: Path,
+) -> None:
+    root_pom = tmp_path / "pom.xml"
+    root_pom.write_text("<project><modules><module>model</module></modules></project>\n")
+    module_pom = tmp_path / "model/pom.xml"
+    module_pom.parent.mkdir()
+    module_pom.write_text("<project><dependencies>\n</dependencies></project>\n")
+    source = tmp_path / "model/src/main/java/example/Address.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "import io.swagger.v3.oas.annotations.media.Schema;\n"
+        "class Address { @Schema String city; }\n"
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stderr="package io.swagger.v3.oas.annotations.media does not exist",
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_6",
+        reason="upgrade",
+        evidence=["boot"],
+        expected_benefit="Boot 2.6",
+        priority="high",
+        confidence=1,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert DeterministicMigrationRepairer().repair(tmp_path, step, failure).green
+    assert "io.swagger.core.v3" in module_pom.read_text()
+    assert "io.swagger.core.v3" not in root_pom.read_text()
+
+
+def test_deterministic_repair_removes_thymeleaf_2_only_joda_dialect(tmp_path: Path) -> None:
+    pom = tmp_path / "pom.xml"
+    pom.write_text(
+        "<project><properties>\n"
+        "  <jodatime-thymeleaf.version>1.3</jodatime-thymeleaf.version>\n"
+        "</properties><dependencies>\n"
+        "  <dependency>\n"
+        "    <groupId>uk.co.gcwilliams</groupId>\n"
+        "    <artifactId>jodatime-thymeleaf-dialect</artifactId>\n"
+        "    <version>${jodatime-thymeleaf.version}</version>\n"
+        "  </dependency>\n"
+        "</dependencies></project>\n"
+    )
+    source = tmp_path / "src/main/java/example/LocaleConfiguration.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "import org.springframework.context.annotation.Bean;\n"
+        "import uk.co.gcwilliams.jodatime.thymeleaf.JodaTimeDialect;\n"
+        "class LocaleConfiguration {\n"
+        " /**\n"
+        "  * Joda Time to Thymeleaf converter\n"
+        "  */\n"
+        " @Bean\n"
+        " public JodaTimeDialect jodaTimeDialect() {\n"
+        "  return new JodaTimeDialect();\n"
+        " }\n"
+        " @Bean Object localeResolver() { return null; }\n"
+        "}\n"
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stderr="java.lang.NoClassDefFoundError: org/thymeleaf/dialect/IExpressionEnhancingDialect",
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_0",
+        reason="upgrade",
+        evidence=["boot"],
+        expected_benefit="Boot 2.0",
+        priority="high",
+        confidence=1,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert DeterministicMigrationRepairer().repair(tmp_path, step, failure).green
+    assert "jodatime-thymeleaf" not in pom.read_text()
+    updated = source.read_text()
+    assert "JodaTimeDialect" not in updated
+    assert "localeResolver" in updated
+
+
+def test_deterministic_repair_makes_list_derived_query_explicit(tmp_path: Path) -> None:
+    repository_source = tmp_path / "src/main/java/example/PostRepository.java"
+    repository_source.parent.mkdir(parents=True)
+    repository_source.write_text(
+        "interface PostRepository {\n"
+        " Page<Post> findByTags(List<Tag> tags, Pageable pageable);\n"
+        "}\n"
+    )
+    service_source = tmp_path / "src/main/java/example/PostService.java"
+    service_source.write_text(
+        "class PostService {\n"
+        " void find(List<Tag> tags) { repository.findByTags(tags, pageable); }\n"
+        "}\n"
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stderr=(
+            "Failed to create query for method public abstract Page "
+            "example.PostRepository.findByTags(java.util.List,Pageable)! "
+            "Operator SIMPLE_PROPERTY on tags requires a scalar argument, "
+            "found interface java.util.List"
+        ),
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_2",
+        reason="upgrade",
+        evidence=["boot"],
+        expected_benefit="Boot 2.2",
+        priority="high",
+        confidence=1,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert DeterministicMigrationRepairer().repair(tmp_path, step, failure).green
+    assert "findByTagsIn(List<Tag>" in repository_source.read_text()
+    assert "repository.findByTagsIn(tags, pageable)" in service_source.read_text()
+
+
+def test_deterministic_repair_disambiguates_custom_repository_get_by_id(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "sm-core/src/main/java/example/ProductService.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "class ProductService {\n"
+        " Product get(Long id) { return productRepository.getById(id); }\n"
+        "}\n"
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stderr=(
+            f"{source}:[2,49] reference to getById is ambiguous\n"
+            "both method getById(java.lang.Long) in "
+            "example.ProductRepositoryCustom and method getById(ID) in "
+            "org.springframework.data.jpa.repository.JpaRepository match"
+        ),
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_5",
+        reason="upgrade",
+        evidence=["boot"],
+        expected_benefit="Boot 2.5",
+        priority="high",
+        confidence=1,
+    )
+
+    assert springdoc_repair_applicable(tmp_path, failure)
+    assert DeterministicMigrationRepairer().repair(tmp_path, step, failure).green
+    assert "((example.ProductRepositoryCustom) productRepository).getById(id)" in source.read_text()
+
+
 def test_deterministic_boot_30_repair_finishes_method_security_migration(
     tmp_path: Path,
 ) -> None:
@@ -1091,7 +1795,10 @@ def test_ai_repair_can_fix_generated_annotations_without_residual_java(
 </project>
 """
     )
-    repairer = AiMigrationRepairer(Settings(repair_mode=RepairMode.CONFIGURED_PROVIDER))
+    repairer = MigrationRepairChain(
+        DeterministicMigrationRepairer(),
+        AiMigrationRepairer(Settings(repair_mode=RepairMode.CONFIGURED_PROVIDER)),
+    )
     result = repairer.repair(
         tmp_path,
         RecipeRecommendation(

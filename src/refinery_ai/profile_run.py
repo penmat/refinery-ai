@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -26,6 +27,12 @@ class ProfileRunResult(BaseModel):
     message: str
 
 
+@dataclass(frozen=True)
+class VerifiedCheckpoint:
+    revision: str
+    java: int
+
+
 class ProfileRunStore:
     def __init__(
         self,
@@ -34,10 +41,7 @@ class ProfileRunStore:
         state_directory: Path = Path(".refinery"),
     ) -> None:
         self.path = (
-            repository.expanduser().resolve()
-            / state_directory
-            / "profile-runs"
-            / f"{profile}.json"
+            repository.expanduser().resolve() / state_directory / "profile-runs" / f"{profile}.json"
         )
         self.profile = profile
 
@@ -93,7 +97,7 @@ class ProfileRunner:
         *,
         analyze: Callable[[bool], bool],
         plan: Callable[[], RunReport],
-        migrate: Callable[[str], MigrationRun],
+        migrate: Callable[[str, VerifiedCheckpoint | None], MigrationRun],
         progress: Callable[[str], None] | None = None,
         max_cycles: int = 20,
         state_directory: Path = Path(".refinery"),
@@ -110,6 +114,7 @@ class ProfileRunner:
     def run(self) -> ProfileRunResult:
         state = self.store.load()
         previous_recipes: tuple[str, ...] | None = None
+        verified_checkpoint: VerifiedCheckpoint | None = None
         for cycle in range(1, self.max_cycles + 1):
             dependency_fingerprint = dependency_inputs_fingerprint(self.repository)
             sonar_enabled = self.profile.evidence.sonarqube is not EvidenceMode.OFF
@@ -119,7 +124,9 @@ class ProfileRunner:
             sonar_note = (
                 "without SonarQube"
                 if not sonar_enabled
-                else "with SonarQube" if run_sonar else "reusing SonarQube evidence"
+                else "with SonarQube"
+                if run_sonar
+                else "reusing SonarQube evidence"
             )
             self.progress(f"Cycle {cycle}: analyzing ({sonar_note}) ...")
             sonar_available = self.analyze(run_sonar)
@@ -154,7 +161,7 @@ class ProfileRunner:
             previous_recipes = recipes
 
             self.progress(f"Cycle {cycle}: running {len(recipes)} migration(s) ...")
-            migration = self.migrate(report.run_id)
+            migration = self.migrate(report.run_id, verified_checkpoint)
             if migration.status is not RunStatus.COMPLETED:
                 return ProfileRunResult(
                     profile=self.profile.name,
@@ -164,6 +171,14 @@ class ProfileRunner:
                 )
             if migration.published_revision is None:
                 return self._stalled(state, cycle, "the migration produced no published changes")
+            verified_checkpoint = (
+                VerifiedCheckpoint(
+                    revision=migration.published_revision,
+                    java=migration.verified_java,
+                )
+                if migration.verified_java is not None
+                else None
+            )
 
         return self._stalled(state, self.max_cycles, "the maximum cycle count was reached")
 

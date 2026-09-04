@@ -97,6 +97,59 @@ def test_migration_agent_loads_latest_plan_and_dispatches_by_type(tmp_path: Path
     ]
 
 
+def test_migration_agent_reuses_matching_verified_checkpoint_as_baseline(
+    tmp_path: Path,
+) -> None:
+    initialize_git_repository(tmp_path)
+    starting_revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    store = MigrationPlanStore(tmp_path)
+    store.root.mkdir(parents=True)
+    step = RecipeRecommendation(
+        recipe="example.Upgrade",
+        reason="Upgrade.",
+        evidence=["test"],
+        expected_benefit="upgrade",
+        priority="high",
+        confidence=1,
+    )
+    plan = PersistedMigrationPlan(
+        plan_id="trustedbaseline",
+        snapshot=DiscoverySnapshot(repository=tmp_path, build_system=BuildSystem.MAVEN),
+        steps=[step],
+    )
+    (store.root / "trustedbaseline.json").write_text(plan.model_dump_json())
+    builds: list[list[str]] = []
+    progress: list[str] = []
+
+    def build_verifier(repository, command, **kwargs):
+        del repository, kwargs
+        builds.append(command)
+        return VerificationResult(command=command, exit_code=0, duration_seconds=0)
+
+    result = MigrationAgent(
+        store,
+        runners={ExecutionType.OPENREWRITE: RecordingRunner()},
+        build_verifier=build_verifier,
+        progress=progress.append,
+    ).run(
+        "trustedbaseline",
+        apply=True,
+        trusted_baseline_revision=starting_revision,
+        trusted_baseline_java=8,
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert builds == [["mvn", "clean", "test"]]
+    assert result.verified_java == 8
+    assert any("skipping baseline build" in message for message in progress)
+
+
 def test_migration_agent_uses_green_target_jdk_for_java_upgrade(tmp_path: Path) -> None:
     initialize_git_repository(tmp_path)
     store = MigrationPlanStore(tmp_path)
@@ -201,9 +254,7 @@ def test_boot_3_recipe_verifies_with_java_17_after_legacy_baseline(
         # then expected to build on the composite recipe's implicit JDK 17 target.
         baseline_attempt = len(build_environments) <= 3
         exit_code = 0 if java_home == "/jdk/8" or not baseline_attempt else 1
-        return VerificationResult(
-            command=command, exit_code=exit_code, duration_seconds=0
-        )
+        return VerificationResult(command=command, exit_code=exit_code, duration_seconds=0)
 
     result = MigrationAgent(
         store,
@@ -409,9 +460,10 @@ def test_migration_agent_stops_before_recipes_when_baseline_is_red(tmp_path: Pat
     assert not result.baseline_verification.green
     assert result.baseline_artifacts is not None
     assert (result.baseline_artifacts / "baseline.json").is_file()
-    assert "not a migration regression" in (
-        result.baseline_artifacts / "failure-summary.md"
-    ).read_text()
+    assert (
+        "not a migration regression"
+        in (result.baseline_artifacts / "failure-summary.md").read_text()
+    )
     assert "Baseline build failed; no migrations were run" in progress[-1]
     assert result.published_revision is None
 

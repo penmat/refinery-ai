@@ -209,14 +209,14 @@ projects:
   ref: 2.5.0
   tier: advanced
   category: distributed-job-scheduler
-  test_configuration_needed: true
+  test_configuration_needed: false
   notes: Established distributed scheduling platform; release 2.5.0 targets Java 8 with Spring Boot 2.7.18 and uses MySQL.
 - id: eladmin
   name: eladmin
   repo_url: https://github.com/elunez/eladmin
   tier: advanced
   category: admin-platform
-  test_configuration_needed: true
+  test_configuration_needed: false
   notes: Multi-module RBAC administration system using Spring Boot 2.7.18, JPA, Spring Security, Redis, Quartz, and MySQL;
     build and run only in an isolated environment.
 - id: spring-boot-admin
@@ -225,6 +225,7 @@ projects:
   ref: 2.7.16
   tier: advanced
   category: application-monitoring
+  test_configuration_needed: false
   notes: Widely adopted administration and monitoring UI for Spring Boot applications; the pinned 2.7 release targets Java 8.
 - id: ruoyi
   name: RuoYi
@@ -232,14 +233,14 @@ projects:
   ref: v4.7.9
   tier: advanced
   category: admin-platform
-  test_configuration_needed: true
+  test_configuration_needed: false
   notes: Established multi-module permissions and administration platform using Spring Boot, MyBatis, Shiro, Quartz, and MySQL.
 - id: roncoo-pay
   name: roncoo-pay
   repo_url: https://github.com/roncoo/roncoo-pay
   tier: advanced
   category: payment-platform
-  test_configuration_needed: true
+  test_configuration_needed: false
   notes: Multi-module payment platform with gateway, merchant, settlement, reconciliation, notification, Spring Boot, Shiro,
     MyBatis, Redis, and MySQL; dependency-heavy stress case.
 - id: favorites-web
@@ -262,7 +263,7 @@ projects:
   repo_url: https://github.com/geekidea/spring-boot-plus
   tier: normal
   category: admin-platform
-  test_configuration_needed: true
+  test_configuration_needed: false
   notes: Java 8 and Spring Boot 2.7.18 administration backend with MyBatis-Plus, Spring Security, Redis, code generation,
     OpenAPI documentation, and MySQL.
 - id: one-blog
@@ -270,5 +271,80 @@ projects:
   repo_url: https://github.com/zhangyd-c/OneBlog
   tier: advanced
   category: blog-platform
-  test_configuration_needed: true
+  test_configuration_needed: false
   notes: Multi-module Java 8 blog platform using Spring Boot 2.3, Shiro, MyBatis, Redis, WebSocket, MySQL, and object storage.
+- id: xboot
+  name: XBoot
+  repo_url: https://github.com/Exrick/xboot
+  tier: advanced
+  category: admin-platform
+  test_configuration_needed: false
+  notes: Established modular administration platform whose current default branch targets Java 8 with Spring Boot 2.4; includes RBAC, code generation, scheduling, and separate fast and multi-module Maven builds.
+- id: nblog
+  name: NBlog
+  repo_url: https://github.com/Naccl/NBlog
+  tier: normal
+  category: blog-platform
+  test_configuration_needed: false
+  notes: Full blogging system with administration, Spring Security, MyBatis, Redis, Quartz, and MySQL; its Maven backend on the default branch explicitly targets Java 8.
+- id: jsherp
+  name: jshERP
+  repo_url: https://github.com/jishenghua/jshERP
+  tier: advanced
+  category: erp-platform
+  test_configuration_needed: false
+  notes: Established inventory, purchasing, sales, finance, and reporting system whose default-branch Maven backend explicitly targets Java 8; requires MySQL and supporting configuration.
+- id: knowstreaming
+  name: KnowStreaming
+  repo_url: https://github.com/didi/KnowStreaming
+  tier: advanced
+  category: kafka-management
+  test_configuration_needed: false
+  notes: Substantial multi-module Kafka management platform whose default branch targets Java 8 with Spring Boot 2.3.7; requires external infrastructure, and bundled deployment scripts must not be run outside a disposable isolated environment.
+- id: mall-swarm
+  name: mall-swarm
+  repo_url: https://github.com/macrozheng/mall-swarm
+  ref: v1.0.3
+  tier: advanced
+  category: ecommerce-microservices
+  test_configuration_needed: false
+  notes: Highly adopted multi-service e-commerce system; the pinned release explicitly targets Java 8 with Spring Boot 2.7 and includes gateway, authentication, search, monitoring, Redis, RabbitMQ, Elasticsearch, and MySQL integration.
+- id: ruoyi-vue-plus
+  name: RuoYi-Vue-Plus
+  repo_url: https://github.com/dromara/RuoYi-Vue-Plus
+  ref: v4.8.3
+  tier: advanced
+  category: admin-platform
+  test_configuration_needed: false
+  notes: Feature-rich multi-module RBAC administration platform; the pinned 4.x release explicitly targets Java 8 with Spring Boot 2.7.18 and uses MyBatis-Plus, Redis, and MySQL.
+- id: zfile
+  name: ZFile
+  repo_url: https://github.com/zfile-dev/zfile
+  ref: 3.2.6
+  tier: advanced
+  category: file-management
+  test_configuration_needed: false
+  notes: Widely adopted file-listing and storage-management application; the pinned 3.x release targets Java 8 with Spring Boot 2.5.4 and integrates multiple cloud and object-storage providers.
+- id: pig
+  name: Pig
+  repo_url: https://github.com/pig-mesh/pig
+  ref: v3.6.7
+  tier: advanced
+  category: microservice-platform
+  test_configuration_needed: false
+  notes: Established Spring Cloud microservice platform; the pinned release explicitly targets Java 8 with Spring Boot 2.7.12 and includes authentication, gateway, service discovery, administration, and code-generation modules.
+- id: hsweb-framework
+  name: hsweb-framework
+  repo_url: https://github.com/hs-web/hsweb-framework
+  ref: 4.0.20
+  tier: advanced
+  category: enterprise-application-platform
+  test_configuration_needed: false
+  notes: Large modular enterprise application framework with reactive APIs, authorization, workflow, and data-access components; the pinned release explicitly configures Java 8.
+- id: mogu-blog
+  name: mogu_blog_v2
+  repo_url: https://github.com/moxi624/mogu_blog_v2
+  tier: advanced
+  category: blog-microservices
+  test_configuration_needed: false
+  notes: Multi-service blogging platform whose default Nacos branch explicitly targets Java 8; includes gateway, search, picture, administration, Redis, RabbitMQ, Elasticsearch, and MySQL services. Run only in isolation and do not expose the legacy application publicly.
