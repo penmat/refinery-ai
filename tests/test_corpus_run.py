@@ -29,6 +29,7 @@ projects:
     tier: easy
     ref: v2.6.2
     test_configuration_needed: true
+    baseline_test: true
   - id: second
     name: Second
     repo_url: https://example.com/second.git
@@ -56,6 +57,8 @@ def test_corpus_runner_uses_ai_repair_by_default(tmp_path: Path, monkeypatch: An
     assert result.projects[0].requested_ref == "v2.6.2"
     assert result.projects[0].profile_cycles == 2
     assert result.projects[0].tier == "easy"
+    assert result.projects[0].baseline_test is True
+    assert corpus.projects[1].baseline_test is False
     assert commands[0][:3] == ["git", "clone", "--quiet"]
     assert commands[1][-2:] == ["--quiet", "v2.6.2"]
     assert "--repair-mode" in commands[2]
@@ -177,6 +180,46 @@ def test_run_corpus_can_include_projects_needing_test_configuration(
 
     assert result.exit_code == 0
     assert calls == [["first", "second"]]
+
+
+def test_run_corpus_can_select_only_baseline_tests(tmp_path: Path, monkeypatch: Any) -> None:
+    corpus_path = _corpus(tmp_path / "corpus.yaml")
+    calls: list[list[str]] = []
+
+    class FakeRunner:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def run(self, projects: Any) -> Any:
+            calls.append([project.id for project in projects])
+            return type("Result", (), {"projects": []})()
+
+    monkeypatch.setattr("refinery_ai.cli.CorpusRunner", FakeRunner)
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-corpus",
+            str(corpus_path),
+            "--baseline-tests-only",
+            "--include-test-configuration-needed",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [["first"]]
+    assert "Selected 1 baseline test project(s)." in result.output
+
+
+def test_run_corpus_reports_when_no_baseline_tests_match(tmp_path: Path) -> None:
+    corpus_path = _corpus(tmp_path / "corpus.yaml")
+
+    result = CliRunner().invoke(
+        app,
+        ["run-corpus", str(corpus_path), "--baseline-tests-only", "--tier", "normal"],
+    )
+
+    assert result.exit_code == 2
+    assert "No corpus projects matched the selection." in result.output
 
 
 def test_load_failed_project_ids_accepts_run_directory(tmp_path: Path) -> None:

@@ -90,6 +90,14 @@ def run_corpus(
             help="Run only project IDs absent from all prior corpus summaries",
         ),
     ] = False,
+    baseline_tests_only: Annotated[
+        bool,
+        typer.Option(
+            "--baseline-tests-only",
+            "--baseline-only",
+            help="Run only projects marked baseline_test: true",
+        ),
+    ] = False,
     run_history: Annotated[
         Path,
         typer.Option(
@@ -136,6 +144,9 @@ def run_corpus(
     if tiers:
         wanted_tiers = set(tiers)
         selected = [project for project in selected if project.tier in wanted_tiers]
+    if baseline_tests_only:
+        selected = [project for project in selected if project.baseline_test]
+        typer.echo(f"Selected {len(selected)} baseline test project(s).")
     if rerun_failed_from is not None:
         try:
             failed_ids = load_failed_project_ids(rerun_failed_from)

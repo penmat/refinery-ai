@@ -278,6 +278,19 @@ or `--include-test-configuration-needed` to include those projects.
 Use `--jobs` to run isolated projects concurrently; it defaults to `1`. Start with `2` or `3`
 because Maven/Gradle processes still share CPU, memory, disk, and dependency caches.
 
+To run the known-good regression set after changing prompts or migration architecture, select only
+projects marked `baseline_test: true` in the corpus:
+
+```bash
+uv run refinery run-corpus \
+  evals/corpora/refinery-java8-spring-boot-test-corpus.yaml \
+  --baseline-tests-only \
+  --jobs 3
+```
+
+The shorter alias `--baseline-only` is also accepted. Other filters, such as `--project`, `--tier`,
+and `--no-ai-patching`, can be combined with this selection.
+
 The earlier goal-first form remains supported with `--repository /path/to/java-project`.
 
 The catalog connection verifies TLS using the bundled CA roots. In a development environment

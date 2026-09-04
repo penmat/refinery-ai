@@ -39,6 +39,7 @@ projects:
   repo_url: https://github.com/CharlesFrost/spring-thymeleaf-shop
   tier: easy
   category: mvc-shop
+  baseline_test: true
   notes: Spring Boot 2.1.7, JPA, Security, Thymeleaf, and H2; clean migration fixture.
 - id: task-management-system
   name: TASK-Management-System
@@ -78,6 +79,7 @@ projects:
   repo_url: https://github.com/tedyoung/kid-bank
   tier: normal
   category: financial-web-app
+  baseline_test: true
   notes: MVC, Data JPA, PostgreSQL, Thymeleaf, and tests.
 - id: community
   name: community
@@ -92,42 +94,49 @@ projects:
   ref: v2.6.2
   tier: baseline
   category: veterinary-rest
+  baseline_test: true
   notes: Reference-sized REST/JPA application; verify a Java 8 commit or branch before pinning the fixture.
 - id: flight-booking
   name: flight-booking
   repo_url: https://github.com/sameerean/flight-booking
   tier: easy
   category: flight-booking-rest
+  baseline_test: true
   notes: Spring Data JPA, H2, Swagger, several domain endpoints, and tests.
 - id: spring-boot-blog-app
   name: spring-boot-blog-app
   repo_url: https://github.com/skarware/spring-boot-blog-app
   tier: normal
   category: blog-web-app
+  baseline_test: true
   notes: Boot 2.2.6, Web, JPA, Security, H2, Lombok, and Thymeleaf.
 - id: spring-boot-blog-rest-api
   name: Spring-Boot-Blog-REST-API
   repo_url: https://github.com/osopromadze/Spring-Boot-Blog-REST-API
   tier: advanced
   category: blog-rest
+  baseline_test: true
   notes: Security/JWT, MySQL, JPA/Hibernate, Docker, Swagger/docs, and a longer project history.
 - id: spring-boot-crud-rest
   name: spring-boot-crud-rest
   repo_url: https://github.com/davidarchanjo/spring-boot-crud-rest
   tier: easy
   category: crud-rest
+  baseline_test: true
   notes: DTO, service, and repository layers with JPA, H2, ModelMapper, Lombok, and tests.
 - id: my-blog-zhenfeng13
   name: My-Blog
   repo_url: https://github.com/ZHENFENG13/My-Blog
   tier: normal
   category: blog-web-app
+  baseline_test: true
   notes: Established Java 8-era Spring Boot/MyBatis/Thymeleaf blogging system with strong community provenance.
 - id: newbee-mall
   name: newbee-mall
   repo_url: https://github.com/newbee-ltd/newbee-mall
   tier: advanced
   category: ecommerce
+  baseline_test: true
   notes: Established open-source e-commerce application with catalog, cart, checkout, orders, members, and admin; pin a validated
     Java 8-era ref.
 - id: newbee-mall-api
@@ -135,6 +144,7 @@ projects:
   repo_url: https://github.com/newbee-ltd/newbee-mall-api
   tier: normal
   category: ecommerce-rest
+  baseline_test: true
   notes: Backend-focused REST API using Spring Boot, MyBatis, Swagger, and MySQL; good provenance and migration surface.
 - id: vhr
   name: vhr
@@ -149,6 +159,7 @@ projects:
   repo_url: https://github.com/lrwinx/shop
   tier: advanced
   category: ecommerce-microservices
+  baseline_test: true
   notes: Java 8-era Spring Boot/Cloud commerce system with JPA, Feign, Security, Eureka, and Zuul; later-stage corpus candidate.
 - id: multitenancy-sunitk
   name: multitenancy
@@ -162,6 +173,7 @@ projects:
   repo_url: https://github.com/reljicd/spring-boot-blog
   tier: normal
   category: blog-web-app
+  baseline_test: true
   notes: Java 8 Spring Boot application with Security, JPA, Data REST, Thymeleaf, and H2; older established community fixture.
 - id: ecommerce-spring-reactjs
   name: ecommerce-spring-reactjs
@@ -191,6 +203,7 @@ projects:
   ref: a41a85ef959d532c617bf65aea5bc49d7ad141ff
   tier: advanced
   category: ecommerce
+  baseline_test: true
   notes: Expanded NewBee Mall with coupons, flash sales, payments, Redis, Spring Boot, MyBatis, and MySQL; pin a validated
     Java 8-era ref.
 - id: mall-macrozheng
@@ -209,6 +222,7 @@ projects:
   tier: advanced
   category: distributed-job-scheduler
   test_configuration_needed: false
+  baseline_test: true
   notes: Established distributed scheduling platform; release 2.5.0 targets Java 8 with Spring Boot 2.7.18 and uses MySQL.
 - id: eladmin
   name: eladmin
@@ -323,6 +337,7 @@ projects:
   tier: advanced
   category: file-management
   test_configuration_needed: false
+  baseline_test: true
   notes: Widely adopted file-listing and storage-management application; the pinned 3.x release targets Java 8 with Spring Boot 2.5.4 and integrates multiple cloud and object-storage providers.
 - id: pig
   name: Pig

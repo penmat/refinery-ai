@@ -1,0 +1,7 @@
+# Runs the initial set of project migrations that have succeeded at least one time
+# Expect very high success rate (100% ideally) here.
+uv run refinery run-corpus \
+  evals/corpora/refinery-java8-spring-boot-test-corpus.yaml \
+  --baseline-tests-only \
+  --jobs 3
+

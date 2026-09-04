@@ -1,0 +1,9 @@
+uv run refinery run-corpus \                                                                              
+  evals/corpora/refinery-java8-spring-boot-test-corpus.yaml \
+  --project mogu-blog \
+  --project hsweb-framework \
+  --project pig \
+  --project zfile \
+  --no-ai-patching \
+  --jobs 3
+

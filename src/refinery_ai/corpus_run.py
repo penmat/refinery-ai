@@ -25,6 +25,7 @@ class CorpusProject(BaseModel):
     notes: str | None = None
     ref: str | None = None
     test_configuration_needed: bool = False
+    baseline_test: bool = False
 
 
 class CorpusDefinition(BaseModel):
@@ -40,6 +41,7 @@ class CorpusProjectResult(BaseModel):
     tier: str | None = None
     category: str | None = None
     test_configuration_needed: bool = False
+    baseline_test: bool = False
     status: str
     ai_patching: bool
     elapsed_seconds: float
@@ -295,6 +297,7 @@ class CorpusRunner:
             tier=project.tier,
             category=project.category,
             test_configuration_needed=project.test_configuration_needed,
+            baseline_test=project.baseline_test,
             status=status,
             ai_patching=self.ai_patching,
             elapsed_seconds=round(time.monotonic() - started, 3),
