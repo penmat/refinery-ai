@@ -148,6 +148,19 @@ class ProfileRunner:
                 raise RuntimeError("Profile planner did not return recipe recommendations")
             recipes = tuple(item.recipe for item in report.plan.recommendations)
             if not recipes:
+                target_gaps = self.profile.unresolved_targets(report.snapshot)
+                if target_gaps:
+                    unresolved = ", ".join(
+                        f"{gap.target} {gap.current_version or 'unknown'} -> "
+                        f"{gap.target_version}"
+                        for gap in target_gaps
+                    )
+                    return self._stalled(
+                        state,
+                        cycle,
+                        "the planner returned no migrations while profile targets remain "
+                        f"unsatisfied ({unresolved})",
+                    )
                 state.completed = True
                 self.store.save(state)
                 return ProfileRunResult(

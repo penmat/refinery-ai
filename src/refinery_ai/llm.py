@@ -27,7 +27,7 @@ class CompletionFunction(Protocol):
 def _litellm_completion(**kwargs: Any) -> Any:
     """Import LiteLLM only when making a real provider request."""
 
-    litellm = importlib.import_module("litellm")
+    litellm: Any = importlib.import_module("litellm")
     from refinery_ai.telemetry import litellm_callbacks
 
     callbacks = litellm_callbacks()

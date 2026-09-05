@@ -9,12 +9,13 @@ import time
 import zipfile
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 import yaml  # type: ignore[import-untyped]
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from refinery_ai.recipe_catalog import _ssl_context
 
@@ -24,6 +25,7 @@ RECIPE_REPOSITORIES = (
     "openrewrite/rewrite-spring",
 )
 TRANSIENT_HTTP_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+RECIPE_CACHE_SCHEMA_VERSION = 2
 
 
 class RecipeSource(BaseModel):
@@ -32,6 +34,7 @@ class RecipeSource(BaseModel):
     description: str
     repository: str
     file_path: str
+    recipe_list: list[str | dict[str, Any]] = Field(default_factory=list)
 
 
 def parse_recipe_yaml(
@@ -50,6 +53,7 @@ def parse_recipe_yaml(
         if not isinstance(name, str) or not isinstance(description, str):
             continue
         display_name = document.get("displayName")
+        recipe_list = document.get("recipeList")
         recipes.append(
             RecipeSource(
                 recipe=name,
@@ -57,6 +61,12 @@ def parse_recipe_yaml(
                 description=" ".join(description.split()),
                 repository=repository,
                 file_path=file_path,
+                recipe_list=(
+                    recipe_list
+                    if isinstance(recipe_list, list)
+                    and all(isinstance(item, (str, dict)) for item in recipe_list)
+                    else []
+                ),
             )
         )
     return recipes
@@ -104,8 +114,14 @@ def _read_cached_recipes(cache_directory: Path, repository: str) -> list[RecipeS
     path = _cache_path(cache_directory, repository)
     try:
         payload = json.loads(path.read_text())
-        recipes = [RecipeSource.model_validate(item) for item in payload]
-    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        if (
+            not isinstance(payload, dict)
+            or payload.get("schema_version") != RECIPE_CACHE_SCHEMA_VERSION
+            or payload.get("repository") != repository
+        ):
+            return None
+        recipes = [RecipeSource.model_validate(item) for item in payload["recipes"]]
+    except (OSError, KeyError, json.JSONDecodeError, TypeError, ValueError):
         return None
     if not recipes or any(recipe.repository != repository for recipe in recipes):
         return None
@@ -120,7 +136,16 @@ def _write_cached_recipes(
     cache_directory.mkdir(parents=True, exist_ok=True)
     path = _cache_path(cache_directory, repository)
     temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps([recipe.model_dump() for recipe in recipes], indent=2))
+    temporary.write_text(
+        json.dumps(
+            {
+                "schema_version": RECIPE_CACHE_SCHEMA_VERSION,
+                "repository": repository,
+                "recipes": [recipe.model_dump() for recipe in recipes],
+            },
+            indent=2,
+        )
+    )
     temporary.replace(path)
 
 
@@ -138,14 +163,24 @@ def fetch_recipe_sources(
     retry_attempts: int = 3,
     retry_delay_seconds: float = 0.5,
     sleep: Callable[[float], None] = time.sleep,
+    refresh: bool = False,
 ) -> list[RecipeSource]:
-    """Download recipe catalogs, retrying transient failures and using a local cache."""
+    """Load cached catalogs, downloading only missing entries or when refresh is requested."""
 
     if retry_attempts < 1:
         raise ValueError("retry_attempts must be at least 1")
 
     recipes: list[RecipeSource] = []
     for repository in RECIPE_REPOSITORIES:
+        cached = (
+            _read_cached_recipes(cache_directory, repository)
+            if cache_directory is not None
+            else None
+        )
+        if cached is not None and not refresh:
+            recipes.extend(cached)
+            continue
+
         failure: BaseException | None = None
         repository_recipes: list[RecipeSource] | None = None
         for attempt in range(retry_attempts):
@@ -161,8 +196,8 @@ def fetch_recipe_sources(
                     break
                 sleep(retry_delay_seconds * (2**attempt))
 
-        if repository_recipes is None and cache_directory is not None:
-            repository_recipes = _read_cached_recipes(cache_directory, repository)
+        if repository_recipes is None:
+            repository_recipes = cached
         if repository_recipes is None:
             assert failure is not None
             raise failure

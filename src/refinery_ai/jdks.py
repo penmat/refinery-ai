@@ -142,11 +142,12 @@ def baseline_java_candidates(source: str | None, recipes: list[str]) -> tuple[in
     """Try the first Java target, then walk backward through supported LTS bridges."""
 
     source_major = java_major(source)
+    runtime_major = project_runtime_java(source)
     first_target = next(
         (target for recipe in recipes if (target := recipe_target_java(recipe)) is not None),
         None,
     )
-    target = first_target or source_major
+    target = first_target or runtime_major
     if target is None:
         return ()
     lower_bound = source_major or target

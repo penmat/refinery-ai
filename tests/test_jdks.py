@@ -65,3 +65,4 @@ def test_java_major_and_recipe_targets() -> None:
         "1.8", ["example.UpgradeSpringBoot_3_0"]
     ) == (17, 11, 8)
     assert baseline_java_candidates("11", ["example.UpgradeToJava21"]) == (21, 17, 11)
+    assert baseline_java_candidates("9", ["example.UpgradeSpringBoot_2_3"]) == (11, 9)

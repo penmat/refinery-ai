@@ -561,6 +561,13 @@ def plan(
             help="Verify the OpenRewrite catalog TLS certificate",
         ),
     ] = None,
+    refresh_recipe_catalog: Annotated[
+        bool,
+        typer.Option(
+            "--refresh-recipe-catalog",
+            help="Re-download OpenRewrite recipe YAML instead of using the local cache",
+        ),
+    ] = False,
 ) -> None:
     """Recommend applicable OpenRewrite recipes without executing them."""
 
@@ -592,6 +599,7 @@ def plan(
         ),
         use_ai_planner=True,
         profile=profile,
+        refresh_recipe_catalog=refresh_recipe_catalog,
     )
     if not isinstance(report.plan, RecipePlan):
         raise RuntimeError("Planner did not return recipe recommendations")
@@ -721,6 +729,13 @@ def run(
             help="Semantic repair policy: disabled, local, or configured-provider",
         ),
     ] = None,
+    refresh_recipe_catalog: Annotated[
+        bool,
+        typer.Option(
+            "--refresh-recipe-catalog",
+            help="Re-download OpenRewrite recipe YAML before the first planning cycle",
+        ),
+    ] = False,
 ) -> None:
     """Run manually, or converge on a named profile through repeated verified migrations."""
 
@@ -737,6 +752,7 @@ def run(
         jdk_resolver = JdkResolver()
         effective_target = target_java if target_java is not None else profile.target_java
         goal_description = goal or profile.goal
+        refresh_catalog_pending = refresh_recipe_catalog
 
         profile_log = (
             root
@@ -773,10 +789,11 @@ def run(
             }
 
         def plan_cycle() -> RunReport:
+            nonlocal refresh_catalog_pending
             snapshot = HarnessRepositoryEnvironment(root).discover(root)
             environment = jdk_resolver.environment(project_runtime_java(snapshot.java_version))
             with selected_jdk(environment):
-                return ModernizationFactory(settings=settings).prepare(
+                report = ModernizationFactory(settings=settings).prepare(
                     root,
                     ModernizationGoal(
                         description=f"{goal_description}. Profile target: {profile.goal}",
@@ -785,7 +802,10 @@ def run(
                     use_ai_planner=True,
                     profile=profile,
                     collect_context_graph=profile.evidence.context_graph != "off",
+                    refresh_recipe_catalog=refresh_catalog_pending,
                 )
+            refresh_catalog_pending = False
+            return report
 
         def migrate_cycle(plan_id: str, checkpoint: VerifiedCheckpoint | None) -> MigrationRun:
             repairer = (

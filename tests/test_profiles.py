@@ -46,8 +46,25 @@ def test_builtin_profile_limits_versions_and_prunes_dependencies() -> None:
     assert [item.recipe for item in result.recommendations] == [boot32]
     assert result.recommendations[0].depends_on == []
     assert profile.target_java == 17
+    assert profile.target_spring_boot == "3.2"
     assert profile.evidence.context_graph is EvidenceMode.OFF
     assert profile.evidence.sonarqube is EvidenceMode.OFF
+
+
+def test_profile_reports_only_unresolved_structured_targets(tmp_path: Path) -> None:
+    profile = load_profile("spring-boot-3.2-java-17")
+    snapshot = DiscoverySnapshot(
+        repository=tmp_path,
+        build_system=BuildSystem.MAVEN,
+        java_version="17",
+        spring_boot_version="3.0.13",
+    )
+
+    gaps = profile.unresolved_targets(snapshot)
+
+    assert [gap.target for gap in gaps] == ["spring_boot"]
+    assert gaps[0].current_version == "3.0.13"
+    assert gaps[0].target_version == "3.2"
 
 
 def test_migration_rejects_plan_from_another_profile(tmp_path: Path) -> None:

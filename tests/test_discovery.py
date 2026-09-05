@@ -27,6 +27,22 @@ def test_discovers_maven_repository(tmp_path: Path) -> None:
     assert result.frameworks == ["Spring"]
 
 
+def test_maven_compiler_plugin_overrides_java_version_property(tmp_path: Path) -> None:
+    (tmp_path / "pom.xml").write_text(
+        """<project><modelVersion>4.0.0</modelVersion>
+        <properties><java.version>1.8</java.version></properties>
+        <build><plugins><plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <configuration><source>9</source><target>9</target></configuration>
+        </plugin></plugins></build></project>"""
+    )
+
+    result = discover(tmp_path)
+
+    assert result.java_version == "9"
+
+
 def test_discovers_repository_beneath_ignored_parent_directory(tmp_path: Path) -> None:
     repository = tmp_path / ".refinery/corpus-runs/run/repositories/example"
     repository.mkdir(parents=True)

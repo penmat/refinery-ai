@@ -188,7 +188,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (refinery_phase, refinery_run_id) (last_over_time(refinery_llm_tokens_total{service_name=\"refinery-ai\",refinery_phase=~\"planning|repair\"}[$__range]))",
+          "expr": "sum by (refinery_phase, refinery_run_id) (last_over_time(refinery_llm_tokens_total{service_name=\"refinery-ai\",refinery_phase=~\"planning|repair\",gen_ai_token_type=~\"input|output\"}[$__range]))",
           "instant": true,
           "legendFormat": "{{refinery_phase}} · {{refinery_run_id}}",
           "range": false,
@@ -214,7 +214,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(last_over_time(refinery_llm_tokens_total{service_name=\"refinery-ai\",refinery_phase=\"planning\"}[$__range]))",
+          "expr": "sum(last_over_time(refinery_llm_tokens_total{service_name=\"refinery-ai\",refinery_phase=\"planning\",gen_ai_token_type=~\"input|output\"}[$__range]))",
           "instant": true, "legendFormat": "Planning tokens", "range": false, "refId": "A"
         }
       ],
@@ -237,7 +237,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(last_over_time(refinery_llm_tokens_total{service_name=\"refinery-ai\",refinery_phase=\"repair\"}[$__range]))",
+          "expr": "sum(last_over_time(refinery_llm_tokens_total{service_name=\"refinery-ai\",refinery_phase=\"repair\",gen_ai_token_type=~\"input|output\"}[$__range]))",
           "instant": true, "legendFormat": "Repair tokens", "range": false, "refId": "A"
         }
       ],
@@ -260,7 +260,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (refinery_plan_id, refinery_repair_attempt) (last_over_time(refinery_llm_tokens_total{service_name=\"refinery-ai\",refinery_phase=\"repair\"}[$__range]))",
+          "expr": "sum by (refinery_plan_id, refinery_repair_attempt) (last_over_time(refinery_llm_tokens_total{service_name=\"refinery-ai\",refinery_phase=\"repair\",gen_ai_token_type=~\"input|output\"}[$__range]))",
           "instant": true,
           "legendFormat": "plan {{refinery_plan_id}} · attempt {{refinery_repair_attempt}}",
           "range": false,
@@ -286,7 +286,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (refinery_phase) (last_over_time(refinery_llm_tokens_total{service_name=\"refinery-ai\",refinery_phase=~\"planning|repair\"}[$__range]))",
+          "expr": "sum by (refinery_phase) (last_over_time(refinery_llm_tokens_total{service_name=\"refinery-ai\",refinery_phase=~\"planning|repair\",gen_ai_token_type=~\"input|output\"}[$__range]))",
           "instant": false,
           "legendFormat": "{{refinery_phase}} tokens",
           "range": true,

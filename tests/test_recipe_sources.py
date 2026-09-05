@@ -38,6 +38,7 @@ description: Not a recipe
             "description": "Apply changes commonly needed when migrating to Java 21.",
             "repository": "openrewrite/rewrite-migrate-java",
             "file_path": "src/main/resources/META-INF/rewrite/java-version-21.yml",
+            "recipe_list": ["org.openrewrite.java.migrate.UpgradeToJava17"],
         }
     ]
 
@@ -117,7 +118,26 @@ def test_fetch_recipe_sources_retries_gateway_timeout_then_succeeds(
     assert delays == [0.5, 1.0]
 
 
-def test_fetch_recipe_sources_uses_cache_after_retries_are_exhausted(
+def test_fetch_recipe_sources_uses_cache_without_contacting_upstream(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        recipe_sources_module,
+        "_fetch_repository_recipes",
+        lambda repository, timeout, verify_ssl: [_recipe(repository)],
+    )
+    expected = fetch_recipe_sources(cache_directory=tmp_path)
+    def fail(repository: str, timeout: float, verify_ssl: bool) -> list[RecipeSource]:
+        raise AssertionError("upstream should not be contacted when the cache is populated")
+
+    monkeypatch.setattr(recipe_sources_module, "_fetch_repository_recipes", fail)  # type: ignore[attr-defined]
+
+    actual = fetch_recipe_sources(cache_directory=tmp_path, sleep=lambda _: None)
+
+    assert actual == expected
+
+
+def test_fetch_recipe_sources_refreshes_on_request_and_falls_back_to_cache(
     tmp_path: Path, monkeypatch: object
 ) -> None:
     monkeypatch.setattr(  # type: ignore[attr-defined]
@@ -135,7 +155,30 @@ def test_fetch_recipe_sources_uses_cache_after_retries_are_exhausted(
 
     monkeypatch.setattr(recipe_sources_module, "_fetch_repository_recipes", fail)  # type: ignore[attr-defined]
 
-    actual = fetch_recipe_sources(cache_directory=tmp_path, sleep=lambda _: None)
+    actual = fetch_recipe_sources(
+        cache_directory=tmp_path,
+        refresh=True,
+        sleep=lambda _: None,
+    )
 
     assert actual == expected
     assert attempts == 6
+
+
+def test_fetch_recipe_sources_reloads_legacy_cache_schema(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    for repository in RECIPE_REPOSITORIES:
+        path = tmp_path / f"{repository.replace('/', '--')}.json"
+        path.write_text("[]")
+    calls: list[str] = []
+
+    def fetch(repository: str, timeout: float, verify_ssl: bool) -> list[RecipeSource]:
+        calls.append(repository)
+        return [_recipe(repository)]
+
+    monkeypatch.setattr(recipe_sources_module, "_fetch_repository_recipes", fetch)  # type: ignore[attr-defined]
+
+    fetch_recipe_sources(cache_directory=tmp_path)
+
+    assert calls == list(RECIPE_REPOSITORIES)

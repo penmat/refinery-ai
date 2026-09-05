@@ -12,6 +12,7 @@ from refinery_ai.agents.planning import (
     create_planning_agent,
     planning_payload_metrics,
 )
+from refinery_ai.agents.recipe_catalog import RecipeCatalogSession
 from refinery_ai.config import Settings
 from refinery_ai.context_graph.contracts import ContextGraphBuildService
 from refinery_ai.context_graph.models import ContextGraphInfo
@@ -42,7 +43,6 @@ from refinery_ai.planning_artifacts import (
     load_planning_artifacts,
 )
 from refinery_ai.profiles import ModernizationProfile
-from refinery_ai.recipe_catalog import JavaMigrationCatalog, fetch_java_migration_catalog
 from refinery_ai.recipe_sources import RecipeSource, fetch_recipe_sources
 from refinery_ai.reporting import to_markdown
 from refinery_ai.repository import RepositoryEnvironment
@@ -172,14 +172,12 @@ class ModernizationFactory:
         rewrite: OpenRewriteAdapter | None = None,
         context_graph: ContextGraphBuildService | None = None,
         environment: RepositoryEnvironment | None = None,
-        recipe_catalog: JavaMigrationCatalog | None = None,
         recipe_sources: list[RecipeSource] | None = None,
     ) -> None:
         self.settings = settings or Settings()
         self.environment = environment
         self.context_graph = context_graph
         self.rewrite = rewrite
-        self.recipe_catalog = recipe_catalog
         self.recipe_sources = recipe_sources
 
     def _environment(self, repository: Path) -> RepositoryEnvironment:
@@ -205,6 +203,7 @@ class ModernizationFactory:
         use_ai_planner: bool = False,
         profile: ModernizationProfile | None = None,
         collect_context_graph: bool = True,
+        refresh_recipe_catalog: bool = False,
     ) -> RunReport:
         run_id = uuid4().hex
         environment = self._environment(repository)
@@ -257,14 +256,12 @@ class ModernizationFactory:
                     "\n\n---\n\n# Active modernization profile\n\n"
                     f"Name: {profile.name}\nDescription: {profile.description}\n"
                     f"Goal: {profile.goal}\nTarget Java: {profile.target_java or 'unspecified'}\n"
+                    "Target Spring Boot: "
+                    f"{profile.target_spring_boot or 'unspecified'}\n"
                     f"Excluded recipe patterns: {profile.exclude_recipes}\n"
                     "Included recipe patterns: "
                     f"{profile.include_recipes or ['all except exclusions']}"
                 )
-            catalog = self.recipe_catalog or fetch_java_migration_catalog(
-                timeout=self.settings.recipe_catalog_timeout_seconds,
-                verify_ssl=self.settings.recipe_catalog_verify_ssl,
-            )
             recipe_sources = (
                 self.recipe_sources
                 if self.recipe_sources is not None
@@ -272,8 +269,17 @@ class ModernizationFactory:
                     timeout=self.settings.recipe_catalog_timeout_seconds,
                     verify_ssl=self.settings.recipe_catalog_verify_ssl,
                     cache_directory=state_dir / "cache" / "recipe-sources",
+                    refresh=refresh_recipe_catalog,
                 )
             )
+            permitted_recipe_sources = [
+                source
+                for source in recipe_sources
+                if profile is None or profile.permits(source.recipe)
+            ]
+            recipe_catalog = RecipeCatalogSession(permitted_recipe_sources)
+            target_gaps = profile.unresolved_targets(snapshot) if profile is not None else []
+            target_candidates = recipe_catalog.target_candidates(target_gaps)
             graph_context = (
                 environment.query_context(
                     graph.graph_path,
@@ -286,6 +292,13 @@ class ModernizationFactory:
                 else "Context graph evidence was not collected for this profile."
             )
             evidence_facts = _planning_evidence_facts(snapshot, goal, artifact_context)
+            if profile is not None:
+                if profile.target_java is not None:
+                    evidence_facts.append(f"profile.target_java={profile.target_java}")
+                if profile.target_spring_boot is not None:
+                    evidence_facts.append(
+                        f"profile.target_spring_boot={profile.target_spring_boot}"
+                    )
             evidence_corpus = "\n".join(
                 (
                     "\n".join(evidence_facts),
@@ -322,26 +335,9 @@ class ModernizationFactory:
                 migration_failure_context=migration_failure_context,
                 failed_recipes=failed_recipes,
                 completed_recipes=migration_failures.completed_recipes,
-                recipe_catalog=(
-                    f"Catalog index: {catalog.source}\n"
-                    "Declarative recipe source array:\n"
-                    + json.dumps(
-                        [source.model_dump(mode="json") for source in recipe_sources],
-                        indent=2,
-                    )
-                ),
-                allowed_recipes=frozenset(
-                    source.recipe
-                    for source in recipe_sources
-                    if profile is None or profile.permits(source.recipe)
-                ),
-                recipe_artifacts={
-                    source.recipe: (
-                        "org.openrewrite.recipe:"
-                        f"{source.repository.rsplit('/', maxsplit=1)[-1]}:RELEASE"
-                    )
-                    for source in recipe_sources
-                },
+                recipe_catalog=recipe_catalog,
+                target_gaps=target_gaps,
+                target_candidates=target_candidates,
                 evidence_corpus=evidence_corpus,
             )
             payload_metrics = planning_payload_metrics(planner_prompt, planning_deps)

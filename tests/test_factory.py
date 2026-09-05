@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+from pydantic_ai.models.openai import OpenAIResponsesModel
 from typer.testing import CliRunner
 
 from refinery_ai.agents.planning import create_planning_agent, grounded_recipe_plan
@@ -31,7 +32,6 @@ from refinery_ai.models import (
     RunStatus,
 )
 from refinery_ai.planning_artifacts import load_migration_failures, load_planner_rules
-from refinery_ai.recipe_catalog import JavaMigrationCatalog, RecipeCatalogEntry
 from refinery_ai.recipe_sources import RecipeSource
 
 
@@ -63,15 +63,6 @@ class FakePlanner:
         return SimpleNamespace(output=RecipePlan())
 
 
-CATALOG = JavaMigrationCatalog(
-    recipes=[
-        RecipeCatalogEntry(
-            name="Migrate to Java 17",
-            url="https://docs.openrewrite.org/recipes/java/migrate/upgradetojava17",
-            kind="Composite Recipes",
-        )
-    ]
-)
 RECIPE_SOURCES = [
     RecipeSource(
         recipe="org.openrewrite.java.migrate.UpgradeToJava17",
@@ -117,6 +108,15 @@ def test_planner_uses_the_configured_ollama_api_base() -> None:
     )
 
     assert str(cast(Any, planner.model).base_url) == "http://ollama.test:11434/v1/"
+
+
+def test_openai_planner_uses_the_responses_api_for_reasoning_tools() -> None:
+    planner = create_planning_agent(
+        "openai:gpt-5.6-luna",
+        openai_api_key="test-key",
+    )
+
+    assert isinstance(planner.model, OpenAIResponsesModel)
 
 
 def test_planner_filters_ungrounded_recommendations_instead_of_failing() -> None:
@@ -847,7 +847,6 @@ def test_prepare_persists_reports(tmp_path: Path) -> None:
     (tmp_path / "pom.xml").write_text("<project><modelVersion>4.0.0</modelVersion></project>")
     report = ModernizationFactory(
         context_graph=FakeContextGraph(),
-        recipe_catalog=CATALOG,
         recipe_sources=RECIPE_SOURCES,
     ).prepare(
         tmp_path, ModernizationGoal(description="Upgrade Java", target_java=17)
@@ -878,7 +877,7 @@ def test_ai_prepare_persists_migration_plan_handoff(tmp_path: Path, monkeypatch)
     )
 
     report = ModernizationFactory(
-        context_graph=FakeContextGraph(), recipe_catalog=CATALOG, recipe_sources=RECIPE_SOURCES
+        context_graph=FakeContextGraph(), recipe_sources=RECIPE_SOURCES
     ).prepare(
         tmp_path,
         ModernizationGoal(description="Upgrade Java", target_java=17),
@@ -902,7 +901,6 @@ def test_ai_prepare_supplies_graph_and_assessment_context(
 
     report = ModernizationFactory(
         context_graph=FakeContextGraph(),
-        recipe_catalog=CATALOG,
         recipe_sources=RECIPE_SOURCES,
     ).prepare(
         tmp_path,
@@ -918,10 +916,8 @@ def test_ai_prepare_supplies_graph_and_assessment_context(
     assert "any Spring Boot release older than 2.7" in planner.deps.planner_rules
     assert "JavaxMigrationToJakarta" in planner.deps.planner_rules
     assert "Spring Boot 3 or greater" in planner.deps.planner_rules
-    assert "org.openrewrite.java.migrate.UpgradeToJava17" in planner.deps.recipe_catalog
-    assert planner.deps.allowed_recipes == {
-        "org.openrewrite.java.migrate.UpgradeToJava17"
-    }
+    assert planner.deps.recipe_catalog.recipe_count == 1
+    assert planner.deps.recipe_catalog.allowed_recipes == set()
     assert '"target_java": 17' in planner.deps.evidence_corpus
     assert "goal.target_java=17" in planner.deps.evidence_facts
     assert "No persisted project artifacts are available." in planner.deps.evidence_corpus
@@ -957,7 +953,6 @@ def test_ai_prepare_supplies_previous_migration_failures(
 
     ModernizationFactory(
         context_graph=FakeContextGraph(),
-        recipe_catalog=CATALOG,
         recipe_sources=RECIPE_SOURCES,
     ).prepare(
         tmp_path,
@@ -1001,8 +996,10 @@ def test_plan_command_runs_ai_planner_and_prints_its_output(
         *,
         use_ai_planner: bool = False,
         profile: object | None = None,
+        refresh_recipe_catalog: bool = False,
     ) -> SimpleNamespace:
         assert profile is None
+        assert refresh_recipe_catalog is True
         calls.append((repository, goal, use_ai_planner))
         return SimpleNamespace(plan=RecipePlan(recommendations=[recommendation]))
 
@@ -1016,6 +1013,7 @@ def test_plan_command_runs_ai_planner_and_prints_its_output(
             str(tmp_path),
             "--target-java",
             "21",
+            "--refresh-recipe-catalog",
         ],
     )
 
@@ -1033,6 +1031,7 @@ def test_run_command_exposes_repair_mode_override() -> None:
 
     assert result.exit_code == 0
     assert "--repair-mode" in result.stdout
+    assert "Re-download" in result.stdout
 
 
 def test_plan_command_accepts_repository_as_the_positional_argument(
@@ -1047,8 +1046,10 @@ def test_plan_command_accepts_repository_as_the_positional_argument(
         *,
         use_ai_planner: bool = False,
         profile: object | None = None,
+        refresh_recipe_catalog: bool = False,
     ) -> SimpleNamespace:
         assert profile is None
+        assert refresh_recipe_catalog is False
         calls.append((repository, goal, use_ai_planner))
         return SimpleNamespace(plan=RecipePlan())
 

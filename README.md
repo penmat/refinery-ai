@@ -300,7 +300,18 @@ warning whenever this protection is disabled.
 
 Planner recipe definitions are loaded from the declarative YAML catalogs in both
 `openrewrite/rewrite-migrate-java` and `openrewrite/rewrite-spring`. Each definition retains its
-source repository and file path in the context supplied to the planner.
+source repository and file path. The normalized catalogs are cached beneath
+`.refinery/cache/recipe-sources/`; subsequent plans read that cache without contacting GitHub.
+Use `--refresh-recipe-catalog` to explicitly download fresh definitions.
+
+The full catalog is not placed in the planner prompt. The planner receives bounded tools to list
+recipe categories, search compact recipe summaries, and inspect one exact recipe definition. A
+recommendation is accepted only if that recipe was returned by a catalog tool during the current
+planning run.
+
+OpenAI-backed planners use the Responses API so GPT-5.6 models can combine configured reasoning
+effort with these function tools. Ollama continues to use its OpenAI-compatible Chat Completions
+endpoint.
 
 The planner also writes a migration-agent handoff to `.refinery/plans/<run-id>.json`. Run the
 latest persisted plan as an OpenRewrite preview, or explicitly apply it:

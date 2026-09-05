@@ -31,7 +31,12 @@ def report(repository: Path, run_id: str, recipes: list[str]) -> RunReport:
         run_id=run_id,
         profile="spring-boot-3.2-java-17",
         status=RunStatus.PLANNED,
-        snapshot=DiscoverySnapshot(repository=repository, build_system=BuildSystem.MAVEN),
+        snapshot=DiscoverySnapshot(
+            repository=repository,
+            build_system=BuildSystem.MAVEN,
+            java_version="17",
+            spring_boot_version="3.2.0",
+        ),
         context_graph=ContextGraphInfo(graph_path=repository / "graph.json"),
         plan=RecipePlan(recommendations=[recommendation(recipe) for recipe in recipes]),
     )
@@ -156,6 +161,26 @@ def test_profile_runner_stops_when_migration_makes_no_change(tmp_path: Path) -> 
 
     assert result.status is RunStatus.NEEDS_REVIEW
     assert "no published changes" in result.message
+
+
+def test_profile_runner_does_not_complete_with_unsatisfied_structured_target(
+    tmp_path: Path,
+) -> None:
+    incomplete = report(tmp_path, "empty", [])
+    incomplete.snapshot.spring_boot_version = "3.0.13"
+
+    result = ProfileRunner(
+        tmp_path,
+        load_profile("spring-boot-3.2-java-17"),
+        analyze=lambda run_sonar: True,
+        plan=lambda: incomplete,
+        migrate=lambda plan_id, checkpoint: MigrationRun(
+            plan_id=plan_id, status=RunStatus.COMPLETED
+        ),
+    ).run()
+
+    assert result.status is RunStatus.NEEDS_REVIEW
+    assert "spring_boot 3.0.13 -> 3.2" in result.message
 
 
 def test_profile_runner_recovers_when_retained_sonar_evidence_is_missing(

@@ -118,11 +118,30 @@ def maven_details(content: str) -> tuple[list[Dependency], str | None]:
             value = values.get(name)
         return value
 
-    java_version = (
+    property_java_version = (
         resolved(values.get("maven.compiler.release"))
         or resolved(values.get("maven.compiler.target"))
         or resolved(values.get("java.version"))
     )
+    compiler_java_version: str | None = None
+    for plugin in root.findall(f"./{prefix}build/{prefix}plugins/{prefix}plugin"):
+        if _xml_text(plugin, prefix, "artifactId") != "maven-compiler-plugin":
+            continue
+        configuration = plugin.find(f"{prefix}configuration")
+        if configuration is None:
+            continue
+        compiler_java_version = next(
+            (
+                resolved(node.text.strip())
+                for name in ("release", "target", "source")
+                if (node := configuration.find(f"{prefix}{name}")) is not None
+                and node.text
+            ),
+            None,
+        )
+        if compiler_java_version:
+            break
+    java_version = compiler_java_version or property_java_version
     dependencies: list[Dependency] = []
     for item in root.findall(f".//{prefix}dependencies/{prefix}dependency"):
         group = _xml_text(item, prefix, "groupId")

@@ -9,7 +9,35 @@ from pathlib import Path
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field
 
-from refinery_ai.models import RecipePlan
+from refinery_ai.models import DiscoverySnapshot, RecipePlan
+
+
+def _java_version(value: str | None) -> int | None:
+    if value is None:
+        return None
+    parts = value.strip().split(".")
+    try:
+        return int(parts[1] if parts[0] == "1" and len(parts) > 1 else parts[0])
+    except ValueError:
+        return None
+
+
+def _major_minor(value: str | None) -> tuple[int, int] | None:
+    if value is None:
+        return None
+    parts = value.strip().split(".")
+    if len(parts) < 2:
+        return None
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+
+
+class ProfileTargetGap(BaseModel):
+    target: str
+    current_version: str | None
+    target_version: str
 
 
 class EvidenceMode(StrEnum):
@@ -28,9 +56,37 @@ class ModernizationProfile(BaseModel):
     description: str
     goal: str
     target_java: int | None = Field(default=None, ge=8)
+    target_spring_boot: str | None = Field(default=None, pattern=r"^\d+\.\d+$")
     include_recipes: list[str] = Field(default_factory=list)
     exclude_recipes: list[str] = Field(default_factory=list)
     evidence: ProfileEvidencePolicy = Field(default_factory=ProfileEvidencePolicy)
+
+    def unresolved_targets(self, snapshot: DiscoverySnapshot) -> list[ProfileTargetGap]:
+        """Return measurable profile targets the current discovery has not reached."""
+
+        gaps: list[ProfileTargetGap] = []
+        current_java = _java_version(snapshot.java_version)
+        if self.target_java is not None and (
+            current_java is None or current_java < self.target_java
+        ):
+            gaps.append(
+                ProfileTargetGap(
+                    target="java",
+                    current_version=snapshot.java_version,
+                    target_version=str(self.target_java),
+                )
+            )
+        current_boot = _major_minor(snapshot.spring_boot_version)
+        target_boot = _major_minor(self.target_spring_boot)
+        if target_boot is not None and (current_boot is None or current_boot < target_boot):
+            gaps.append(
+                ProfileTargetGap(
+                    target="spring_boot",
+                    current_version=snapshot.spring_boot_version,
+                    target_version=self.target_spring_boot or "",
+                )
+            )
+        return gaps
 
     def permits(self, recipe: str) -> bool:
         included = not self.include_recipes or any(
