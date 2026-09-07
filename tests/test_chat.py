@@ -22,7 +22,7 @@ def test_chat_includes_reports_tools_and_conversation_history(
                 "messages": list(messages),
                 "tool_names": [tool.__name__ for tool in tools],
                 "max_turns": max_turns,
-                "model": settings.litellm_model,
+                "model": settings.planner_model,
             }
         )
         answer = "It is a Spring application." if len(calls) == 1 else "It uses Java."
@@ -57,7 +57,7 @@ def test_chat_includes_reports_tools_and_conversation_history(
         "get_inspector_result",
     ]
     assert calls[0]["max_turns"] == 3
-    assert calls[0]["model"] == "openai/gpt-5.6-terra"
+    assert calls[0]["model"] == "openai:gpt-5.6-luna"
     assert calls[1]["messages"][-2:] == [
         {"role": "assistant", "prompt": "It is a Spring application."},
         {"role": "user", "prompt": "What language?"},

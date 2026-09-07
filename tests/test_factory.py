@@ -18,9 +18,7 @@ from refinery_ai.factory import (
     _with_boot3_before_jakarta,
     _with_boot3_before_mybatis3,
     _with_boot3_before_springdoc2,
-    _with_boot_minor_staging,
     _with_datasource_initialization_prerequisite,
-    _with_deterministic_prerequisites,
     _with_springfox_before_boot27,
     _with_utf8_prerequisite,
 )
@@ -32,7 +30,7 @@ from refinery_ai.models import (
     RunStatus,
 )
 from refinery_ai.planning_artifacts import load_migration_failures, load_planner_rules
-from refinery_ai.recipe_sources import RecipeSource
+from refinery_ai.recipes.sources import RecipeSource
 
 
 class FakeContextGraph:
@@ -74,14 +72,17 @@ RECIPE_SOURCES = [
 ]
 
 
-def test_planner_uses_supported_openai_model() -> None:
-    assert Settings().model in {"openai:gpt-5.6-terra", "openai:gpt-5.6-luna"}
-
-
-def test_deterministic_repairs_get_one_more_attempt_than_ai() -> None:
+def test_planner_and_repair_models_are_explicitly_configured() -> None:
     settings = Settings()
 
-    assert settings.max_deterministic_repair_attempts == 4
+    assert settings.planner_model == "openai:gpt-5.6-luna"
+    assert settings.repair_model == "openai:gpt-5.6-terra"
+
+
+def test_deterministic_and_ai_repairs_each_get_three_attempts() -> None:
+    settings = Settings()
+
+    assert settings.max_deterministic_repair_attempts == 3
     assert settings.max_repair_attempts == 3
 
 
@@ -201,9 +202,7 @@ def test_load_migration_failures_returns_structured_planning_evidence(
                 "status": "failed",
                 "reason": "Build verification failed",
                 "base_revision": "abc123",
-                "recipe": {
-                    "recipe": "org.openrewrite.java.springdoc.SpringFoxToSpringDoc"
-                },
+                "recipe": {"recipe": "org.openrewrite.java.springdoc.SpringFoxToSpringDoc"},
                 "verification": {
                     "exit_code": 1,
                     "stderr": "cannot find symbol: Docket",
@@ -218,10 +217,7 @@ def test_load_migration_failures_returns_structured_planning_evidence(
             {
                 "status": "completed",
                 "recipe": {
-                    "recipe": (
-                        "org.openrewrite.java.spring.boot2."
-                        "SpringBoot2JUnit4to5Migration"
-                    )
+                    "recipe": ("org.openrewrite.java.spring.boot2.SpringBoot2JUnit4to5Migration")
                 },
             }
         )
@@ -250,9 +246,7 @@ def test_load_migration_failures_keeps_stdout_when_stderr_is_nonempty(
             {
                 "status": "failed",
                 "reason": "Post-migration build failed",
-                "recipe": {
-                    "recipe": "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"
-                },
+                "recipe": {"recipe": "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"},
                 "verification": {
                     "exit_code": 1,
                     "stdout": "EnableGlobalMethodSecurity is required",
@@ -276,10 +270,7 @@ def test_no_change_migration_is_not_recorded_as_completed(tmp_path: Path) -> Non
             {
                 "status": "completed",
                 "recipe": {
-                    "recipe": (
-                        "org.openrewrite.java.spring.boot2."
-                        "AddSpringBootStarterValidation"
-                    )
+                    "recipe": ("org.openrewrite.java.spring.boot2.AddSpringBootStarterValidation")
                 },
                 "base_revision": "abc123",
                 "checkpoint": "abc123",
@@ -312,137 +303,9 @@ def test_planning_evidence_facts_include_goal_and_retained_warnings(tmp_path: Pa
     assert "discovery.framework=Spring" in facts
     assert "discovery.spring_boot_version=2.1.6.RELEASE" in facts
     assert (
-        "discovery.non_utf8_application_properties="
-        "src/main/resources/application.properties"
+        "discovery.non_utf8_application_properties=src/main/resources/application.properties"
     ) in facts
     assert "- [warning] Legacy javax imports remain." in facts
-
-
-def test_boot_1_upgrade_is_staged_through_boot_20(tmp_path: Path) -> None:
-    requested = RecipeRecommendation(
-        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7",
-        reason="Upgrade Boot.",
-        evidence=["discovery.spring_boot_version=1.3.0.RELEASE"],
-        expected_benefit="Boot 2.7 support.",
-        priority="high",
-        confidence=0.9,
-    )
-    java = requested.model_copy(
-        update={"recipe": "org.openrewrite.java.migrate.UpgradeToJava17"}
-    )
-    snapshot = DiscoverySnapshot(
-        repository=tmp_path,
-        build_system="maven",
-        spring_boot_version="1.3.0.RELEASE",
-    )
-
-    result = _with_boot_minor_staging(
-        RecipePlan(recommendations=[requested, java]), snapshot
-    )
-
-    assert [item.recipe for item in result.recommendations] == [
-        "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_0"
-    ]
-    assert result.recommendations[0].depends_on == []
-
-
-def test_java17_only_plan_for_old_boot_is_replaced_by_next_boot_bridge(
-    tmp_path: Path,
-) -> None:
-    java = RecipeRecommendation(
-        recipe="org.openrewrite.java.migrate.UpgradeToJava17",
-        reason="Upgrade Java after Boot.",
-        evidence=["discovery.java_version=1.8"],
-        expected_benefit="Java 17.",
-        priority="high",
-        confidence=0.9,
-    )
-    snapshot = DiscoverySnapshot(
-        repository=tmp_path,
-        build_system="maven",
-        spring_boot_version="2.2.6.RELEASE",
-    )
-
-    result = _with_deterministic_prerequisites(
-        RecipePlan(recommendations=[java]), snapshot
-    )
-
-    assert [item.recipe for item in result.recommendations] == [
-        "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_3"
-    ]
-    assert result.recommendations[0].depends_on == []
-
-
-def test_boot_23_upgrade_advances_only_to_next_minor(tmp_path: Path) -> None:
-    requested = RecipeRecommendation(
-        recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7",
-        reason="Upgrade Boot.",
-        evidence=["discovery.spring_boot_version=2.3.4.RELEASE"],
-        expected_benefit="Boot 2.7 support.",
-        priority="high",
-        confidence=0.9,
-    )
-    snapshot = DiscoverySnapshot(
-        repository=tmp_path,
-        build_system="maven",
-        spring_boot_version="2.3.4.RELEASE",
-    )
-
-    result = _with_boot_minor_staging(
-        RecipePlan(recommendations=[requested]), snapshot
-    )
-
-    assert [item.recipe for item in result.recommendations] == [
-        "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_4"
-    ]
-
-
-def test_boot_26_does_not_jump_directly_to_boot_31(tmp_path: Path) -> None:
-    requested = RecipeRecommendation(
-        recipe="org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_1",
-        reason="Upgrade Boot.",
-        evidence=["discovery.spring_boot_version=2.6.15"],
-        expected_benefit="Boot 3.1 support.",
-        priority="high",
-        confidence=0.9,
-    )
-
-    result = _with_boot_minor_staging(
-        RecipePlan(recommendations=[requested]),
-        DiscoverySnapshot(
-            repository=tmp_path,
-            build_system="maven",
-            spring_boot_version="2.6.15",
-        ),
-    )
-
-    assert [item.recipe for item in result.recommendations] == [
-        "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7"
-    ]
-
-
-def test_boot_27_does_not_jump_directly_to_boot_31(tmp_path: Path) -> None:
-    requested = RecipeRecommendation(
-        recipe="org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_1",
-        reason="Upgrade Boot.",
-        evidence=["discovery.spring_boot_version=2.7.18"],
-        expected_benefit="Boot 3.1 support.",
-        priority="high",
-        confidence=0.9,
-    )
-
-    result = _with_boot_minor_staging(
-        RecipePlan(recommendations=[requested]),
-        DiscoverySnapshot(
-            repository=tmp_path,
-            build_system="maven",
-            spring_boot_version="2.7.18",
-        ),
-    )
-
-    assert [item.recipe for item in result.recommendations] == [
-        "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"
-    ]
 
 
 def test_utf8_conversion_is_planned_before_spring_boot_upgrade(tmp_path: Path) -> None:
@@ -463,12 +326,8 @@ def test_utf8_conversion_is_planned_before_spring_boot_upgrade(tmp_path: Path) -
     plan = _with_utf8_prerequisite(RecipePlan(recommendations=[boot]), snapshot)
 
     assert plan.recommendations[0].execution_type.value == "utf8"
-    assert plan.recommendations[0].recipe == (
-        "refinery.convert-application-properties-to-utf8"
-    )
-    assert plan.recommendations[1].depends_on == [
-        "refinery.convert-application-properties-to-utf8"
-    ]
+    assert plan.recommendations[0].recipe == ("refinery.convert-application-properties-to-utf8")
+    assert plan.recommendations[1].depends_on == ["refinery.convert-application-properties-to-utf8"]
 
 
 def test_datasource_initialization_is_planned_before_boot_upgrade(tmp_path: Path) -> None:
@@ -493,16 +352,12 @@ def test_datasource_initialization_is_planned_before_boot_upgrade(tmp_path: Path
     )
 
     assert plan.recommendations[0].execution_type.value == "spring-properties"
-    assert plan.recommendations[1].depends_on == [
-        "refinery.defer-datasource-initialization"
-    ]
+    assert plan.recommendations[1].depends_on == ["refinery.defer-datasource-initialization"]
 
 
 def test_boot2_upgrade_is_enforced_before_validation_starter() -> None:
     boot_recipe = "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_5"
-    validation_recipe = (
-        "org.openrewrite.java.spring.boot2.AddSpringBootStarterValidation"
-    )
+    validation_recipe = "org.openrewrite.java.spring.boot2.AddSpringBootStarterValidation"
     common = {
         "reason": "Modernize validation.",
         "evidence": ["validation"],
@@ -521,9 +376,7 @@ def test_boot2_upgrade_is_enforced_before_validation_starter() -> None:
         **common,
     )
 
-    result = _with_boot2_before_validation_starter(
-        RecipePlan(recommendations=[validation, boot])
-    )
+    result = _with_boot2_before_validation_starter(RecipePlan(recommendations=[validation, boot]))
 
     assert [item.recipe for item in result.recommendations] == [
         boot_recipe,
@@ -583,9 +436,7 @@ def test_springfox_prerequisite_is_restored_when_failure_history_filtered_it() -
         dependencies=[{"group": "io.springfox", "artifact": "springfox-swagger2"}],
     )
 
-    result = _with_springfox_before_boot27(
-        RecipePlan(recommendations=[boot27]), snapshot
-    )
+    result = _with_springfox_before_boot27(RecipePlan(recommendations=[boot27]), snapshot)
 
     assert [item.recipe for item in result.recommendations] == [
         "org.openrewrite.java.springdoc.SpringFoxToSpringDoc",
@@ -701,9 +552,7 @@ def test_mybatis3_failure_is_retryable_after_ordering_repair() -> None:
         "NoClassDefFoundError: org/springframework/aot/AotDetector",
     )
 
-    assert retryable == {
-        "org.openrewrite.java.spring.boot3.UpgradeMyBatisToSpringBoot_3_0"
-    }
+    assert retryable == {"org.openrewrite.java.spring.boot3.UpgradeMyBatisToSpringBoot_3_0"}
 
 
 def test_boot_failures_are_retryable_after_h2_and_fastjson_repairs() -> None:
@@ -748,9 +597,7 @@ def test_springfox_generated_annotation_failure_is_retryable_after_repair() -> N
         "[ERROR] symbol:   class ApiModelProperty",
     )
 
-    assert retryable == {
-        "org.openrewrite.java.springdoc.SpringFoxToSpringDoc"
-    }
+    assert retryable == {"org.openrewrite.java.springdoc.SpringFoxToSpringDoc"}
 
 
 def test_springfox_schema_version_failure_is_retryable_after_repair() -> None:
@@ -762,9 +609,7 @@ def test_springfox_schema_version_failure_is_retryable_after_repair() -> None:
         ),
     )
 
-    assert retryable == {
-        "org.openrewrite.java.springdoc.SpringFoxToSpringDoc"
-    }
+    assert retryable == {"org.openrewrite.java.springdoc.SpringFoxToSpringDoc"}
 
 
 def test_boot3_failure_is_retryable_after_generator_repair_is_available(
@@ -783,9 +628,7 @@ def test_boot3_failure_is_retryable_after_generator_repair_is_available(
         "package javax.validation does not exist",
     )
 
-    assert retryable == {
-        "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"
-    }
+    assert retryable == {"org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"}
 
 
 def test_boot3_failure_is_retryable_after_test_compatibility_repair_is_available(
@@ -796,9 +639,7 @@ def test_boot3_failure_is_retryable_after_test_compatibility_repair_is_available
         "shouldDeletePet:213 » InvalidDataAccessApiUsage",
     )
 
-    assert retryable == {
-        "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"
-    }
+    assert retryable == {"org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0"}
 
 
 def test_boot2_validation_failure_is_retryable_after_dependency_repair() -> None:
@@ -808,8 +649,7 @@ def test_boot2_validation_failure_is_retryable_after_dependency_repair() -> None
     )
 
     assert retryable == {
-        f"org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_{minor}"
-        for minor in range(3, 8)
+        f"org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_{minor}" for minor in range(3, 8)
     }
 
 
@@ -819,9 +659,7 @@ def test_boot26_circular_security_failure_is_retryable_after_repair() -> None:
         "BeanCurrentlyInCreationException: webSecurityConfig",
     )
 
-    assert retryable == {
-        "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_6"
-    }
+    assert retryable == {"org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_6"}
 
 
 def test_boot27_repository_rest_override_failure_is_retryable(tmp_path: Path) -> None:
@@ -838,9 +676,7 @@ def test_boot27_repository_rest_override_failure_is_retryable(tmp_path: Path) ->
         "method does not override or implement a method from a supertype",
     )
 
-    assert retryable == {
-        "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7"
-    }
+    assert retryable == {"org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7"}
 
 
 def test_prepare_persists_reports(tmp_path: Path) -> None:
@@ -848,9 +684,7 @@ def test_prepare_persists_reports(tmp_path: Path) -> None:
     report = ModernizationFactory(
         context_graph=FakeContextGraph(),
         recipe_sources=RECIPE_SOURCES,
-    ).prepare(
-        tmp_path, ModernizationGoal(description="Upgrade Java", target_java=17)
-    )
+    ).prepare(tmp_path, ModernizationGoal(description="Upgrade Java", target_java=17))
     assert report.status is RunStatus.PLANNED
     assert report.context_graph.provider == "context-graph"
     assert (tmp_path / ".refinery/fake-context/graph.json").exists()
@@ -889,9 +723,7 @@ def test_ai_prepare_persists_migration_plan_handoff(tmp_path: Path, monkeypatch)
     assert persisted["steps"] == [recommendation.model_dump(mode="json")]
 
 
-def test_ai_prepare_supplies_graph_and_assessment_context(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_ai_prepare_supplies_graph_and_assessment_context(tmp_path: Path, monkeypatch) -> None:
     (tmp_path / "pom.xml").write_text("<project><modelVersion>4.0.0</modelVersion></project>")
     planner = FakePlanner()
     monkeypatch.setattr(
@@ -917,7 +749,9 @@ def test_ai_prepare_supplies_graph_and_assessment_context(
     assert "JavaxMigrationToJakarta" in planner.deps.planner_rules
     assert "Spring Boot 3 or greater" in planner.deps.planner_rules
     assert planner.deps.recipe_catalog.recipe_count == 1
-    assert planner.deps.recipe_catalog.allowed_recipes == set()
+    assert planner.deps.recipe_catalog.allowed_recipes == {
+        "org.openrewrite.java.migrate.UpgradeToJava17"
+    }
     assert '"target_java": 17' in planner.deps.evidence_corpus
     assert "goal.target_java=17" in planner.deps.evidence_facts
     assert "No persisted project artifacts are available." in planner.deps.evidence_corpus
@@ -928,9 +762,7 @@ def test_ai_prepare_supplies_graph_and_assessment_context(
     assert planner.deps.completed_recipes == frozenset()
 
 
-def test_ai_prepare_supplies_previous_migration_failures(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_ai_prepare_supplies_previous_migration_failures(tmp_path: Path, monkeypatch) -> None:
     (tmp_path / "pom.xml").write_text("<project><modelVersion>4.0.0</modelVersion></project>")
     failed_step = tmp_path / ".refinery/migration-runs/run-1/step-001"
     failed_step.mkdir(parents=True)
@@ -939,9 +771,7 @@ def test_ai_prepare_supplies_previous_migration_failures(
             {
                 "status": "failed",
                 "reason": "Build verification failed",
-                "recipe": {
-                    "recipe": "org.openrewrite.java.migrate.UpgradeToJava17"
-                },
+                "recipe": {"recipe": "org.openrewrite.java.migrate.UpgradeToJava17"},
                 "verification": {"exit_code": 1, "stdout": "compilation failed"},
             }
         )

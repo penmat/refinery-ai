@@ -151,8 +151,7 @@ class ProfileRunner:
                 target_gaps = self.profile.unresolved_targets(report.snapshot)
                 if target_gaps:
                     unresolved = ", ".join(
-                        f"{gap.target} {gap.current_version or 'unknown'} -> "
-                        f"{gap.target_version}"
+                        f"{gap.target} {gap.current_version or 'unknown'} -> {gap.target_version}"
                         for gap in target_gaps
                     )
                     return self._stalled(
@@ -183,7 +182,10 @@ class ProfileRunner:
                     message="Profile run stopped because a migration failed.",
                 )
             if migration.published_revision is None:
-                return self._stalled(state, cycle, "the migration produced no published changes")
+                self.progress(
+                    "The migration produced no published changes; rechecking profile targets ..."
+                )
+                continue
             verified_checkpoint = (
                 VerifiedCheckpoint(
                     revision=migration.published_revision,

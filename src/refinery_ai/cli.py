@@ -10,7 +10,7 @@ from typing import Annotated, Literal
 
 import typer
 
-from refinery_ai.agents.migration import MigrationAgent
+from refinery_ai.agents.ai_repair import AiRepairAgent
 from refinery_ai.assessment.comparison import compare
 from refinery_ai.assessment.dependency_artifacts import write_dependency_artifact
 from refinery_ai.assessment.engine import AssessmentEngine
@@ -30,9 +30,9 @@ from refinery_ai.jdks import JdkResolver, project_runtime_java, selected_jdk
 from refinery_ai.llm import run_tool_loop
 from refinery_ai.logging import configure_logging, get_logger
 from refinery_ai.mcp import run_mcp_server
-from refinery_ai.migrations.ai_repair import AiMigrationRepairer
 from refinery_ai.migrations.deterministic_repair import DeterministicMigrationRepairer
-from refinery_ai.migrations.repair import MigrationRepairChain
+from refinery_ai.migrations.repair import MigrationRepairStage
+from refinery_ai.migrations.runner import MigrationRunner
 from refinery_ai.models import (
     MigrationRun,
     ModernizationGoal,
@@ -658,22 +658,35 @@ def migrate(
         / f"migrate-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.log"
     )
     configure_logging(logging.DEBUG, console_level=logging.WARNING, log_file=log_path)
-    repairer = (
-        DeterministicMigrationRepairer()
+    repair_stages = (
+        (
+            MigrationRepairStage(
+                "deterministic",
+                DeterministicMigrationRepairer(),
+                settings.max_deterministic_repair_attempts,
+            ),
+        )
         if settings.repair_mode is RepairMode.DISABLED
-        else MigrationRepairChain(DeterministicMigrationRepairer(), AiMigrationRepairer(settings))
+        else (
+            MigrationRepairStage(
+                "deterministic",
+                DeterministicMigrationRepairer(),
+                settings.max_deterministic_repair_attempts,
+            ),
+            MigrationRepairStage(
+                "AI",
+                AiRepairAgent(settings),
+                settings.max_repair_attempts,
+                uses_model=True,
+            ),
+        )
     )
-    result = MigrationAgent(
+    result = MigrationRunner(
         MigrationPlanStore(root, settings.state_directory),
         timeout=settings.command_timeout_seconds,
         output_limit=settings.max_output_characters,
         progress=None if json_output else typer.echo,
-        repairer=repairer,
-        max_repair_attempts=(
-            settings.max_deterministic_repair_attempts
-            if settings.repair_mode is RepairMode.DISABLED
-            else settings.max_repair_attempts
-        ),
+        repair_stages=repair_stages,
         jdk_resolver=JdkResolver(),
     ).run(
         plan_id,
@@ -808,24 +821,35 @@ def run(
             return report
 
         def migrate_cycle(plan_id: str, checkpoint: VerifiedCheckpoint | None) -> MigrationRun:
-            repairer = (
-                DeterministicMigrationRepairer()
+            repair_stages = (
+                (
+                    MigrationRepairStage(
+                        "deterministic",
+                        DeterministicMigrationRepairer(),
+                        settings.max_deterministic_repair_attempts,
+                    ),
+                )
                 if settings.repair_mode is RepairMode.DISABLED
-                else MigrationRepairChain(
-                    DeterministicMigrationRepairer(), AiMigrationRepairer(settings)
+                else (
+                    MigrationRepairStage(
+                        "deterministic",
+                        DeterministicMigrationRepairer(),
+                        settings.max_deterministic_repair_attempts,
+                    ),
+                    MigrationRepairStage(
+                        "AI",
+                        AiRepairAgent(settings),
+                        settings.max_repair_attempts,
+                        uses_model=True,
+                    ),
                 )
             )
-            return MigrationAgent(
+            return MigrationRunner(
                 MigrationPlanStore(root, settings.state_directory),
                 timeout=settings.command_timeout_seconds,
                 output_limit=settings.max_output_characters,
                 progress=typer.echo,
-                repairer=repairer,
-                max_repair_attempts=(
-                    settings.max_deterministic_repair_attempts
-                    if settings.repair_mode is RepairMode.DISABLED
-                    else settings.max_repair_attempts
-                ),
+                repair_stages=repair_stages,
                 jdk_resolver=jdk_resolver,
             ).run(
                 plan_id,

@@ -152,8 +152,8 @@ evidence tools. Type `exit` or `quit` to end the session:
 uv run refinery chat /path/to/java-project
 ```
 
-The default provider is local Ollama with `gemma4:latest`; configure it with
-`REFINERY_LITELLM_MODEL` and `REFINERY_LITELLM_API_BASE`.
+Chat uses the planner model; configure it with `REFINERY_PLANNER_MODEL` and, for Ollama,
+`REFINERY_OLLAMA_BASE_URL`.
 
 Expose the same bounded, read-only evidence catalog to any MCP client over stdio:
 
@@ -343,9 +343,9 @@ Use `--no-apply-result` to leave all verified changes isolated in their worktree
 
 Semantic repair is disabled by default. `--repair-mode local` permits a bounded repair only when
 an OpenRewrite migration leaves recognized Springfox source behind and verification fails. Local
-mode requires `REFINERY_LITELLM_API_BASE` to point to `localhost`, `127.0.0.1`, or `::1`; only the
+mode requires `REFINERY_OLLAMA_BASE_URL` to point to `localhost`, `127.0.0.1`, or `::1`; only the
 residual Java files, relevant `pom.xml` content, recipe name, and build failure are sent to that
-endpoint. `--repair-mode configured-provider` uses the configured LiteLLM provider explicitly.
+endpoint. `--repair-mode configured-provider` uses the configured Pydantic AI repair model.
 Every proposed patch is file-scoped, checked by Git, and must pass the build before checkpointing.
 
 Subsequent planning runs read the retained failed-step records as repository-specific evidence.
@@ -376,9 +376,9 @@ Settings use the `REFINERY_` prefix and may be placed in `.env`. See `.env.examp
 | Setting | Default | Purpose |
 |---|---:|---|
 | `OPENAI_API_KEY` | none | OpenAI API key loaded from the environment or `.env` |
-| `REFINERY_MODEL` | `openai:gpt-5.6-terra` | Pydantic AI planner model identifier |
-| `REFINERY_LITELLM_MODEL` | `openai/gpt-5.6-terra` | LiteLLM provider and model identifier |
-| `REFINERY_LITELLM_API_BASE` | none | Optional provider base URL; set to `http://localhost:11434` for Ollama |
+| `REFINERY_PLANNER_MODEL` | `openai:gpt-5.6-luna` | Pydantic AI planner model identifier |
+| `REFINERY_REPAIR_MODEL` | `openai:gpt-5.6-terra` | Pydantic AI repair model identifier |
+| `REFINERY_OLLAMA_BASE_URL` | none | Optional Ollama base URL, such as `http://localhost:11434` |
 | `REFINERY_OTEL_ENABLED` | `false` | Export Pydantic AI and LiteLLM telemetry over OTLP/HTTP |
 | `REFINERY_OTEL_SERVICE_NAME` | `refinery-ai` | OpenTelemetry service name |
 | `REFINERY_OTEL_ENDPOINT` | `http://localhost:4318` | OTLP/HTTP base endpoint; signal paths are added automatically |

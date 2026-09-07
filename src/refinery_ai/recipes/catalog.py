@@ -8,10 +8,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from refinery_ai.profiles import ProfileTargetGap
-from refinery_ai.recipe_sources import RecipeSource
+from refinery_ai.recipes.sources import RecipeSource
 
 MAX_RECIPE_SEARCH_RESULTS = 20
+MAX_INDEX_DESCRIPTION_CHARACTERS = 240
 
 
 class RecipeCategory(BaseModel):
@@ -25,6 +25,10 @@ class RecipeSummary(BaseModel):
     display_name: str
     description: str
     repository: str
+
+
+class RecipeIndexEntry(RecipeSummary):
+    category: str
 
 
 class RecipeDetail(RecipeSummary):
@@ -70,6 +74,23 @@ class RecipeCatalogSession:
             for (repo, category), count in sorted(counts.items())
         ]
 
+    def compact_index(self) -> list[RecipeIndexEntry]:
+        """Return a compact view of every recipe and make each entry selectable."""
+
+        self._allow(list(self._sources))
+        return [
+            RecipeIndexEntry(
+                recipe=source.recipe,
+                display_name=source.display_name,
+                description=" ".join(source.description.split())[
+                    :MAX_INDEX_DESCRIPTION_CHARACTERS
+                ],
+                repository=source.repository,
+                category=_category(source),
+            )
+            for source in self._sources
+        ]
+
     def search(
         self, query: str, repository: str | None = None, limit: int = 10
     ) -> list[RecipeSummary]:
@@ -109,40 +130,6 @@ class RecipeCatalogSession:
             recipe_list=source.recipe_list,
         )
 
-    def target_candidates(self, gaps: list[ProfileTargetGap]) -> list[RecipeSummary]:
-        """Preselect the bounded catalog path for unresolved structured targets."""
-
-        selected: list[RecipeSource] = []
-        for gap in gaps:
-            if gap.target == "java":
-                recipe = self._by_name.get(
-                    f"org.openrewrite.java.migrate.UpgradeToJava{gap.target_version}"
-                )
-                if recipe is not None:
-                    selected.append(recipe)
-                continue
-            if gap.target != "spring_boot":
-                continue
-            current = _version_pair(gap.current_version)
-            target = _version_pair(gap.target_version)
-            if target is None:
-                continue
-            for source in self._sources:
-                match = re.fullmatch(
-                    r"org\.openrewrite\.java\.spring\.boot(\d+)\."
-                    r"UpgradeSpringBoot_(\d+)_(\d+)",
-                    source.recipe,
-                )
-                if match is None:
-                    continue
-                recipe_version = (int(match.group(2)), int(match.group(3)))
-                if (current is None or recipe_version > current) and recipe_version <= target:
-                    selected.append(source)
-        selected = list({source.recipe: source for source in selected}.values())
-        selected.sort(key=lambda source: source.recipe)
-        self._allow(selected)
-        return [self._summary(source) for source in selected]
-
     def _allow(self, sources: list[RecipeSource]) -> None:
         for source in sources:
             self.allowed_recipes.add(source.recipe)
@@ -159,8 +146,3 @@ class RecipeCatalogSession:
             description=source.description,
             repository=source.repository,
         )
-
-
-def _version_pair(value: str | None) -> tuple[int, int] | None:
-    match = re.match(r"\s*(\d+)\.(\d+)", value or "")
-    return (int(match.group(1)), int(match.group(2))) if match else None

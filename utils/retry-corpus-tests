@@ -1,0 +1,3 @@
+uv run refinery run-corpus \
+  evals/corpora/refinery-java8-spring-boot-test-corpus.yaml \
+  --rerun-failed-from .refinery/corpus-runs/$1 \

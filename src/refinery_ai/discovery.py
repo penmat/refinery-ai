@@ -77,9 +77,7 @@ def deferred_datasource_initialization_properties(
                 r"spring\.jpa\.defer-datasource-initialization\s*[=:]\s*true",
                 content,
                 re.IGNORECASE,
-            ) or re.search(
-                r"defer-datasource-initialization\s*:\s*true", content, re.IGNORECASE
-            ):
+            ) or re.search(r"defer-datasource-initialization\s*:\s*true", content, re.IGNORECASE):
                 configured = True
                 break
         if not configured:
@@ -134,8 +132,7 @@ def maven_details(content: str) -> tuple[list[Dependency], str | None]:
             (
                 resolved(node.text.strip())
                 for name in ("release", "target", "source")
-                if (node := configuration.find(f"{prefix}{name}")) is not None
-                and node.text
+                if (node := configuration.find(f"{prefix}{name}")) is not None and node.text
             ),
             None,
         )
@@ -261,9 +258,18 @@ def _maven_details(path: Path) -> tuple[list[Dependency], str | None]:
 
 def _spring_boot_parent_version(path: Path) -> str | None:
     try:
-        parent = _parent_coordinates(path.read_text())
-    except (OSError, UnicodeError):
+        content = path.read_text()
+        root = ET.fromstring(content)
+    except (OSError, UnicodeError, ET.ParseError):
         return None
+    namespace = root.tag[1:].split("}", 1)[0] if root.tag.startswith("{") else ""
+    prefix = f"{{{namespace}}}" if namespace else ""
+    properties = root.find(f"{prefix}properties")
+    if properties is not None:
+        configured = _xml_text(properties, prefix, "spring-boot.version")
+        if configured:
+            return configured
+    parent = _parent_coordinates(content)
     if parent is None:
         return None
     group, artifact, version, _ = parent
@@ -309,9 +315,7 @@ def discover(repository: Path) -> DiscoverySnapshot:
     if not root.is_dir():
         raise ValueError(f"Repository does not exist: {root}")
 
-    pom_files = [
-        path for path in sorted(root.glob("**/pom.xml")) if _is_source_file(path, root)
-    ]
+    pom_files = [path for path in sorted(root.glob("**/pom.xml")) if _is_source_file(path, root)]
     gradle_files = [
         path
         for path in sorted([*root.glob("**/build.gradle"), *root.glob("**/build.gradle.kts")])

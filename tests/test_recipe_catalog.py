@@ -1,69 +1,88 @@
-import ssl
-from pathlib import Path
-
-from refinery_ai.models import ExecutionType, RecipeRecommendation
-from refinery_ai.planning_artifacts import load_planning_artifacts
-from refinery_ai.recipe_catalog import _ssl_context, parse_java_migration_catalog
+from refinery_ai.recipes.catalog import RecipeCatalogSession
+from refinery_ai.recipes.sources import RecipeSource
 
 
-def test_parses_categories_and_recipes_from_catalog_article() -> None:
-    catalog = parse_java_migration_catalog(
-        """
-        <main>
-          <h2>Categories</h2>
-          <ul><li><a href="/recipes/java/migrate/jakarta">Jakarta</a></li></ul>
-          <h2>Composite Recipes</h2>
-          <a href="/recipes/java/migrate/upgradetojava21">Migrate to Java 21</a>
-          <h2>Recipes</h2>
-          <a href="/recipes/java/migrate/upgradebuildtojava21">Upgrade build to Java 21</a>
-        </main>
-        """
+def source(recipe: str, display_name: str, description: str) -> RecipeSource:
+    return RecipeSource(
+        recipe=recipe,
+        display_name=display_name,
+        description=description,
+        repository="openrewrite/rewrite-spring",
+        file_path="src/main/resources/META-INF/rewrite/recipe.yml",
+        recipe_list=["org.openrewrite.java.migrate.UpgradeToJava17"],
     )
 
-    assert [entry.name for entry in catalog.categories] == ["Jakarta"]
-    assert [entry.name for entry in catalog.recipes] == [
-        "Migrate to Java 21",
-        "Upgrade build to Java 21",
+
+def test_search_is_bounded_and_marks_only_returned_recipes_as_allowed() -> None:
+    catalog = RecipeCatalogSession(
+        [
+            source(
+                "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_5",
+                "Migrate to Spring Boot 3.5",
+                "Upgrade Spring Boot applications.",
+            ),
+            source(
+                "org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7",
+                "Migrate to Spring Boot 2.7",
+                "Upgrade Spring Boot applications.",
+            ),
+        ]
+    )
+
+    results = catalog.search("Spring Boot", limit=1)
+
+    assert len(results) == 1
+    assert catalog.allowed_recipes == {results[0].recipe}
+    assert catalog.recipe_artifacts[results[0].recipe] == (
+        "org.openrewrite.recipe:rewrite-spring:RELEASE"
+    )
+
+
+def test_get_returns_composition_and_categories_do_not_allow_recipes() -> None:
+    recipe = source(
+        "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_5",
+        "Migrate to Spring Boot 3.5",
+        "Upgrade Spring Boot applications.",
+    )
+    catalog = RecipeCatalogSession([recipe])
+
+    categories = catalog.list_categories()
+    assert categories[0].category == "spring.boot3"
+    assert catalog.allowed_recipes == set()
+
+    detail = catalog.get(recipe.recipe)
+    assert detail is not None
+    assert detail.recipe_list == ["org.openrewrite.java.migrate.UpgradeToJava17"]
+    assert catalog.allowed_recipes == {recipe.recipe}
+
+
+def test_compact_index_exposes_every_recipe_and_makes_it_selectable() -> None:
+    recipes = [
+        source(
+            f"org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_{minor}",
+            f"Migrate to Spring Boot 3.{minor}",
+            "Upgrade Spring Boot applications.",
+        )
+        for minor in range(4)
     ]
-    context = catalog.planning_context()
-    assert "Categories:\n- Jakarta" in context
-    assert "Recipes:\n- [Composite Recipes] Migrate to Java 21" in context
-    assert not context.lstrip().startswith("{")
+    catalog = RecipeCatalogSession(recipes)
+
+    candidates = catalog.compact_index()
+
+    assert [candidate.recipe for candidate in candidates] == [
+        "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0",
+        "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_1",
+        "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2",
+        "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_3",
+    ]
+    assert {candidate.category for candidate in candidates} == {"spring.boot3"}
+    assert catalog.allowed_recipes == {candidate.recipe for candidate in candidates}
 
 
-def test_planning_artifacts_include_summary_assessment_and_osv(tmp_path: Path) -> None:
-    refinery = tmp_path / ".refinery"
-    (refinery / "dependencies").mkdir(parents=True)
-    (refinery / "summary.md").write_text("Java 11 project")
-    (refinery / "assessment.json").write_text('{"runtime":{"java":11}}')
-    (refinery / "dependencies/osv-findings-a.json").write_text('{"findings":[]}')
+def test_compact_index_bounds_and_flattens_descriptions() -> None:
+    recipe = source("example.Recipe", "Example", "first line\n" + "x" * 300)
 
-    context = load_planning_artifacts(tmp_path, Path(".refinery"), 10_000)
+    entry = RecipeCatalogSession([recipe]).compact_index()[0]
 
-    assert "summary.md" in context
-    assert "assessment.json" in context
-    assert "osv-findings-a.json" in context
-
-
-def test_recipe_recommendations_identify_the_execution_type() -> None:
-    recommendation = RecipeRecommendation(
-        recipe="org.openrewrite.java.migrate.UpgradeToJava21",
-        reason="The project targets Java 11.",
-        evidence=["pom.xml maven.compiler.release=11"],
-        expected_benefit="Moves the project to the requested Java baseline.",
-        priority="high",
-        confidence=0.98,
-    )
-
-    assert recommendation.execution_type is ExecutionType.OPENREWRITE
-    assert recommendation.model_dump(mode="json")["execution_type"] == "openrewrite"
-
-
-def test_catalog_ssl_verification_can_be_explicitly_disabled() -> None:
-    verified = _ssl_context(True)
-    insecure = _ssl_context(False)
-
-    assert verified.verify_mode is ssl.CERT_REQUIRED
-    assert verified.check_hostname is True
-    assert insecure.verify_mode is ssl.CERT_NONE
-    assert insecure.check_hostname is False
+    assert "\n" not in entry.description
+    assert len(entry.description) == 240

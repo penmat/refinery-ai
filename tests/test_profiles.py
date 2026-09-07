@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from refinery_ai.agents.migration import MigrationAgent
+from refinery_ai.migrations.runner import MigrationRunner
 from refinery_ai.models import (
     BuildSystem,
     DiscoverySnapshot,
@@ -78,7 +78,7 @@ def test_migration_rejects_plan_from_another_profile(tmp_path: Path) -> None:
     (store.root / "plan1.json").write_text(plan.model_dump_json())
 
     with pytest.raises(ValueError, match="requested profile"):
-        MigrationAgent(store).run(expected_profile="another-profile")
+        MigrationRunner(store).run(expected_profile="another-profile")
 
 
 def test_unknown_profile_is_actionable() -> None:

@@ -53,8 +53,8 @@ def test_run_tool_loop_executes_tools_until_final_answer() -> None:
         [add],
         max_turns=3,
         settings=Settings(
-            litellm_model="ollama_chat/llama3.1:8b",
-            litellm_api_base="http://ollama.test:11434",
+            planner_model="ollama:llama3.1:8b",
+            ollama_base_url="http://ollama.test:11434",
         ),
         completion_fn=fake_completion,
     )
@@ -82,8 +82,8 @@ def test_run_tool_loop_passes_openai_key_without_an_api_base() -> None:
         [{"role": "user", "prompt": "Plan it"}],
         settings=Settings(
             OPENAI_API_KEY="test-key",
-            litellm_model="openai/gpt-5.6-terra",
-            litellm_api_base=None,
+            planner_model="openai:gpt-5.6-terra",
+            ollama_base_url=None,
         ),
         completion_fn=fake_completion,
     )

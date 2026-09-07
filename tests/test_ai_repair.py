@@ -1,10 +1,12 @@
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
+from pydantic_ai import Agent
+from pydantic_ai.models.test import TestModel
 
+from refinery_ai.agents.ai_repair import AiRepairAgent
 from refinery_ai.config import Settings
-from refinery_ai.migrations.ai_repair import AiMigrationRepairer
+from refinery_ai.migrations.ai_repair import AiMigrationRepairer, _ai_repair_files
 from refinery_ai.migrations.deterministic_repair import (
     DeterministicMigrationRepairer,
     configure_boot3_test_compatibility,
@@ -29,44 +31,46 @@ def test_local_repair_requires_loopback_endpoint() -> None:
         AiMigrationRepairer(
             Settings(
                 repair_mode=RepairMode.LOCAL,
-                litellm_api_base="https://models.example.com/v1",
+                ollama_base_url="https://models.example.com/v1",
             )
         )
 
 
-def test_repair_chain_uses_ai_after_deterministic_rules_do_not_match(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_repair_chain_uses_ai_after_deterministic_rules_do_not_match(tmp_path: Path) -> None:
     source = tmp_path / "src/main/java/SwaggerConfiguration.java"
     source.parent.mkdir(parents=True)
     source.write_text("import springfox.documentation.spring.web.plugins.Docket;\n")
-    response = SimpleNamespace(
-        content=(
-            '{"diagnosis":"Springfox remains","summary":"Converted Docket",'
-            '"files":[{"path":"src/main/java/SwaggerConfiguration.java",'
-            '"content":"class SwaggerConfiguration {}\\n"}]}'
-        )
+    model = TestModel(
+        custom_output_args={
+            "diagnosis": "Springfox remains",
+            "summary": "Converted Docket",
+            "files": [
+                {
+                    "path": "src/main/java/SwaggerConfiguration.java",
+                    "content": "class SwaggerConfiguration {}\n",
+                }
+            ],
+        }
     )
-    monkeypatch.setattr(
-        "refinery_ai.migrations.ai_repair.run_tool_loop", lambda *args, **kwargs: response
-    )
+    ai_repair = AiRepairAgent(Settings(repair_mode=RepairMode.CONFIGURED_PROVIDER))
     repairer = MigrationRepairChain(
         DeterministicMigrationRepairer(),
-        AiMigrationRepairer(Settings(repair_mode=RepairMode.CONFIGURED_PROVIDER)),
+        ai_repair,
     )
 
-    result = repairer.repair(
-        tmp_path,
-        RecipeRecommendation(
-            recipe="org.openrewrite.java.springdoc.SpringFoxToSpringDoc",
-            reason="convert",
-            evidence=["springfox"],
-            expected_benefit="springdoc",
-            priority="high",
-            confidence=1,
-        ),
-        VerificationResult(command=["mvn", "test"], exit_code=1, duration_seconds=0),
-    )
+    with ai_repair.override(model=model):
+        result = repairer.repair(
+            tmp_path,
+            RecipeRecommendation(
+                recipe="org.openrewrite.java.springdoc.SpringFoxToSpringDoc",
+                reason="convert",
+                evidence=["springfox"],
+                expected_benefit="springdoc",
+                priority="high",
+                confidence=1,
+            ),
+            VerificationResult(command=["mvn", "test"], exit_code=1, duration_seconds=0),
+        )
 
     assert result.green
     assert result.stdout == "Converted Docket"
@@ -82,21 +86,29 @@ def test_springdoc_repair_scope_contains_only_residual_java(tmp_path: Path) -> N
     assert springdoc_repair_files(tmp_path) == (Path("src/main/java/SwaggerConfiguration.java"),)
 
 
-def test_ai_repair_uses_scoped_full_file_replacement(tmp_path: Path, monkeypatch) -> None:
+def test_ai_repair_is_a_pydantic_ai_agent() -> None:
+    assert isinstance(
+        AiRepairAgent(Settings(repair_mode=RepairMode.CONFIGURED_PROVIDER)), Agent
+    )
+
+
+def test_ai_repair_uses_scoped_full_file_replacement(tmp_path: Path) -> None:
     source = tmp_path / "src/main/java/SwaggerConfiguration.java"
     source.parent.mkdir(parents=True)
     source.write_text("import springfox.documentation.spring.web.plugins.Docket;\n")
-    response = SimpleNamespace(
-        content=(
-            '{"diagnosis":"Springfox remains","summary":"Converted Docket",'
-            '"files":[{"path":"src/main/java/SwaggerConfiguration.java",'
-            '"content":"class SwaggerConfiguration {}\\n"}]}'
-        )
+    model = TestModel(
+        custom_output_args={
+            "diagnosis": "Springfox remains",
+            "summary": "Converted Docket",
+            "files": [
+                {
+                    "path": "src/main/java/SwaggerConfiguration.java",
+                    "content": "class SwaggerConfiguration {}\n",
+                }
+            ],
+        }
     )
-    monkeypatch.setattr(
-        "refinery_ai.migrations.ai_repair.run_tool_loop", lambda *args, **kwargs: response
-    )
-    repairer = AiMigrationRepairer(Settings(repair_mode=RepairMode.CONFIGURED_PROVIDER))
+    repairer = AiRepairAgent(Settings(repair_mode=RepairMode.CONFIGURED_PROVIDER))
     step = RecipeRecommendation(
         recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7",
         reason="Upgrade Boot.",
@@ -106,14 +118,105 @@ def test_ai_repair_uses_scoped_full_file_replacement(tmp_path: Path, monkeypatch
         confidence=1,
     )
 
-    result = repairer.repair(
-        tmp_path,
-        step,
-        VerificationResult(command=["mvn", "test"], exit_code=1, duration_seconds=0),
-    )
+    with repairer.override(model=model):
+        result = repairer.repair(
+            tmp_path,
+            step,
+            VerificationResult(command=["mvn", "test"], exit_code=1, duration_seconds=0),
+        )
 
     assert result.green
     assert source.read_text() == "class SwaggerConfiguration {}\n"
+
+
+def test_ai_repair_scope_uses_diagnostic_source_and_module_build_files(tmp_path: Path) -> None:
+    source = tmp_path / "module/src/main/java/example/App.java"
+    source.parent.mkdir(parents=True)
+    source.write_text("class App {}\n")
+    (tmp_path / "pom.xml").write_text("<project/>\n")
+    (tmp_path / "module/pom.xml").write_text("<project/>\n")
+
+    allowed = _ai_repair_files(
+        tmp_path,
+        RecipeRecommendation(
+            recipe="org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0",
+            reason="Upgrade Boot.",
+            evidence=["boot"],
+            expected_benefit="Boot 3.",
+            priority="high",
+            confidence=1,
+        ),
+        VerificationResult(
+            command=["mvn", "test"],
+            exit_code=1,
+            stdout=f"[ERROR] {source}:[10,2] cannot find symbol",
+            duration_seconds=0,
+        ),
+    )
+
+    assert allowed == (
+        Path("module/pom.xml"),
+        Path("module/src/main/java/example/App.java"),
+        Path("pom.xml"),
+    )
+
+
+def test_ai_repair_scope_finds_same_missing_symbol_across_modules(tmp_path: Path) -> None:
+    first = tmp_path / "one/src/main/java/example/First.java"
+    second = tmp_path / "two/src/main/java/example/Second.java"
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True)
+    first.write_text("@EnableEurekaClient class First {}\n")
+    second.write_text("@EnableEurekaClient class Second {}\n")
+    (tmp_path / "pom.xml").write_text("<project/>\n")
+
+    allowed = _ai_repair_files(
+        tmp_path,
+        RecipeRecommendation(
+            recipe="org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0",
+            reason="Upgrade Boot.",
+            evidence=["boot"],
+            expected_benefit="Boot 3.",
+            priority="high",
+            confidence=1,
+        ),
+        VerificationResult(
+            command=["mvn", "test"],
+            exit_code=1,
+            stdout=f"[ERROR] {first}:[1,1] cannot find symbol\nsymbol: class EnableEurekaClient",
+            duration_seconds=0,
+        ),
+    )
+
+    assert Path("one/src/main/java/example/First.java") in allowed
+    assert Path("two/src/main/java/example/Second.java") in allowed
+
+
+def test_ai_repair_scope_includes_openapi_contract_for_springdoc(tmp_path: Path) -> None:
+    contract = tmp_path / "src/main/resources/api-docs.yml"
+    contract.parent.mkdir(parents=True)
+    contract.write_text("openapi: 3.0.0\n")
+    (tmp_path / "pom.xml").write_text("<project/>\n")
+
+    allowed = _ai_repair_files(
+        tmp_path,
+        RecipeRecommendation(
+            recipe="org.openrewrite.java.springdoc.SpringFoxToSpringDoc",
+            reason="Replace Springfox.",
+            evidence=["springfox"],
+            expected_benefit="Use Springdoc.",
+            priority="high",
+            confidence=1,
+        ),
+        VerificationResult(
+            command=["mvn", "test"],
+            exit_code=1,
+            stdout="Status expected:<400> but was:<201>",
+            duration_seconds=0,
+        ),
+    )
+
+    assert allowed == (Path("pom.xml"), Path("src/main/resources/api-docs.yml"))
 
 
 def test_springdoc_repair_configures_generated_openapi_annotations(tmp_path: Path) -> None:

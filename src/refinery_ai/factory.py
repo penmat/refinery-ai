@@ -12,7 +12,6 @@ from refinery_ai.agents.planning import (
     create_planning_agent,
     planning_payload_metrics,
 )
-from refinery_ai.agents.recipe_catalog import RecipeCatalogSession
 from refinery_ai.config import Settings
 from refinery_ai.context_graph.contracts import ContextGraphBuildService
 from refinery_ai.context_graph.models import ContextGraphInfo
@@ -43,7 +42,8 @@ from refinery_ai.planning_artifacts import (
     load_planning_artifacts,
 )
 from refinery_ai.profiles import ModernizationProfile
-from refinery_ai.recipe_sources import RecipeSource, fetch_recipe_sources
+from refinery_ai.recipes.catalog import RecipeCatalogSession
+from refinery_ai.recipes.sources import RecipeSource, fetch_recipe_sources
 from refinery_ai.reporting import to_markdown
 from refinery_ai.repository import RepositoryEnvironment
 from refinery_ai.telemetry import run_observed_agent
@@ -278,8 +278,6 @@ class ModernizationFactory:
                 if profile is None or profile.permits(source.recipe)
             ]
             recipe_catalog = RecipeCatalogSession(permitted_recipe_sources)
-            target_gaps = profile.unresolved_targets(snapshot) if profile is not None else []
-            target_candidates = recipe_catalog.target_candidates(target_gaps)
             graph_context = (
                 environment.query_context(
                     graph.graph_path,
@@ -311,8 +309,8 @@ class ModernizationFactory:
                 )
             )
             planner = create_planning_agent(
-                self.settings.model,
-                ollama_base_url=self.settings.litellm_api_base,
+                self.settings.planner_model,
+                ollama_base_url=self.settings.ollama_base_url,
                 openai_api_key=(
                     self.settings.openai_api_key.get_secret_value()
                     if self.settings.openai_api_key
@@ -336,8 +334,6 @@ class ModernizationFactory:
                 failed_recipes=failed_recipes,
                 completed_recipes=migration_failures.completed_recipes,
                 recipe_catalog=recipe_catalog,
-                target_gaps=target_gaps,
-                target_candidates=target_candidates,
                 evidence_corpus=evidence_corpus,
             )
             payload_metrics = planning_payload_metrics(planner_prompt, planning_deps)
@@ -360,7 +356,7 @@ class ModernizationFactory:
                 phase="planning",
                 run_id=run_id,
                 plan_id=run_id,
-                model=self.settings.model,
+                model=self.settings.planner_model,
             )
             plan = _with_deterministic_prerequisites(result.output, snapshot)
             if profile is not None:
@@ -572,8 +568,6 @@ def _with_datasource_initialization_prerequisite(
 def _with_deterministic_prerequisites(
     plan: RecipePlan, snapshot: DiscoverySnapshot
 ) -> RecipePlan:
-    plan = _with_boot_bridge_before_java17(plan, snapshot)
-    plan = _with_boot_minor_staging(plan, snapshot)
     plan = _with_springfox_before_boot27(plan, snapshot)
     plan = _with_boot3_before_jakarta(plan, snapshot)
     plan = _with_boot3_before_springdoc2(plan, snapshot)
@@ -581,110 +575,6 @@ def _with_deterministic_prerequisites(
     plan = _with_boot2_before_validation_starter(plan)
     plan = _with_datasource_initialization_prerequisite(plan, snapshot)
     return _with_utf8_prerequisite(plan, snapshot)
-
-
-def _with_boot_bridge_before_java17(
-    plan: RecipePlan, snapshot: DiscoverySnapshot
-) -> RecipePlan:
-    """Replace a premature Java 17 upgrade with the next old-Boot bridge."""
-
-    match = re.match(r"\s*(\d+)\.(\d+)", snapshot.spring_boot_version or "")
-    if match is None:
-        return plan
-    major, minor = (int(part) for part in match.groups())
-    if major > 2 or (major == 2 and minor >= 7):
-        return plan
-    java17 = next(
-        (
-            item
-            for item in plan.recommendations
-            if item.recipe == "org.openrewrite.java.migrate.UpgradeToJava17"
-        ),
-        None,
-    )
-    has_boot_upgrade = any("UpgradeSpringBoot" in item.recipe for item in plan.recommendations)
-    if java17 is None or has_boot_upgrade:
-        return plan
-    next_minor = 0 if major < 2 else minor + 1
-    return RecipePlan(
-        recommendations=[
-            java17.model_copy(
-                update={
-                    "recipe": (
-                        "org.openrewrite.java.spring.boot2."
-                        f"UpgradeSpringBoot_2_{next_minor}"
-                    ),
-                    "recipe_artifact": "org.openrewrite.recipe:rewrite-spring:RELEASE",
-                    "reason": (
-                        f"Spring Boot {snapshot.spring_boot_version} must advance through "
-                        f"the Spring Boot 2.{next_minor} compatibility boundary before Java 17."
-                    ),
-                    "expected_benefit": (
-                        "Keeps Spring Framework bytecode support compatible while staging "
-                        "the application toward Java 17."
-                    ),
-                    "depends_on": [],
-                    "confidence": 1,
-                }
-            )
-        ]
-    )
-
-
-def _with_boot_minor_staging(
-    plan: RecipePlan, snapshot: DiscoverySnapshot
-) -> RecipePlan:
-    """Advance Spring Boot applications one compatibility boundary per profile cycle."""
-
-    match = re.match(r"\s*(\d+)\.(\d+)", snapshot.spring_boot_version or "")
-    if match is None:
-        return plan
-    major, minor = (int(part) for part in match.groups())
-    if major > 3 or (major == 3 and minor >= 2):
-        return plan
-    requested = next(
-        (
-            item
-            for item in plan.recommendations
-            if re.fullmatch(
-                r"org\.openrewrite\.java\.spring\.boot[23]\.UpgradeSpringBoot_[23]_[0-7]",
-                item.recipe,
-            )
-        ),
-        None,
-    )
-    if requested is None:
-        return plan
-    if major < 2:
-        bridge_major, bridge_minor = 2, 0
-    elif major == 2 and minor < 7:
-        bridge_major, bridge_minor = 2, minor + 1
-    elif major == 2:
-        bridge_major, bridge_minor = 3, 0
-    else:
-        bridge_major, bridge_minor = 3, minor + 1
-    bridge_recipe = (
-        f"org.openrewrite.java.spring.boot{bridge_major}."
-        f"UpgradeSpringBoot_{bridge_major}_{bridge_minor}"
-    )
-    if requested.recipe == bridge_recipe and len(plan.recommendations) == 1:
-        return plan
-    bridge = requested.model_copy(
-        update={
-            "recipe": bridge_recipe,
-            "recipe_artifact": "org.openrewrite.recipe:rewrite-spring:RELEASE",
-            "reason": (
-                f"Spring Boot {snapshot.spring_boot_version} must advance through "
-                f"the Spring Boot {bridge_major}.{bridge_minor} compatibility boundary first."
-            ),
-            "expected_benefit": (
-                "Applies a bounded Spring Boot bridge before later profile upgrades."
-            ),
-            "depends_on": [],
-            "confidence": 1,
-        }
-    )
-    return RecipePlan(recommendations=[bridge])
 
 
 def _with_springfox_before_boot27(

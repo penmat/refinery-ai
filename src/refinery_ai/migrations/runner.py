@@ -1,15 +1,12 @@
-"""Migration agents: deterministic plan dispatch and scoped AI patch proposals."""
+"""Deterministic migration plan orchestration and verified publication."""
 
 from __future__ import annotations
 
 import json
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
-
-from pydantic_ai import Agent, RunContext
 
 from refinery_ai.jdks import (
     JdkResolver,
@@ -20,7 +17,7 @@ from refinery_ai.jdks import (
 from refinery_ai.migrations.contracts import MigrationTypeRunner
 from refinery_ai.migrations.deterministic_repair import springdoc_repair_applicable
 from refinery_ai.migrations.openrewrite import OpenRewriteMigrationRunner
-from refinery_ai.migrations.repair import MigrationRepairer
+from refinery_ai.migrations.repair import MigrationRepairer, MigrationRepairStage
 from refinery_ai.migrations.spring_properties import (
     DEFER_DATASOURCE_INITIALIZATION_RECIPE,
     SpringPropertiesMigrationRunner,
@@ -34,7 +31,6 @@ from refinery_ai.models import (
     DiscoverySnapshot,
     ExecutionType,
     MigrationRun,
-    PatchProposal,
     RunStatus,
     StepResult,
     VerificationResult,
@@ -44,7 +40,7 @@ from refinery_ai.telemetry import observe_llm
 from refinery_ai.verification import verification_command, verify
 
 
-class MigrationAgent:
+class MigrationRunner:
     """Load a persisted plan and dispatch each step by its execution type."""
 
     def __init__(
@@ -60,6 +56,7 @@ class MigrationAgent:
         worktree_factory: type[GitWorktreeManager] = GitWorktreeManager,
         repairer: MigrationRepairer | None = None,
         max_repair_attempts: int = 1,
+        repair_stages: tuple[MigrationRepairStage, ...] | None = None,
         jdk_resolver: JdkResolver | None = None,
     ) -> None:
         self.store = store
@@ -76,6 +73,7 @@ class MigrationAgent:
         self.worktree_factory = worktree_factory
         self.repairer = repairer
         self.max_repair_attempts = max_repair_attempts
+        self.repair_stages = repair_stages
         self.jdk_resolver = jdk_resolver
         self._jdk_environments: dict[int, dict[str, str]] = {}
 
@@ -316,38 +314,61 @@ class MigrationAgent:
                     output_limit=self.output_limit,
                     environment=self._jdk_environment(current_java),
                 )
-                while (
-                    not build_result.green
-                    and self.repairer is not None
-                    and workspace is not None
-                    and len(repairs) < self.max_repair_attempts
-                    and springdoc_repair_applicable(workspace.path, build_result)
-                ):
-                    attempt = len(repairs) + 1
-                    self.progress(
-                        f"Attempting local/scoped repair {attempt}/"
-                        f"{self.max_repair_attempts}: {label}"
+                stages = self.repair_stages
+                if stages is None and self.repairer is not None:
+                    stages = (
+                        MigrationRepairStage(
+                            name="repair",
+                            repairer=self.repairer,
+                            max_attempts=self.max_repair_attempts,
+                        ),
                     )
-                    with observe_llm(
-                        "repair",
-                        run_id=run_id,
-                        plan_id=plan.plan_id,
-                        repair_attempt=attempt,
-                    ):
-                        repair = self.repairer.repair(workspace.path, step, build_result)
-                    repairs.append(repair)
-                    if not repair.green:
-                        detail = repair.stderr.strip() or "no diagnostic was returned"
-                        self.progress(f"Repair attempt {attempt} failed: {detail}")
+                for stage in stages or ():
+                    for attempt in range(1, stage.max_attempts + 1):
+                        if (
+                            build_result.green
+                            or workspace is None
+                            or (
+                                not stage.uses_model
+                                and not springdoc_repair_applicable(workspace.path, build_result)
+                            )
+                        ):
+                            break
+                        self.progress(
+                            f"Attempting {stage.name} repair {attempt}/"
+                            f"{stage.max_attempts}: {label}"
+                        )
+                        if stage.uses_model:
+                            with observe_llm(
+                                "repair",
+                                run_id=run_id,
+                                plan_id=plan.plan_id,
+                                repair_attempt=attempt,
+                            ):
+                                repair = stage.repairer.repair(workspace.path, step, build_result)
+                        else:
+                            repair = stage.repairer.repair(workspace.path, step, build_result)
+                        repair = repair.model_copy(
+                            update={"command": ["refinery", f"{stage.name.lower()}-repair"]}
+                        )
+                        repairs.append(repair)
+                        if not repair.green:
+                            detail = repair.stderr.strip() or "no diagnostic was returned"
+                            self.progress(
+                                f"{stage.name.capitalize()} repair attempt {attempt} "
+                                f"did not apply: {detail}"
+                            )
+                            break
+                        self.progress(f"Verifying {stage.name} repair {attempt}: {label}")
+                        build_result = self.build_verifier(
+                            Path(step_snapshot.repository),
+                            command,
+                            timeout=self.timeout,
+                            output_limit=self.output_limit,
+                            environment=self._jdk_environment(current_java),
+                        )
+                    if build_result.green:
                         break
-                    self.progress(f"Verifying repair {attempt}: {label}")
-                    build_result = self.build_verifier(
-                        Path(step_snapshot.repository),
-                        command,
-                        timeout=self.timeout,
-                        output_limit=self.output_limit,
-                        environment=self._jdk_environment(current_java),
-                    )
                 if not build_result.green:
                     self.progress(f"Migration {index}/{total} failed verification: {label}")
                     failure_artifacts = None
@@ -464,29 +485,3 @@ def migration_display_name(recipe: str) -> str:
         return f"Upgrade to Java {upgrade.group(1)}"
     words = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name)
     return words.replace(" To ", " → ")
-
-
-@dataclass(frozen=True)
-class MigrationDependencies:
-    snapshot: DiscoverySnapshot
-    allowed_files: tuple[str, ...]
-
-
-def create_migration_agent(model: str) -> Agent[MigrationDependencies, PatchProposal]:
-    """Create a migration agent that proposes, but never applies, a unified diff."""
-
-    agent: Agent[MigrationDependencies, PatchProposal] = Agent(
-        model,
-        deps_type=MigrationDependencies,
-        output_type=PatchProposal,
-        system_prompt=(
-            "Propose the smallest correct unified diff for the assigned migration step. "
-            "Only touch explicitly allowed files. Do not weaken tests or add unrelated changes."
-        ),
-    )
-
-    @agent.instructions
-    def migration_scope(ctx: RunContext[MigrationDependencies]) -> str:
-        return f"Allowed files: {', '.join(ctx.deps.allowed_files)}"
-
-    return agent

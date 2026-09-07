@@ -147,20 +147,26 @@ def test_profile_runner_reruns_sonar_after_dependency_change(tmp_path: Path) -> 
     assert analyses == [False, False]
 
 
-def test_profile_runner_stops_when_migration_makes_no_change(tmp_path: Path) -> None:
+def test_profile_runner_rechecks_targets_when_migration_makes_no_change(tmp_path: Path) -> None:
+    plans = iter(
+        [
+            report(tmp_path, "plan-1", ["example.Upgrade"]),
+            report(tmp_path, "complete", []),
+        ]
+    )
     result = ProfileRunner(
         tmp_path,
         load_profile("spring-boot-3.2-java-17"),
         analyze=lambda run_sonar: True,
-        plan=lambda: report(tmp_path, "plan-1", ["example.Upgrade"]),
+        plan=lambda: next(plans),
         migrate=lambda plan_id, checkpoint: MigrationRun(
             plan_id=plan_id,
             status=RunStatus.COMPLETED,
         ),
     ).run()
 
-    assert result.status is RunStatus.NEEDS_REVIEW
-    assert "no published changes" in result.message
+    assert result.status is RunStatus.COMPLETED
+    assert result.cycles == 2
 
 
 def test_profile_runner_does_not_complete_with_unsatisfied_structured_target(

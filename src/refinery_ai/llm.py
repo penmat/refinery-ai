@@ -141,6 +141,7 @@ def run_tool_loop(
         raise ValueError("max_turns must be at least 1")
 
     config = settings or Settings()
+    model = _litellm_model_name(config.planner_model)
     history: list[dict[str, Any]] = []
     for message in messages:
         role = message.get("role")
@@ -157,19 +158,19 @@ def run_tool_loop(
     last_response: Any = None
     for turn in range(1, max_turns + 1):
         request: dict[str, Any] = {
-            "model": config.litellm_model,
+            "model": model,
             "messages": list(history),
         }
-        if config.litellm_api_base:
-            request["api_base"] = config.litellm_api_base
-        if config.openai_api_key and config.litellm_model.startswith("openai/"):
+        if config.ollama_base_url:
+            request["api_base"] = config.ollama_base_url
+        if config.openai_api_key and model.startswith("openai/"):
             request["api_key"] = config.openai_api_key.get_secret_value()
         if definitions:
             request["tools"] = definitions
         last_response = completion_fn(**request)
         record_llm_usage(
             _message_value(last_response, "usage"),
-            model=_message_value(last_response, "model", config.litellm_model),
+            model=_message_value(last_response, "model", model),
         )
         response_message = last_response.choices[0].message
         content = _message_value(response_message, "content")
@@ -222,3 +223,13 @@ def run_tool_loop(
             )
 
     raise MaxTurnsExceeded(max_turns, history)
+
+
+def _litellm_model_name(model: str) -> str:
+    """Translate Pydantic AI's explicit provider syntax for the legacy chat command."""
+
+    if model.startswith("openai:"):
+        return f"openai/{model.removeprefix('openai:')}"
+    if model.startswith("ollama:"):
+        return f"ollama_chat/{model.removeprefix('ollama:')}"
+    return model

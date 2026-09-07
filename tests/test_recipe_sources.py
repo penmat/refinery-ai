@@ -1,14 +1,25 @@
 import io
+import ssl
 from pathlib import Path
 from urllib.error import HTTPError
 
-import refinery_ai.recipe_sources as recipe_sources_module
-from refinery_ai.recipe_sources import (
+import refinery_ai.recipes.sources as recipe_sources_module
+from refinery_ai.recipes.sources import (
     RECIPE_REPOSITORIES,
     RecipeSource,
+    _ssl_context,
     fetch_recipe_sources,
     parse_recipe_yaml,
 )
+
+
+def test_recipe_source_ssl_context_can_disable_verification() -> None:
+    verified = _ssl_context(True)
+    insecure = _ssl_context(False)
+
+    assert verified.verify_mode == ssl.CERT_REQUIRED
+    assert insecure.verify_mode == ssl.CERT_NONE
+    assert insecure.check_hostname is False
 
 
 def test_parse_recipe_yaml_builds_planner_objects_with_source_paths() -> None:

@@ -52,9 +52,7 @@ def test_discovers_repository_beneath_ignored_parent_directory(tmp_path: Path) -
     )
     ignored = repository / ".refinery/copied-project"
     ignored.mkdir(parents=True)
-    (ignored / "pom.xml").write_text(
-        "<project><modelVersion>4.0.0</modelVersion></project>"
-    )
+    (ignored / "pom.xml").write_text("<project><modelVersion>4.0.0</modelVersion></project>")
 
     result = discover(repository)
 
@@ -78,16 +76,24 @@ def test_discovers_spring_boot_parent_version(tmp_path: Path) -> None:
     assert result.spring_boot_version == "2.1.6.RELEASE"
 
 
+def test_discovers_spring_boot_version_property_without_boot_parent(tmp_path: Path) -> None:
+    (tmp_path / "pom.xml").write_text(
+        """<project><modelVersion>4.0.0</modelVersion>
+        <properties><java.version>17</java.version>
+        <spring-boot.version>3.2.0</spring-boot.version></properties></project>"""
+    )
+
+    result = discover(tmp_path)
+
+    assert result.spring_boot_version == "3.2.0"
+
+
 def test_discovers_non_utf8_application_properties(tmp_path: Path) -> None:
     resources = tmp_path / "src/main/resources"
     resources.mkdir(parents=True)
-    (resources / "application.properties").write_bytes(
-        "# Interface Gráfica\n".encode("iso-8859-1")
-    )
+    (resources / "application.properties").write_bytes("# Interface Gráfica\n".encode("iso-8859-1"))
     (resources / "application-test.properties").write_text("feature.enabled=true\n")
-    (tmp_path / "pom.xml").write_text(
-        "<project><modelVersion>4.0.0</modelVersion></project>"
-    )
+    (tmp_path / "pom.xml").write_text("<project><modelVersion>4.0.0</modelVersion></project>")
 
     result = discover(tmp_path)
 
@@ -134,9 +140,7 @@ def test_resolves_java_version_from_maven_central_parent(tmp_path: Path) -> None
         calls.append((group, artifact, version))
         return parent
 
-    version = resolve_parent_java_version(
-        tmp_path / "pom.xml", child, fetch_parent=fetch
-    )
+    version = resolve_parent_java_version(tmp_path / "pom.xml", child, fetch_parent=fetch)
 
     assert version == "8"
     assert calls == [("example.parents", "application-parent", "1.2.3")]

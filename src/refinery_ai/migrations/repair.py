@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -15,6 +16,16 @@ class MigrationRepairer(Protocol):
         step: RecipeRecommendation,
         failure: VerificationResult,
     ) -> VerificationResult: ...
+
+
+@dataclass(frozen=True)
+class MigrationRepairStage:
+    """One independently budgeted migration-repair strategy."""
+
+    name: str
+    repairer: MigrationRepairer
+    max_attempts: int
+    uses_model: bool = False
 
 
 class MigrationRepairChain:
@@ -37,9 +48,7 @@ class MigrationRepairChain:
         return result
 
 
-def repair_result(
-    exit_code: int, stderr: str = "", stdout: str = ""
-) -> VerificationResult:
+def repair_result(exit_code: int, stderr: str = "", stdout: str = "") -> VerificationResult:
     return VerificationResult(
         command=["refinery", "ai-repair"],
         exit_code=exit_code,

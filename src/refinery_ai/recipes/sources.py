@@ -17,8 +17,6 @@ from urllib.request import Request, urlopen
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field
 
-from refinery_ai.recipe_catalog import _ssl_context
-
 RECIPE_SOURCE_PREFIX = "src/main/resources/META-INF/rewrite/"
 RECIPE_REPOSITORIES = (
     "openrewrite/rewrite-migrate-java",
@@ -26,6 +24,19 @@ RECIPE_REPOSITORIES = (
 )
 TRANSIENT_HTTP_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 RECIPE_CACHE_SCHEMA_VERSION = 2
+
+
+def _ssl_context(verify_ssl: bool) -> ssl.SSLContext:
+    if verify_ssl:
+        try:
+            import certifi
+        except ImportError:
+            return ssl.create_default_context()
+        return ssl.create_default_context(cafile=certifi.where())
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
 
 
 class RecipeSource(BaseModel):

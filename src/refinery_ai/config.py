@@ -13,9 +13,9 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="REFINERY_", env_file=".env", extra="ignore")
 
-    model: str = "openai:gpt-5.6-terra"
-    litellm_model: str = "openai/gpt-5.6-terra"
-    litellm_api_base: str | None = None
+    planner_model: str = "openai:gpt-5.6-luna"
+    repair_model: str = "openai:gpt-5.6-terra"
+    ollama_base_url: str | None = None
     openai_api_key: SecretStr | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     otel_enabled: bool = False
     otel_service_name: str = "refinery-ai"
@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     otel_include_content: bool = False
     state_directory: Path = Path(".refinery")
     max_repair_attempts: int = 3
-    max_deterministic_repair_attempts: int = 4
+    max_deterministic_repair_attempts: int = 3
     repair_mode: RepairMode = RepairMode.DISABLED
     command_timeout_seconds: int = 900
     codegraph_timeout_seconds: int = 900

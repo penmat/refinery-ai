@@ -2,8 +2,9 @@ import os
 import subprocess
 from pathlib import Path
 
-from refinery_ai.agents.migration import MigrationAgent, migration_display_name
 from refinery_ai.migrations.openrewrite import _infer_recipe_artifact
+from refinery_ai.migrations.repair import MigrationRepairStage
+from refinery_ai.migrations.runner import MigrationRunner, migration_display_name
 from refinery_ai.models import (
     BuildSystem,
     DiscoverySnapshot,
@@ -44,7 +45,7 @@ def initialize_git_repository(path: Path) -> None:
     subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=path, env=env, check=True)
 
 
-def test_migration_agent_loads_latest_plan_and_dispatches_by_type(tmp_path: Path) -> None:
+def test_migration_runner_loads_latest_plan_and_dispatches_by_type(tmp_path: Path) -> None:
     initialize_git_repository(tmp_path)
     store = MigrationPlanStore(tmp_path)
     store.root.mkdir(parents=True)
@@ -70,7 +71,7 @@ def test_migration_agent_loads_latest_plan_and_dispatches_by_type(tmp_path: Path
         builds.append(command)
         return VerificationResult(command=command, exit_code=0, duration_seconds=0)
 
-    result = MigrationAgent(
+    result = MigrationRunner(
         store,
         runners={ExecutionType.OPENREWRITE: runner},
         timeout=42,
@@ -97,7 +98,7 @@ def test_migration_agent_loads_latest_plan_and_dispatches_by_type(tmp_path: Path
     ]
 
 
-def test_migration_agent_reuses_matching_verified_checkpoint_as_baseline(
+def test_migration_runner_reuses_matching_verified_checkpoint_as_baseline(
     tmp_path: Path,
 ) -> None:
     initialize_git_repository(tmp_path)
@@ -132,7 +133,7 @@ def test_migration_agent_reuses_matching_verified_checkpoint_as_baseline(
         builds.append(command)
         return VerificationResult(command=command, exit_code=0, duration_seconds=0)
 
-    result = MigrationAgent(
+    result = MigrationRunner(
         store,
         runners={ExecutionType.OPENREWRITE: RecordingRunner()},
         build_verifier=build_verifier,
@@ -150,7 +151,7 @@ def test_migration_agent_reuses_matching_verified_checkpoint_as_baseline(
     assert any("skipping baseline build" in message for message in progress)
 
 
-def test_migration_agent_uses_green_target_jdk_for_java_upgrade(tmp_path: Path) -> None:
+def test_migration_runner_uses_green_target_jdk_for_java_upgrade(tmp_path: Path) -> None:
     initialize_git_repository(tmp_path)
     store = MigrationPlanStore(tmp_path)
     store.root.mkdir(parents=True)
@@ -192,7 +193,7 @@ def test_migration_agent_uses_green_target_jdk_for_java_upgrade(tmp_path: Path) 
         build_environments.append(kwargs["environment"])
         return VerificationResult(command=command, exit_code=0, duration_seconds=0)
 
-    result = MigrationAgent(
+    result = MigrationRunner(
         store,
         runners={ExecutionType.OPENREWRITE: Runner()},
         build_verifier=build_verifier,
@@ -256,7 +257,7 @@ def test_boot_3_recipe_verifies_with_java_17_after_legacy_baseline(
         exit_code = 0 if java_home == "/jdk/8" or not baseline_attempt else 1
         return VerificationResult(command=command, exit_code=exit_code, duration_seconds=0)
 
-    result = MigrationAgent(
+    result = MigrationRunner(
         store,
         runners={ExecutionType.OPENREWRITE: Runner()},
         build_verifier=build_verifier,
@@ -268,7 +269,7 @@ def test_boot_3_recipe_verifies_with_java_17_after_legacy_baseline(
     assert runner_environments[0]["JAVA_HOME"] == "/jdk/8"
 
 
-def test_migration_agent_falls_back_from_java_target_to_source_jdk(tmp_path: Path) -> None:
+def test_migration_runner_falls_back_from_java_target_to_source_jdk(tmp_path: Path) -> None:
     initialize_git_repository(tmp_path)
     store = MigrationPlanStore(tmp_path)
     store.root.mkdir(parents=True)
@@ -315,7 +316,7 @@ def test_migration_agent_falls_back_from_java_target_to_source_jdk(tmp_path: Pat
             duration_seconds=0,
         )
 
-    result = MigrationAgent(
+    result = MigrationRunner(
         store,
         runners={ExecutionType.OPENREWRITE: Runner()},
         build_verifier=build_verifier,
@@ -327,7 +328,7 @@ def test_migration_agent_falls_back_from_java_target_to_source_jdk(tmp_path: Pat
     assert runner_environments[0]["JAVA_HOME"] == "/jdk/8"
 
 
-def test_migration_agent_stops_at_recipe_with_failing_post_build(tmp_path: Path) -> None:
+def test_migration_runner_stops_at_recipe_with_failing_post_build(tmp_path: Path) -> None:
     initialize_git_repository(tmp_path)
     store = MigrationPlanStore(tmp_path)
     store.root.mkdir(parents=True)
@@ -356,7 +357,7 @@ def test_migration_agent_stops_at_recipe_with_failing_post_build(tmp_path: Path)
             command=command, exit_code=0 if build_count < 3 else 1, duration_seconds=0
         )
 
-    result = MigrationAgent(
+    result = MigrationRunner(
         store,
         runners={ExecutionType.OPENREWRITE: runner},
         build_verifier=build_verifier,
@@ -368,7 +369,7 @@ def test_migration_agent_stops_at_recipe_with_failing_post_build(tmp_path: Path)
     assert result.steps[1].message == "Post-migration build failed: recipe.two"
 
 
-def test_migration_agent_repairs_residual_springfox_before_stopping(tmp_path: Path) -> None:
+def test_migration_runner_repairs_residual_springfox_before_stopping(tmp_path: Path) -> None:
     initialize_git_repository(tmp_path)
     store = MigrationPlanStore(tmp_path)
     store.root.mkdir(parents=True)
@@ -407,7 +408,7 @@ def test_migration_agent_repairs_residual_springfox_before_stopping(tmp_path: Pa
         red = source.is_file() and "springfox." in source.read_text()
         return VerificationResult(command=command, exit_code=int(red), duration_seconds=0)
 
-    result = MigrationAgent(
+    result = MigrationRunner(
         store,
         runners={ExecutionType.OPENREWRITE: SpringfoxRunner()},
         build_verifier=verifier,
@@ -420,7 +421,93 @@ def test_migration_agent_repairs_residual_springfox_before_stopping(tmp_path: Pa
     assert result.steps[0].verification.green
 
 
-def test_migration_agent_stops_before_recipes_when_baseline_is_red(tmp_path: Path) -> None:
+def test_migration_runner_budgets_deterministic_and_ai_repairs_separately(
+    tmp_path: Path,
+) -> None:
+    initialize_git_repository(tmp_path)
+    store = MigrationPlanStore(tmp_path)
+    store.root.mkdir(parents=True)
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.springdoc.SpringFoxToSpringDoc",
+        reason="Replace Springfox.",
+        evidence=["springfox"],
+        expected_benefit="Use Springdoc.",
+        priority="high",
+        confidence=1,
+    )
+    plan = PersistedMigrationPlan(
+        plan_id="staged-repair",
+        snapshot=DiscoverySnapshot(repository=tmp_path, build_system=BuildSystem.MAVEN),
+        steps=[step],
+    )
+    (store.root / "staged-repair.json").write_text(plan.model_dump_json())
+
+    class SpringdocRunner:
+        def run(self, snapshot, step, *, apply: bool, timeout: int, environment=None):
+            del step, timeout, environment
+            if apply:
+                Path(snapshot.repository, "pom.xml").write_text(
+                    "<artifactId>openapi-generator-maven-plugin</artifactId>\n"
+                )
+            return VerificationResult(command=["rewrite"], exit_code=0, duration_seconds=0)
+
+    calls = {"deterministic": 0, "ai": 0}
+
+    class DeterministicRepairer:
+        def repair(self, repository, step, failure):
+            del repository, step, failure
+            calls["deterministic"] += 1
+            return VerificationResult(
+                command=["deterministic-repair"], exit_code=0, duration_seconds=0
+            )
+
+    class AiRepairer:
+        def repair(self, repository, step, failure):
+            del repository, step, failure
+            calls["ai"] += 1
+            return VerificationResult(command=["ai-repair"], exit_code=0, duration_seconds=0)
+
+    build_count = 0
+
+    def verifier(repository, command, **kwargs):
+        nonlocal build_count
+        del repository, kwargs
+        build_count += 1
+        green = build_count == 1 or calls["ai"] == 1
+        return VerificationResult(
+            command=command,
+            exit_code=0 if green else 1,
+            stdout=(
+                "package io.swagger.annotations does not exist"
+                if not green and calls["deterministic"] < 3
+                else "incompatible types: boolean cannot be converted"
+                if not green
+                else ""
+            ),
+            duration_seconds=0,
+        )
+
+    result = MigrationRunner(
+        store,
+        runners={ExecutionType.OPENREWRITE: SpringdocRunner()},
+        build_verifier=verifier,
+        repair_stages=(
+            MigrationRepairStage("deterministic", DeterministicRepairer(), 3),
+            MigrationRepairStage("AI", AiRepairer(), 3, uses_model=True),
+        ),
+    ).run(apply=True)
+
+    assert result.status is RunStatus.COMPLETED
+    assert calls == {"deterministic": 3, "ai": 1}
+    assert [repair.command for repair in result.steps[0].repairs] == [
+        ["refinery", "deterministic-repair"],
+        ["refinery", "deterministic-repair"],
+        ["refinery", "deterministic-repair"],
+        ["refinery", "ai-repair"],
+    ]
+
+
+def test_migration_runner_stops_before_recipes_when_baseline_is_red(tmp_path: Path) -> None:
     initialize_git_repository(tmp_path)
     store = MigrationPlanStore(tmp_path)
     store.root.mkdir(parents=True)
@@ -441,7 +528,7 @@ def test_migration_agent_stops_before_recipes_when_baseline_is_red(tmp_path: Pat
     runner = RecordingRunner()
     progress: list[str] = []
 
-    result = MigrationAgent(
+    result = MigrationRunner(
         store,
         runners={ExecutionType.OPENREWRITE: runner},
         build_verifier=lambda repository, command, **kwargs: VerificationResult(
@@ -500,7 +587,7 @@ def test_first_failed_migration_does_not_publish_unchanged_starting_revision(
             duration_seconds=0,
         )
 
-    result = MigrationAgent(
+    result = MigrationRunner(
         store,
         runners={ExecutionType.OPENREWRITE: RecordingRunner()},
         build_verifier=verifier,
