@@ -76,7 +76,7 @@ def test_planner_and_repair_models_are_explicitly_configured() -> None:
     settings = Settings()
 
     assert settings.planner_model == "openai:gpt-5.6-luna"
-    assert settings.repair_model == "openai:gpt-5.6-terra"
+    assert settings.repair_model == "openai:gpt-5.6-luna"
 
 
 def test_deterministic_and_ai_repairs_each_get_three_attempts() -> None:

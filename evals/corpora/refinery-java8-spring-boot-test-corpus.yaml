@@ -40,6 +40,16 @@ projects:
   tier: easy
   category: mvc-shop
   baseline_test: true
+  baseline_migrations:
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_2
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_3
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_4
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_5
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_6
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_1
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2
+  - org.openrewrite.java.migrate.UpgradeToJava17
   notes: Spring Boot 2.1.7, JPA, Security, Thymeleaf, and H2; clean migration fixture.
 - id: task-management-system
   name: TASK-Management-System
@@ -80,6 +90,10 @@ projects:
   tier: normal
   category: financial-web-app
   baseline_test: true
+  baseline_migrations:
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_1
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2
   notes: MVC, Data JPA, PostgreSQL, Thymeleaf, and tests.
 - id: community
   name: community
@@ -95,6 +109,14 @@ projects:
   tier: baseline
   category: veterinary-rest
   baseline_test: true
+  baseline_migrations:
+  - org.openrewrite.java.springdoc.SpringFoxToSpringDoc
+  - org.openrewrite.java.migrate.UpgradeToJava17
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_1
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2
+  - org.openrewrite.java.springdoc.UpgradeSpringDoc_2_5
   notes: Reference-sized REST/JPA application; verify a Java 8 commit or branch before pinning the fixture.
 - id: flight-booking
   name: flight-booking
@@ -102,6 +124,17 @@ projects:
   tier: easy
   category: flight-booking-rest
   baseline_test: true
+  baseline_migrations:
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_1
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_2
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_3
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_4
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_5
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_6
+  - org.openrewrite.java.springdoc.SpringFoxToSpringDoc
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7
+  - org.openrewrite.java.migrate.UpgradeToJava17
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2
   notes: Spring Data JPA, H2, Swagger, several domain endpoints, and tests.
 - id: spring-boot-blog-app
   name: spring-boot-blog-app
@@ -109,6 +142,16 @@ projects:
   tier: normal
   category: blog-web-app
   baseline_test: true
+  baseline_migrations:
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_3
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_4
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_5
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_6
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7
+  - org.openrewrite.java.migrate.UpgradeToJava17
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_1
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2
   notes: Boot 2.2.6, Web, JPA, Security, H2, Lombok, and Thymeleaf.
 - id: spring-boot-blog-rest-api
   name: Spring-Boot-Blog-REST-API
@@ -116,6 +159,17 @@ projects:
   tier: advanced
   category: blog-rest
   baseline_test: true
+  baseline_migrations:
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_2
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_3
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_4
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_5
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_6
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7
+  - org.openrewrite.java.migrate.UpgradeToJava17
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_1
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2
   notes: Security/JWT, MySQL, JPA/Hibernate, Docker, Swagger/docs, and a longer project history.
 - id: spring-boot-crud-rest
   name: spring-boot-crud-rest
@@ -123,6 +177,13 @@ projects:
   tier: easy
   category: crud-rest
   baseline_test: true
+  baseline_migrations:
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_6
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7
+  - org.openrewrite.java.migrate.UpgradeToJava17
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_1
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2
   notes: DTO, service, and repository layers with JPA, H2, ModelMapper, Lombok, and tests.
 - id: my-blog-zhenfeng13
   name: My-Blog
@@ -130,6 +191,9 @@ projects:
   tier: normal
   category: blog-web-app
   baseline_test: true
+  baseline_migrations:
+  - org.openrewrite.java.migrate.UpgradeToJava17
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2
   notes: Established Java 8-era Spring Boot/MyBatis/Thymeleaf blogging system with strong community provenance.
 - id: newbee-mall
   name: newbee-mall
@@ -137,6 +201,12 @@ projects:
   tier: advanced
   category: ecommerce
   baseline_test: true
+  baseline_migrations:
+  - org.openrewrite.java.migrate.UpgradeToJava17
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_1
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2
+  - org.openrewrite.java.spring.boot3.UpgradeMyBatisToSpringBoot_3_2
   notes: Established open-source e-commerce application with catalog, cart, checkout, orders, members, and admin; pin a validated
     Java 8-era ref.
 - id: newbee-mall-api
@@ -145,6 +215,12 @@ projects:
   tier: normal
   category: ecommerce-rest
   baseline_test: true
+  baseline_migrations:
+  - org.openrewrite.java.springdoc.SpringFoxToSpringDoc
+  - org.openrewrite.java.migrate.UpgradeToJava17
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_1
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2
   notes: Backend-focused REST API using Spring Boot, MyBatis, Swagger, and MySQL; good provenance and migration surface.
 - id: vhr
   name: vhr
@@ -160,6 +236,13 @@ projects:
   tier: advanced
   category: ecommerce-microservices
   baseline_test: true
+  baseline_migrations:
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_0
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7
+  - org.openrewrite.java.migrate.UpgradeToJava17
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_1
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2
   notes: Java 8-era Spring Boot/Cloud commerce system with JPA, Feign, Security, Eureka, and Zuul; later-stage corpus candidate.
 - id: multitenancy-sunitk
   name: multitenancy
@@ -173,7 +256,7 @@ projects:
   repo_url: https://github.com/reljicd/spring-boot-blog
   tier: normal
   category: blog-web-app
-  baseline_test: true
+  baseline_test: false
   notes: Java 8 Spring Boot application with Security, JPA, Data REST, Thymeleaf, and H2; older established community fixture.
 - id: ecommerce-spring-reactjs
   name: ecommerce-spring-reactjs
@@ -203,7 +286,7 @@ projects:
   ref: a41a85ef959d532c617bf65aea5bc49d7ad141ff
   tier: advanced
   category: ecommerce
-  baseline_test: true
+  baseline_test: false
   notes: Expanded NewBee Mall with coupons, flash sales, payments, Redis, Spring Boot, MyBatis, and MySQL; pin a validated
     Java 8-era ref.
 - id: mall-macrozheng
@@ -223,6 +306,13 @@ projects:
   category: distributed-job-scheduler
   test_configuration_needed: false
   baseline_test: true
+  baseline_migrations:
+  - org.openrewrite.java.migrate.UpgradeToJava17
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2
+  - org.openrewrite.java.migrate.jakarta.RemoveJakartaAnnotationDependencyWhenManagedBySpringBoot
+  - org.openrewrite.java.migrate.jakarta.RemoveJakartaAnnotationDependencyWhenManagedBySpringBoot
+  - org.openrewrite.java.spring.boot3.UpgradeMyBatisToSpringBoot_3_2
+  - org.openrewrite.java.migrate.jakarta.RemoveJakartaAnnotationDependencyWhenManagedBySpringBoot
   notes: Established distributed scheduling platform; release 2.5.0 targets Java 8 with Spring Boot 2.7.18 and uses MySQL.
 - id: eladmin
   name: eladmin
@@ -338,6 +428,15 @@ projects:
   category: file-management
   test_configuration_needed: false
   baseline_test: true
+  baseline_migrations:
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_6
+  - org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7
+  - org.openrewrite.java.migrate.UpgradeToJava17
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_1
+  - org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2
+  - org.openrewrite.java.migrate.jakarta.JavaxServletToJakartaServlet
+  - org.openrewrite.java.migrate.jakarta.MigrationToJakarta10Apis
   notes: Widely adopted file-listing and storage-management application; the pinned 3.x release targets Java 8 with Spring Boot 2.5.4 and integrates multiple cloud and object-storage providers.
 - id: pig
   name: Pig

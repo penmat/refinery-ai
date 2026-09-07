@@ -1,0 +1,115 @@
+schema_version: 1
+corpus:
+  id: refinery-java17-spring-boot3-assessment
+  name: Refinery Java 17 Spring Boot 3 assessment corpus
+  description: >-
+    A corpus of established Java 17 and Spring Boot 3 repositories for testing
+    Refinery's repository summary, assessment, documentation, and modernization
+    discovery capabilities.
+  source_context: Find Older Java Projects
+  generated_on: 2026-09-07
+  caveats:
+  - Repository metadata, default branches, build requirements, and dependency versions can change.
+  - Verify the Java and Spring Boot versions after checkout and pin a commit for reproducible benchmark runs.
+  - Some projects require databases, brokers, identity providers, containers, or other external services for integration tests.
+  defaults:
+    source_java: '17'
+    framework: spring-boot
+    framework_version: '3'
+    purpose:
+      primary: assessment
+      secondary:
+      - summary
+      - documentation
+      - modernization-discovery
+      migration_by_default: false
+    assessment_goal:
+      summarize_architecture: true
+      identify_modules_and_entry_points: true
+      document_build_and_runtime_requirements: true
+      assess_dependencies_and_deprecations: true
+      assess_tests_ci_and_documentation: true
+      recommend_modernization_opportunities: true
+      preserve_behavior: true
+projects:
+- id: youlai-boot
+  name: youlai-boot
+  repo_url: https://github.com/youlaitech/youlai-boot
+  tier: advanced
+  category: admin-rbac-platform
+  notes: >-
+    Modular administration and permissions platform with a broad infrastructure
+    surface, suitable for architecture, dependency, configuration, and documentation assessment.
+- id: continew-admin
+  name: continew-admin
+  repo_url: https://github.com/continew-org/continew-admin
+  tier: advanced
+  category: multitenant-admin-platform
+  notes: >-
+    Established multi-module administration system with multi-tenancy and substantial
+    project history; a strong target for module mapping and modernization discovery.
+- id: springwolf-core
+  name: springwolf-core
+  repo_url: https://github.com/springwolf/springwolf-core
+  tier: advanced
+  category: asyncapi-library
+  notes: >-
+    Multi-module Spring library for generating AsyncAPI documentation across messaging
+    integrations; especially useful for public API, extension-point, and architecture summaries.
+- id: java-spring-boot-boilerplate
+  name: java-spring-boot-boilerplate
+  repo_url: https://github.com/mewebstudio/java-spring-boot-boilerplate
+  tier: normal
+  category: application-boilerplate
+  notes: >-
+    Representative application foundation spanning security, persistence, migrations,
+    caching, API documentation, and tests; useful as a moderate-complexity baseline.
+- id: openkoda
+  name: openkoda
+  repo_url: https://github.com/openkoda/openkoda
+  tier: advanced
+  category: business-application-platform
+  notes: >-
+    Substantial open-source business application platform with multi-tenancy and a broad
+    persistence and extension surface; suited to architecture and maintainability assessment.
+- id: ecommerce-store
+  name: e-commerce-store
+  repo_url: https://github.com/micaellobo/e-commerce-store
+  tier: advanced
+  category: ecommerce-microservices
+  notes: >-
+    Spring Boot microservices example with several operational components and documented
+    future work; useful for service-boundary, deployment, security, and documentation analysis.
+- id: mall4j
+  name: mall4j
+  repo_url: https://github.com/gz-yami/mall4j
+  ref: v3.4
+  tier: advanced
+  category: ecommerce-platform
+  notes: >-
+    Full commerce platform with a large application surface. The v3.4 release is pinned
+    because the default branch has moved to Spring Boot 4; v3.4 uses Spring Boot 3.4.x.
+- id: springboot-modular-monolith-boilerplate
+  name: springboot-modular-monolith-boilerplate
+  repo_url: https://github.com/subhashadhikari057/springboot-modular-monolith-boilerplate
+  tier: normal
+  category: modular-monolith
+  notes: >-
+    Modular-monolith reference application suited to assessment of boundaries, dependency
+    direction, build structure, testing strategy, and architectural documentation.
+- id: keycloak-integration-with-spring-boot-3
+  name: keycloak-integration-with-spring-boot-3
+  repo_url: https://github.com/ali-bouali/keycloak-integration-with-spring-boot-3
+  tier: normal
+  category: identity-security-integration
+  notes: >-
+    Focused Keycloak and Spring Security integration target for assessing authentication
+    flows, configuration, version compatibility, operational setup, and documentation.
+- id: realworld-spring-boot-native
+  name: realworld-spring-boot-native
+  repo_url: https://github.com/softwaremill/realworld-spring-boot-native
+  tier: advanced
+  category: native-rest-application
+  notes: >-
+    RealWorld application implementation with native-image concerns, making it useful for
+    API, persistence, testing, build, runtime, and ahead-of-time compilation assessment.

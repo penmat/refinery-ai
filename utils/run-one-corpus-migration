@@ -1,0 +1,4 @@
+uv run refinery run-corpus \
+  evals/corpora/refinery-java8-spring-boot-test-corpus.yaml \
+  --project $1 \
+  --ai-patching

@@ -4,7 +4,7 @@ import pytest
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 
-from refinery_ai.agents.ai_repair import AiRepairAgent
+from refinery_ai.agents.ai_repair import AiRepairAgent, _repair_file_context
 from refinery_ai.config import Settings
 from refinery_ai.migrations.ai_repair import AiMigrationRepairer, _ai_repair_files
 from refinery_ai.migrations.deterministic_repair import (
@@ -129,6 +129,39 @@ def test_ai_repair_uses_scoped_full_file_replacement(tmp_path: Path) -> None:
     assert source.read_text() == "class SwaggerConfiguration {}\n"
 
 
+def test_ai_repair_rejects_a_noop_replacement(tmp_path: Path) -> None:
+    source = tmp_path / "src/main/java/SwaggerConfiguration.java"
+    source.parent.mkdir(parents=True)
+    original = "import springfox.documentation.spring.web.plugins.Docket;\n"
+    source.write_text(original)
+    model = TestModel(
+        custom_output_args={
+            "diagnosis": "No change",
+            "summary": "No change",
+            "files": [{"path": str(source.relative_to(tmp_path)), "content": original}],
+        }
+    )
+    repairer = AiRepairAgent(Settings(repair_mode=RepairMode.CONFIGURED_PROVIDER))
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.springdoc.SpringFoxToSpringDoc",
+        reason="Convert Springfox.",
+        evidence=["springfox"],
+        expected_benefit="Use Springdoc.",
+        priority="high",
+        confidence=1,
+    )
+
+    with repairer.override(model=model):
+        result = repairer.repair(
+            tmp_path,
+            step,
+            VerificationResult(command=["mvn", "test"], exit_code=1, duration_seconds=0),
+        )
+
+    assert not result.green
+    assert "did not change any files" in result.stderr
+
+
 def test_ai_repair_scope_uses_diagnostic_source_and_module_build_files(tmp_path: Path) -> None:
     source = tmp_path / "module/src/main/java/example/App.java"
     source.parent.mkdir(parents=True)
@@ -217,6 +250,34 @@ def test_ai_repair_scope_includes_openapi_contract_for_springdoc(tmp_path: Path)
     )
 
     assert allowed == (Path("pom.xml"), Path("src/main/resources/api-docs.yml"))
+
+
+def test_ai_repair_context_keeps_relevant_schema_beyond_file_limit() -> None:
+    prefix = "openapi: 3.0.0\n" + ("# filler\n" * 100)
+    contract = (
+        prefix
+        + "components:\n  schemas:\n"
+        + "    PetType:\n"
+        + "      type: object\n"
+        + "      properties:\n"
+        + "        name:\n"
+        + "          type: string\n"
+        + "          minLength: 1\n"
+        + "      required:\n"
+        + "        - id\n"
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stdout="PetTypeRestControllerTests Status expected:<400> but was:<201>",
+        duration_seconds=0,
+    )
+
+    rendered = _repair_file_context(Path("api-docs.yml"), contract, failure, 400)
+
+    assert rendered == contract
+    assert "PetType:" in rendered
+    assert "minLength: 1" in rendered
 
 
 def test_springdoc_repair_configures_generated_openapi_annotations(tmp_path: Path) -> None:

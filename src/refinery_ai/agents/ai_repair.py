@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from hashlib import sha256
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -38,6 +39,7 @@ class AiRepairAgent(Agent[None, RepairEditProposal]):
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._proposal_fingerprints: set[str] = set()
         if settings.repair_mode is RepairMode.LOCAL:
             _require_local_endpoint(settings.ollama_base_url)
         repair_model = _repair_model(
@@ -71,7 +73,13 @@ class AiRepairAgent(Agent[None, RepairEditProposal]):
         context = []
         for relative in allowed:
             content = (repository / relative).read_text(errors="replace")
-            context.append(f"--- {relative}\n{content[: self.settings.max_output_characters]}")
+            rendered = _repair_file_context(
+                relative,
+                content,
+                failure,
+                self.settings.max_output_characters,
+            )
+            context.append(f"--- {relative}\n{rendered}")
         prompt = (
             "Return complete replacement content for the smallest set of allowed files needed "
             "to make the migration build and tests pass. Address every distinct error in the "
@@ -96,10 +104,24 @@ class AiRepairAgent(Agent[None, RepairEditProposal]):
         changed = [replacement.path for replacement in proposal.files]
         if len(changed) != len(set(changed)) or set(changed) - allowed_names:
             return repair_result(1, "Repair proposal attempted files outside the allowed scope")
+        fingerprint = sha256(
+            "\0".join(
+                f"{replacement.path}\0{replacement.content}"
+                for replacement in sorted(proposal.files, key=lambda item: item.path)
+            ).encode()
+        ).hexdigest()
+        if fingerprint in self._proposal_fingerprints:
+            return repair_result(1, "Repair agent repeated an earlier proposal")
+        self._proposal_fingerprints.add(fingerprint)
         for replacement in proposal.files:
             target = (repository / replacement.path).resolve()
             if not target.is_relative_to(repository.resolve()) or not target.is_file():
                 return repair_result(1, f"Unsafe or missing repair target: {replacement.path}")
+        if all(
+            (repository / replacement.path).read_text(errors="replace") == replacement.content
+            for replacement in proposal.files
+        ):
+            return repair_result(1, "Repair proposal did not change any files")
         for replacement in proposal.files:
             (repository / replacement.path).write_text(replacement.content)
         return repair_result(0, stdout=proposal.summary)
@@ -136,6 +158,29 @@ def _repair_model(
             else OpenAIResponsesModel(model_name, provider="openai")
         )
     return model
+
+
+def _repair_file_context(
+    relative: Path,
+    content: str,
+    failure: VerificationResult,
+    limit: int,
+) -> str:
+    """Keep a relevant OpenAPI contract complete so full-file replacement remains safe."""
+
+    if len(content) <= limit or relative.suffix.lower() not in {".yaml", ".yml"}:
+        return content[:limit]
+    diagnostic = f"{failure.stdout}\n{failure.stderr}"
+    schema_names = sorted(
+        set(re.findall(r"([A-Z][A-Za-z0-9]+)RestControllerTests", diagnostic))
+    )
+    has_relevant_schema = any(
+        re.search(rf"(?m)^    {re.escape(schema)}:\s*$", content) is not None
+        for schema in schema_names
+    )
+    # Repair output uses complete file replacements. Supplying a stitched or truncated contract
+    # would make a model-authored replacement destructive, so include the complete relevant file.
+    return content if has_relevant_schema else content[:limit]
 
 
 def _ai_repair_files(

@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="REFINERY_", env_file=".env", extra="ignore")
 
     planner_model: str = "openai:gpt-5.6-luna"
-    repair_model: str = "openai:gpt-5.6-terra"
+    repair_model: str = "openai:gpt-5.6-luna"
     ollama_base_url: str | None = None
     openai_api_key: SecretStr | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     otel_enabled: bool = False

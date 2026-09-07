@@ -26,6 +26,7 @@ class CorpusProject(BaseModel):
     ref: str | None = None
     test_configuration_needed: bool = False
     baseline_test: bool = False
+    baseline_migrations: list[str] = Field(default_factory=list)
 
 
 class CorpusDefinition(BaseModel):

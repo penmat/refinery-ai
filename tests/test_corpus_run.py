@@ -30,6 +30,9 @@ projects:
     ref: v2.6.2
     test_configuration_needed: true
     baseline_test: true
+    baseline_migrations:
+      - org.example.UpgradeOne
+      - org.example.UpgradeTwo
   - id: second
     name: Second
     repo_url: https://example.com/second.git
@@ -58,6 +61,10 @@ def test_corpus_runner_uses_ai_repair_by_default(tmp_path: Path, monkeypatch: An
     assert result.projects[0].profile_cycles == 2
     assert result.projects[0].tier == "easy"
     assert result.projects[0].baseline_test is True
+    assert corpus.projects[0].baseline_migrations == [
+        "org.example.UpgradeOne",
+        "org.example.UpgradeTwo",
+    ]
     assert corpus.projects[1].baseline_test is False
     assert commands[0][:3] == ["git", "clone", "--quiet"]
     assert commands[1][-2:] == ["--quiet", "v2.6.2"]

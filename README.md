@@ -377,7 +377,7 @@ Settings use the `REFINERY_` prefix and may be placed in `.env`. See `.env.examp
 |---|---:|---|
 | `OPENAI_API_KEY` | none | OpenAI API key loaded from the environment or `.env` |
 | `REFINERY_PLANNER_MODEL` | `openai:gpt-5.6-luna` | Pydantic AI planner model identifier |
-| `REFINERY_REPAIR_MODEL` | `openai:gpt-5.6-terra` | Pydantic AI repair model identifier |
+| `REFINERY_REPAIR_MODEL` | `openai:gpt-5.6-luna` | Pydantic AI repair model identifier |
 | `REFINERY_OLLAMA_BASE_URL` | none | Optional Ollama base URL, such as `http://localhost:11434` |
 | `REFINERY_OTEL_ENABLED` | `false` | Export Pydantic AI and LiteLLM telemetry over OTLP/HTTP |
 | `REFINERY_OTEL_SERVICE_NAME` | `refinery-ai` | OpenTelemetry service name |
