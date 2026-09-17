@@ -46,6 +46,7 @@ from refinery_ai.recipes.catalog import RecipeCatalogSession
 from refinery_ai.recipes.sources import RecipeSource, fetch_recipe_sources
 from refinery_ai.reporting import to_markdown
 from refinery_ai.repository import RepositoryEnvironment
+from refinery_ai.workflows.planning import run_planning_graph
 
 logger = get_logger(__name__)
 
@@ -352,13 +353,14 @@ class ModernizationFactory:
                 payload_metrics["estimated_tokens"],
                 component_metrics,
             )
-            planned_recipes = planner.plan(
+            planned_recipes = run_planning_graph(
+                planner,
                 PlanningRequest(
                     prompt=planner_prompt,
                     dependencies=planning_deps,
                     run_id=run_id,
                     plan_id=run_id,
-                )
+                ),
             )
             plan = _with_deterministic_prerequisites(planned_recipes, snapshot)
             if profile is not None:
