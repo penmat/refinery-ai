@@ -9,8 +9,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from refinery_ai.models import MigrationRun, RecipePlan, RunReport, RunStatus
-from refinery_ai.profiles import EvidenceMode, ModernizationProfile
+from refinery_ai.models import MigrationRun, RunReport, RunStatus
+from refinery_ai.profiles import ModernizationProfile
 
 
 class ProfileRunState(BaseModel):
@@ -112,90 +112,9 @@ class ProfileRunner:
         self.store = ProfileRunStore(self.repository, profile.name, state_directory)
 
     def run(self) -> ProfileRunResult:
-        state = self.store.load()
-        previous_recipes: tuple[str, ...] | None = None
-        verified_checkpoint: VerifiedCheckpoint | None = None
-        for cycle in range(1, self.max_cycles + 1):
-            dependency_fingerprint = dependency_inputs_fingerprint(self.repository)
-            sonar_enabled = self.profile.evidence.sonarqube is not EvidenceMode.OFF
-            run_sonar = sonar_enabled and (
-                state.sonar_dependency_fingerprint != dependency_fingerprint
-            )
-            sonar_note = (
-                "without SonarQube"
-                if not sonar_enabled
-                else "with SonarQube"
-                if run_sonar
-                else "reusing SonarQube evidence"
-            )
-            self.progress(f"Cycle {cycle}: analyzing ({sonar_note}) ...")
-            sonar_available = self.analyze(run_sonar)
-            if sonar_enabled and not run_sonar and not sonar_available:
-                self.progress(
-                    "Retained SonarQube evidence is unavailable; running a fresh scan ..."
-                )
-                run_sonar = True
-                sonar_available = self.analyze(True)
-            if run_sonar and sonar_available:
-                state.sonar_dependency_fingerprint = dependency_fingerprint
-            state.cycles += 1
-            state.completed = False
-            self.store.save(state)
+        from refinery_ai.workflows.profile import run_profile_graph
 
-            self.progress(f"Cycle {cycle}: planning for {self.profile.name} ...")
-            report = self.plan()
-            if not isinstance(report.plan, RecipePlan):
-                raise RuntimeError("Profile planner did not return recipe recommendations")
-            recipes = tuple(item.recipe for item in report.plan.recommendations)
-            if not recipes:
-                target_gaps = self.profile.unresolved_targets(report.snapshot)
-                if target_gaps:
-                    unresolved = ", ".join(
-                        f"{gap.target} {gap.current_version or 'unknown'} -> {gap.target_version}"
-                        for gap in target_gaps
-                    )
-                    return self._stalled(
-                        state,
-                        cycle,
-                        "the planner returned no migrations while profile targets remain "
-                        f"unsatisfied ({unresolved})",
-                    )
-                state.completed = True
-                self.store.save(state)
-                return ProfileRunResult(
-                    profile=self.profile.name,
-                    status=RunStatus.COMPLETED,
-                    cycles=cycle,
-                    message="Profile complete; the planner found no remaining migrations.",
-                )
-            if recipes == previous_recipes:
-                return self._stalled(state, cycle, "the planner repeated the same migration plan")
-            previous_recipes = recipes
-
-            self.progress(f"Cycle {cycle}: running {len(recipes)} migration(s) ...")
-            migration = self.migrate(report.run_id, verified_checkpoint)
-            if migration.status is not RunStatus.COMPLETED:
-                return ProfileRunResult(
-                    profile=self.profile.name,
-                    status=migration.status,
-                    cycles=cycle,
-                    message="Profile run stopped because a migration failed.",
-                )
-            if migration.published_revision is None:
-                self.progress(
-                    "The migration produced no published changes; rechecking profile targets ..."
-                )
-                continue
-            verified_checkpoint = (
-                VerifiedCheckpoint(
-                    revision=migration.published_revision,
-                    java=migration.verified_java,
-                )
-                if migration.verified_java is not None
-                else None
-            )
-
-        return self._stalled(state, self.max_cycles, "the maximum cycle count was reached")
+        return run_profile_graph(self)
 
     def _stalled(self, state: ProfileRunState, cycle: int, reason: str) -> ProfileRunResult:
         self.store.save(state)

@@ -13,6 +13,7 @@ from refinery_ai.models import (
 )
 from refinery_ai.profile_run import ProfileRunner, dependency_inputs_fingerprint
 from refinery_ai.profiles import load_profile
+from refinery_ai.workflows.profile import build_profile_graph
 
 
 def recommendation(recipe: str) -> RecipeRecommendation:
@@ -49,6 +50,26 @@ def test_dependency_fingerprint_only_tracks_dependency_inputs(tmp_path: Path) ->
     assert dependency_inputs_fingerprint(tmp_path) == original
     (tmp_path / "pom.xml").write_text("<project><dependencies /></project>")
     assert dependency_inputs_fingerprint(tmp_path) != original
+
+
+def test_profile_graph_exposes_deterministic_workflow_nodes(tmp_path: Path) -> None:
+    runner = ProfileRunner(
+        tmp_path,
+        load_profile("spring-boot-3.2-java-17"),
+        analyze=lambda run_sonar: True,
+        plan=lambda: report(tmp_path, "complete", []),
+        migrate=lambda plan_id, checkpoint: MigrationRun(
+            plan_id=plan_id, status=RunStatus.COMPLETED
+        ),
+    )
+
+    assert set(build_profile_graph(runner).get_graph().nodes) == {
+        "__start__",
+        "analyze",
+        "plan",
+        "migrate",
+        "__end__",
+    }
 
 
 def test_profile_runner_loops_until_plan_is_empty_and_skips_unchanged_sonar(
