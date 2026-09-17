@@ -2,8 +2,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from pydantic_ai.exceptions import ModelRetry
-from pydantic_ai.models.test import TestModel
 
 from refinery_ai.context import DurableContextStore
 from refinery_ai.harness import (
@@ -16,18 +14,27 @@ from refinery_ai.models import BuildSystem, DiscoverySnapshot
 from refinery_ai.repository import RepositoryEnvironment
 
 
-def test_assessment_factory_is_read_only_and_has_no_shell(tmp_path: Path) -> None:
-    bundle = create_read_only_assessment_harness(TestModel(), tmp_path)
+def test_assessment_factory_is_read_only_and_has_no_shell(
+    tmp_path: Path, monkeypatch
+) -> None:
+    agents = []
+
+    def fake_create_agent(*args, **kwargs):
+        agent = object()
+        agents.append((agent, kwargs))
+        return agent
+
+    monkeypatch.setattr("refinery_ai.harness.create_agent", fake_create_agent)
+    bundle = create_read_only_assessment_harness("test:model", tmp_path)
 
     assert bundle.filesystem.read_only
     assert not bundle.policy.network_allowed
-    assert bundle.repo_context.workspace_dir == tmp_path
     assert bundle.agent is not None
-    assert bundle.compaction.max_messages == bundle.policy.context_clear_after_messages
-    assert len(bundle.subagents.agents) == 1
-    assert bundle.subagents.agents[0].max_calls == 1
-    assert not bundle.subagents.inherit_tools
-    assert len(bundle.subagents.shared_capabilities) == 2
+    assert bundle.build_runtime_specialist is not None
+    assert len(agents) == 2
+    assert agents[0][1]["name"] == "build-runtime-specialist"
+    assert agents[1][1]["name"] == "refinery-assessment"
+    assert all(tool.__name__ != "shell" for _, call in agents for tool in call["tools"])
 
 
 @pytest.mark.asyncio
@@ -49,9 +56,9 @@ async def test_harness_denies_escape_and_secret_reads(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text("SECRET=value")
     environment = HarnessRepositoryEnvironment(tmp_path)
 
-    with pytest.raises(ModelRetry, match="outside the root"):
+    with pytest.raises(HarnessPolicyError, match="outside the repository root"):
         await environment.read_file("../outside")
-    with pytest.raises(ModelRetry, match="denied"):
+    with pytest.raises(HarnessPolicyError, match="denied"):
         await environment.read_file(".env")
 
 
