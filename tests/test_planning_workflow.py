@@ -1,4 +1,8 @@
 from pathlib import Path
+from typing import TypedDict
+
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.graph import END, START, StateGraph
 
 from refinery_ai.agents.contracts import PlanningDependencies, PlanningRequest
 from refinery_ai.models import BuildSystem, DiscoverySnapshot, RecipePlan, RecipeRecommendation
@@ -59,3 +63,29 @@ def test_planning_graph_has_explicit_invocation_and_validation_nodes() -> None:
         "validate_plan",
         "__end__",
     }
+
+
+def test_planning_graph_does_not_inherit_parent_sqlite_checkpointer(tmp_path: Path) -> None:
+    class ParentState(TypedDict):
+        planned: bool
+
+    planner = RecordingPlanner(RecipePlan())
+
+    def plan_node(state: ParentState) -> dict[str, bool]:
+        del state
+        run_planning_graph(planner, request())
+        return {"planned": True}
+
+    builder = StateGraph(ParentState)
+    builder.add_node("plan", plan_node)
+    builder.add_edge(START, "plan")
+    builder.add_edge("plan", END)
+    with SqliteSaver.from_conn_string(str(tmp_path / "checkpoints.sqlite")) as checkpointer:
+        graph = builder.compile(checkpointer=checkpointer)
+        result = graph.invoke(
+            {"planned": False},
+            config={"configurable": {"thread_id": "nested-planning"}},
+        )
+
+    assert result["planned"] is True
+    assert len(planner.requests) == 1

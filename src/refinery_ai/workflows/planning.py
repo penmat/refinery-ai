@@ -33,7 +33,9 @@ def build_planning_graph(
     graph.add_edge(START, "invoke_planner")
     graph.add_edge("invoke_planner", "validate_plan")
     graph.add_edge("validate_plan", END)
-    return graph.compile()
+    # Planning is atomic inside the durable profile graph. Do not inherit its checkpointer:
+    # PlanningRequest contains live catalog services rather than persistence state.
+    return graph.compile(checkpointer=False)
 
 
 def run_planning_graph(planner: Planner, request: PlanningRequest) -> RecipePlan:
