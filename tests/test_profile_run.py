@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from refinery_ai.context_graph.models import ContextGraphInfo
 from refinery_ai.models import (
     BuildSystem,
@@ -13,7 +15,7 @@ from refinery_ai.models import (
 )
 from refinery_ai.profile_run import ProfileRunner, dependency_inputs_fingerprint
 from refinery_ai.profiles import load_profile
-from refinery_ai.workflows.profile import build_profile_graph
+from refinery_ai.workflows.profile import build_profile_graph, profile_thread_id
 
 
 def recommendation(recipe: str) -> RecipeRecommendation:
@@ -70,6 +72,37 @@ def test_profile_graph_exposes_deterministic_workflow_nodes(tmp_path: Path) -> N
         "migrate",
         "__end__",
     }
+
+
+def test_profile_graph_resumes_from_sqlite_checkpoint_after_interruption(tmp_path: Path) -> None:
+    analyses: list[bool] = []
+    planning_attempts = 0
+
+    def plan() -> RunReport:
+        nonlocal planning_attempts
+        planning_attempts += 1
+        if planning_attempts == 1:
+            raise RuntimeError("interrupted")
+        return report(tmp_path, "complete", [])
+
+    runner = ProfileRunner(
+        tmp_path,
+        load_profile("spring-boot-3.2-java-17"),
+        analyze=lambda run_sonar: not analyses.append(run_sonar),
+        plan=plan,
+        migrate=lambda plan_id, checkpoint: MigrationRun(
+            plan_id=plan_id, status=RunStatus.COMPLETED
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="interrupted"):
+        runner.run()
+    result = runner.run()
+
+    assert result.status is RunStatus.COMPLETED
+    assert analyses == [False]
+    assert profile_thread_id(runner) == profile_thread_id(runner)
+    assert (tmp_path / ".refinery/langgraph-checkpoints.sqlite").is_file()
 
 
 def test_profile_runner_loops_until_plan_is_empty_and_skips_unchanged_sonar(

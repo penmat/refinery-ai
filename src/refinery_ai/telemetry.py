@@ -1,8 +1,7 @@
-"""Shared OpenTelemetry configuration for Pydantic AI and LiteLLM."""
+"""Shared OpenTelemetry configuration for LangGraph and LiteLLM."""
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -66,7 +65,6 @@ def configure_telemetry(settings: Settings | None = None) -> bool:
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
-        from pydantic_ai import Agent, InstrumentationSettings
 
         headers = _headers(
             config.otel_headers.get_secret_value() if config.otel_headers is not None else None
@@ -106,14 +104,6 @@ def configure_telemetry(settings: Settings | None = None) -> bool:
             unit="{request}",
             description="LLM model requests attributed to a Refinery workflow phase",
         )
-
-        instrumentation = InstrumentationSettings(
-            tracer_provider=tracer_provider,
-            meter_provider=meter_provider,
-            include_content=config.otel_include_content,
-            include_binary_content=config.otel_include_content,
-        )
-        Agent.instrument_all(instrumentation)
 
         from litellm.integrations.opentelemetry import OpenTelemetry, OpenTelemetryConfig
 
@@ -197,31 +187,3 @@ def record_llm_usage(usage: Any, *, model: str | None = None) -> None:
         if amount:
             _token_counter.add(amount, {**attributes, "gen_ai.token.type": token_type})
     _request_counter.add(value("requests") or 1, attributes)
-
-
-def run_observed_agent(
-    agent: Any,
-    prompt: str,
-    *,
-    deps: Any,
-    phase: str,
-    run_id: str,
-    plan_id: str | None = None,
-    model: str | None = None,
-) -> Any:
-    """Run a synchronous Pydantic AI agent and attribute its aggregate usage."""
-
-    with observe_llm(phase, run_id=run_id, plan_id=plan_id):
-        parameters = inspect.signature(agent.run_sync).parameters
-        kwargs: dict[str, Any] = {"deps": deps}
-        if "run_id" in parameters:
-            kwargs["run_id"] = run_id
-        if "metadata" in parameters:
-            kwargs["metadata"] = {
-                "refinery.phase": phase,
-                "refinery.plan.id": plan_id or "",
-            }
-        result = agent.run_sync(prompt, **kwargs)
-        usage = getattr(result, "usage", None)
-        record_llm_usage(usage() if callable(usage) else usage, model=model)
-        return result

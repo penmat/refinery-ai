@@ -20,8 +20,6 @@ dependencies = [
   "opentelemetry-exporter-otlp-proto-http>=1.39,<2",
   "opentelemetry-sdk>=1.39,<2",
   "pydantic>=2.10,<3",
-  "pydantic-ai-harness==0.21.0",
-  "pydantic-ai-slim[openai]==2.33.0",
   "pydantic-settings>=2.7,<3",
   "pyyaml>=6,<7",
   "typer>=0.15,<1",

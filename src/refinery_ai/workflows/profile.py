@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict
 
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
@@ -21,6 +25,7 @@ if TYPE_CHECKING:
 
 
 class ProfileGraphState(TypedDict):
+    schema_version: int
     stored_state: ProfileRunState
     cycle: int
     previous_recipes: tuple[str, ...] | None
@@ -33,6 +38,8 @@ class ProfileGraphState(TypedDict):
 
 def build_profile_graph(
     runner: ProfileRunner,
+    *,
+    checkpointer: BaseCheckpointSaver[str] | None = None,
 ) -> CompiledStateGraph[ProfileGraphState, None, ProfileGraphState, ProfileGraphState]:
     """Build the deterministic profile loop as explicit LangGraph nodes."""
 
@@ -153,19 +160,38 @@ def build_profile_graph(
     graph.add_edge("analyze", "plan")
     graph.add_conditional_edges("plan", after_plan, {"migrate": "migrate", "finished": END})
     graph.add_conditional_edges("migrate", after_migrate, {"analyze": "analyze", "finished": END})
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
+
+
+def profile_thread_id(runner: ProfileRunner) -> str:
+    """Return the stable checkpoint identity for one repository profile."""
+
+    repository_id = hashlib.sha256(str(runner.repository).encode()).hexdigest()[:16]
+    return f"profile-v1:{repository_id}:{runner.profile.name}"
 
 
 def run_profile_graph(runner: ProfileRunner) -> ProfileRunResult:
     """Run a profile until completion, failure, or a deterministic stop condition."""
 
-    result = build_profile_graph(runner).invoke(
-        {
-            "stored_state": runner.store.load(),
-            "cycle": 0,
-            "previous_recipes": None,
-            "verified_checkpoint": None,
-        },
-        config={"recursion_limit": runner.max_cycles * 3 + 5},
-    )
+    checkpoint_path = runner.store.path.parents[1] / "langgraph-checkpoints.sqlite"
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    config: RunnableConfig = {
+        "configurable": {"thread_id": profile_thread_id(runner)},
+        "recursion_limit": runner.max_cycles * 3 + 5,
+    }
+    with SqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
+        graph = build_profile_graph(runner, checkpointer=checkpointer)
+        snapshot = graph.get_state(config)
+        graph_input: ProfileGraphState | None
+        if snapshot.next:
+            graph_input = None
+        else:
+            graph_input = {
+                "schema_version": 1,
+                "stored_state": runner.store.load(),
+                "cycle": 0,
+                "previous_recipes": None,
+                "verified_checkpoint": None,
+            }
+        result = graph.invoke(graph_input, config=config)
     return ProfileRunResult.model_validate(result["result"])
