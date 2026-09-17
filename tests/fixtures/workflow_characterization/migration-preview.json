@@ -1,0 +1,51 @@
+{
+  "result": {
+    "plan_id": "plan1",
+    "status": "completed",
+    "run_id": "<run-id>",
+    "starting_revision": null,
+    "final_revision": null,
+    "published_revision": null,
+    "verified_java": 17,
+    "baseline_verification": null,
+    "baseline_artifacts": null,
+    "steps": [
+      {
+        "step_id": "1-openrewrite",
+        "status": "completed",
+        "message": "openrewrite dry run completed: example.Upgrade",
+        "execution": {
+          "command": [
+            "rewrite",
+            "--dry-run",
+            "example.Upgrade"
+          ],
+          "exit_code": 0,
+          "stdout": "Preview completed",
+          "stderr": "",
+          "duration_seconds": 0.25
+        },
+        "verification": null,
+        "repairs": [],
+        "attempts": 1,
+        "workspace": null,
+        "checkpoint": null,
+        "failure_artifacts": null
+      }
+    ]
+  },
+  "runner_calls": [
+    {
+      "repository": "<repository>",
+      "recipe": "example.Upgrade",
+      "apply": false,
+      "timeout": 42,
+      "environment": null
+    }
+  ],
+  "progress": [
+    "Reading plan plan1 ... about to run 1 migration.",
+    "Running Migration 1/1: Upgrade",
+    "Migration 1/1 completed: Upgrade"
+  ]
+}

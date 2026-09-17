@@ -1,0 +1,88 @@
+{
+  "recipe_plan": {
+    "recommendations": [
+      {
+        "execution_type": "openrewrite",
+        "recipe": "example.Upgrade",
+        "recipe_artifact": null,
+        "reason": "The repository requires this migration.",
+        "evidence": [
+          "discovery.java_version=11"
+        ],
+        "expected_benefit": "The repository reaches the requested target.",
+        "priority": "high",
+        "depends_on": [],
+        "confidence": 0.9
+      }
+    ]
+  },
+  "migration_run": {
+    "plan_id": "plan-1",
+    "status": "completed",
+    "run_id": "<run-id>",
+    "starting_revision": "abc123",
+    "final_revision": "def456",
+    "published_revision": "def456",
+    "verified_java": 17,
+    "baseline_verification": null,
+    "baseline_artifacts": null,
+    "steps": []
+  },
+  "profile_run_result": {
+    "profile": "spring-boot-3.2-java-17",
+    "status": "completed",
+    "cycles": 2,
+    "message": "Profile complete; the planner found no remaining migrations."
+  },
+  "run_report": {
+    "run_id": "<run-id>",
+    "profile": "spring-boot-3.2-java-17",
+    "status": "planned",
+    "snapshot": {
+      "repository": "<repository>",
+      "build_system": "maven",
+      "build_files": [
+        "pom.xml"
+      ],
+      "modules": [],
+      "dependencies": [],
+      "java_version": "17",
+      "spring_boot_version": "3.2.0",
+      "non_utf8_application_properties": [],
+      "deferred_datasource_initialization_properties": [],
+      "frameworks": [
+        "Spring"
+      ],
+      "git_branch": "lang-graph",
+      "dirty": false,
+      "discovered_at": "2026-01-02T03:04:05Z"
+    },
+    "context_graph": {
+      "provider": "context-graph",
+      "graph_path": "<repository>/.refinery/context/context-graph.json",
+      "report_path": null,
+      "node_count": 0,
+      "edge_count": 0,
+      "schema_version": 1,
+      "provider_runs": []
+    },
+    "plan": {
+      "recommendations": [
+        {
+          "execution_type": "openrewrite",
+          "recipe": "example.Upgrade",
+          "recipe_artifact": null,
+          "reason": "The repository requires this migration.",
+          "evidence": [
+            "discovery.java_version=11"
+          ],
+          "expected_benefit": "The repository reaches the requested target.",
+          "priority": "high",
+          "depends_on": [],
+          "confidence": 0.9
+        }
+      ]
+    },
+    "steps": []
+  }
+}

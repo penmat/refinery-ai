@@ -1,0 +1,57 @@
+{
+  "result": {
+    "profile": "spring-boot-3.2-java-17",
+    "status": "completed",
+    "cycles": 2,
+    "message": "Profile complete; the planner found no remaining migrations."
+  },
+  "events": [
+    {
+      "operation": "progress",
+      "message": "Cycle 1: analyzing (without SonarQube) ..."
+    },
+    {
+      "operation": "analyze",
+      "run_sonar": false
+    },
+    {
+      "operation": "progress",
+      "message": "Cycle 1: planning for spring-boot-3.2-java-17 ..."
+    },
+    {
+      "operation": "plan",
+      "plan_id": "plan-1"
+    },
+    {
+      "operation": "progress",
+      "message": "Cycle 1: running 1 migration(s) ..."
+    },
+    {
+      "operation": "migrate",
+      "plan_id": "plan-1",
+      "checkpoint": null
+    },
+    {
+      "operation": "progress",
+      "message": "Cycle 2: analyzing (without SonarQube) ..."
+    },
+    {
+      "operation": "analyze",
+      "run_sonar": false
+    },
+    {
+      "operation": "progress",
+      "message": "Cycle 2: planning for spring-boot-3.2-java-17 ..."
+    },
+    {
+      "operation": "plan",
+      "plan_id": "plan-2"
+    }
+  ],
+  "persisted_state": {
+    "profile": "spring-boot-3.2-java-17",
+    "sonar_dependency_fingerprint": null,
+    "completed": true,
+    "cycles": 2
+  }
+}

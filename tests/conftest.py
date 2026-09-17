@@ -4,6 +4,13 @@ from refinery_ai.context_graph.contracts import ContextFragment, ContextRequest
 from refinery_ai.context_graph.providers.codegraph import CodeGraphProvider
 
 
+@pytest.fixture(autouse=True)
+def disable_telemetry_export(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep tests isolated from developer and CI OpenTelemetry configuration."""
+
+    monkeypatch.setenv("REFINERY_OTEL_ENABLED", "false")
+
+
 @pytest.fixture
 def stub_codegraph(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep CLI tests independent of the external CodeGraph installation."""
