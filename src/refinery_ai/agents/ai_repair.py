@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import subprocess
+import xml.etree.ElementTree as ET
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,7 @@ from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field, SecretStr
 
+from refinery_ai.build_tools import maven_command_prefix
 from refinery_ai.config import Settings
 from refinery_ai.migrations.deterministic_repair import springdoc_repair_files
 from refinery_ai.migrations.repair import repair_result
@@ -43,6 +46,7 @@ class AiRepairAgent:
         self.settings = settings
         self._proposal_fingerprints: set[str] = set()
         self._last_replacements: dict[Path, str] = {}
+        self._dependency_feedback: list[str] = []
         if settings.repair_mode is RepairMode.LOCAL:
             _require_local_endpoint(settings.ollama_base_url)
         self.model = _repair_model(
@@ -91,7 +95,9 @@ class AiRepairAgent:
             "only change dependency coordinates when the supplied files or build diagnostics "
             "provide evidence for a resolvable version.\n"
             f"Recipe: {step.recipe}\nAllowed files: {[str(path) for path in allowed]}\n"
-            f"Build failure:\n{failure.model_dump_json()}\nSources:\n" + "\n".join(context)
+            f"Build failure:\n{failure.model_dump_json()}\n"
+            f"Rejected dependency proposals: {self._dependency_feedback}\nSources:\n"
+            + "\n".join(context)
         )
         try:
             result = self.agent.invoke(
@@ -135,6 +141,18 @@ class AiRepairAgent:
         }
         for replacement in proposal.files:
             (repository / replacement.path).write_text(replacement.content)
+        dependency_error = _validate_new_maven_coordinates(
+            repository,
+            self._last_replacements,
+            {
+                repository / replacement.path: replacement.content
+                for replacement in proposal.files
+            },
+        )
+        if dependency_error:
+            self.rollback_last()
+            self._dependency_feedback.append(dependency_error)
+            return repair_result(1, dependency_error)
         return repair_result(0, stdout=proposal.summary)
 
     def accept_last(self) -> None:
@@ -156,6 +174,77 @@ def _require_local_endpoint(api_base: str | None) -> None:
     host = urlparse(api_base).hostname
     if host not in {"localhost", "127.0.0.1", "::1"}:
         raise ValueError("Local repair mode requires a loopback model endpoint")
+
+
+def _maven_dependencies(content: str) -> set[tuple[str, str, str]]:
+    """Extract literal dependency coordinates from one Maven project file."""
+
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError:
+        return set()
+
+    def child_text(element: ET.Element, name: str) -> str | None:
+        for child in element:
+            if child.tag.rsplit("}", 1)[-1] == name and child.text:
+                return child.text.strip()
+        return None
+
+    coordinates: set[tuple[str, str, str]] = set()
+    for element in root.iter():
+        if element.tag.rsplit("}", 1)[-1] != "dependency":
+            continue
+        group = child_text(element, "groupId")
+        artifact = child_text(element, "artifactId")
+        version = child_text(element, "version")
+        if group and artifact and version and "${" not in version:
+            coordinates.add((group, artifact, version))
+    return coordinates
+
+
+def _validate_new_maven_coordinates(
+    repository: Path,
+    originals: dict[Path, str],
+    proposals: dict[Path, str],
+) -> str | None:
+    """Reject literal Maven coordinates introduced by an AI proposal if unavailable."""
+
+    original_coordinates: set[tuple[str, str, str]] = set()
+    proposed_coordinates: set[tuple[str, str, str]] = set()
+    for path, content in originals.items():
+        if path.name == "pom.xml":
+            original_coordinates.update(_maven_dependencies(content))
+    for path, content in proposals.items():
+        if path.name == "pom.xml":
+            proposed_coordinates.update(_maven_dependencies(content))
+
+    for group, artifact, version in sorted(proposed_coordinates - original_coordinates):
+        coordinate = f"{group}:{artifact}:{version}"
+        command = [
+            *maven_command_prefix(repository),
+            "-q",
+            "dependency:get",
+            f"-Dartifact={coordinate}",
+            "-Dtransitive=false",
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                cwd=repository,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=120,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            return f"Could not validate proposed Maven dependency {coordinate}: {error}"
+        if result.returncode != 0:
+            diagnostic = (result.stderr.strip() or result.stdout.strip())[-1000:]
+            return (
+                f"Rejected proposed Maven dependency {coordinate}: it did not resolve from "
+                f"the configured repositories. {diagnostic}"
+            )
+    return None
 
 
 def _repair_model(

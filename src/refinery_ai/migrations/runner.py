@@ -419,6 +419,12 @@ class MigrationRunner:
                                 f"{stage.name.capitalize()} repair attempt {attempt} "
                                 f"did not apply: {detail}"
                             )
+                            # Model repairers can reject a scoped proposal (for example, an
+                            # unavailable dependency) and use that feedback on the next attempt.
+                            if stage.uses_model and isinstance(
+                                stage.repairer, TransactionalMigrationRepairer
+                            ):
+                                continue
                             break
                         self.progress(f"Verifying {stage.name} repair {attempt}: {label}")
                         candidate_result = self.build_verifier(

@@ -647,6 +647,71 @@ def test_migration_runner_rolls_back_ai_repairs_that_do_not_improve_verification
     assert "Failures: 1" in result.steps[0].verification.stdout
 
 
+def test_migration_runner_retries_rejected_transactional_ai_proposal(
+    tmp_path: Path,
+) -> None:
+    initialize_git_repository(tmp_path)
+    store = MigrationPlanStore(tmp_path)
+    store.root.mkdir(parents=True)
+    step = RecipeRecommendation(
+        recipe="example.Upgrade",
+        reason="Upgrade.",
+        evidence=["test"],
+        expected_benefit="upgrade",
+        priority="high",
+        confidence=1,
+    )
+    plan = PersistedMigrationPlan(
+        plan_id="retry-rejected-ai",
+        snapshot=DiscoverySnapshot(repository=tmp_path, build_system=BuildSystem.MAVEN),
+        steps=[step],
+    )
+    (store.root / "retry-rejected-ai.json").write_text(plan.model_dump_json())
+
+    class Runner:
+        def run(self, snapshot, step, *, apply, timeout, environment=None):
+            del snapshot, step, apply, timeout, environment
+            return VerificationResult(command=["rewrite"], exit_code=0, duration_seconds=0)
+
+    class Repairer:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def repair(self, repository, step, failure):
+            del repository, step, failure
+            self.calls += 1
+            return VerificationResult(
+                command=["repair"], exit_code=0 if self.calls == 2 else 1, duration_seconds=0
+            )
+
+        def accept_last(self):
+            pass
+
+        def rollback_last(self):
+            pass
+
+    repairer = Repairer()
+    build_count = 0
+
+    def verifier(repository, command, **kwargs):
+        nonlocal build_count
+        del repository, command, kwargs
+        build_count += 1
+        return VerificationResult(
+            command=["mvn"], exit_code=0 if build_count in {1, 3} else 1, duration_seconds=0
+        )
+
+    result = MigrationRunner(
+        store,
+        runners={ExecutionType.OPENREWRITE: Runner()},
+        build_verifier=verifier,
+        repair_stages=(MigrationRepairStage("AI", repairer, 2, uses_model=True),),
+    ).run(apply=True)
+
+    assert result.status is RunStatus.COMPLETED
+    assert repairer.calls == 2
+
+
 def test_migration_runner_stops_before_recipes_when_baseline_is_red(tmp_path: Path) -> None:
     initialize_git_repository(tmp_path)
     store = MigrationPlanStore(tmp_path)

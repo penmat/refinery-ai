@@ -2,7 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from refinery_ai.agents.ai_repair import AiRepairAgent, _repair_file_context
+from refinery_ai.agents.ai_repair import (
+    AiRepairAgent,
+    _maven_dependencies,
+    _repair_file_context,
+    _validate_new_maven_coordinates,
+)
 from refinery_ai.config import Settings
 from refinery_ai.migrations.ai_repair import AiMigrationRepairer, _ai_repair_files
 from refinery_ai.migrations.deterministic_repair import (
@@ -182,6 +187,55 @@ def test_ai_repair_rejects_a_noop_replacement(tmp_path: Path, monkeypatch) -> No
     assert "did not change any files" in result.stderr
 
 
+def test_ai_repair_rolls_back_an_unresolvable_dependency(tmp_path: Path, monkeypatch) -> None:
+    pom = tmp_path / "pom.xml"
+    original = "<project><dependencies/></project>\n"
+    proposal = """<project><dependencies><dependency>
+      <groupId>io.milton</groupId><artifactId>milton-server-ce</artifactId><version>4.0.3</version>
+    </dependency></dependencies></project>
+"""
+    pom.write_text(original)
+    install_repair_graph(
+        monkeypatch,
+        {
+            "diagnosis": "Milton needs Jakarta support",
+            "summary": "Upgrade Milton",
+            "files": [{"path": "pom.xml", "content": proposal}],
+        },
+    )
+    monkeypatch.setattr(
+        "refinery_ai.agents.ai_repair._validate_new_maven_coordinates",
+        lambda *args: (
+            "Rejected proposed Maven dependency io.milton:milton-server-ce:4.0.3: "
+            "it did not resolve from the configured repositories."
+        ),
+    )
+    repairer = AiRepairAgent(Settings(repair_mode=RepairMode.CONFIGURED_PROVIDER))
+
+    result = repairer.repair(
+        tmp_path,
+        RecipeRecommendation(
+            recipe="org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2",
+            reason="Upgrade Boot.",
+            evidence=["boot"],
+            expected_benefit="Boot 3.2.",
+            priority="high",
+            confidence=1,
+        ),
+        VerificationResult(
+            command=["mvn", "test"],
+            exit_code=1,
+            stdout=f"[ERROR] {pom}:[1,1] dependency resolution failed",
+            duration_seconds=0,
+        ),
+    )
+
+    assert not result.green
+    assert "io.milton:milton-server-ce:4.0.3" in result.stderr
+    assert pom.read_text() == original
+    assert repairer._dependency_feedback == [result.stderr]
+
+
 def test_ai_repair_scope_uses_diagnostic_source_and_module_build_files(tmp_path: Path) -> None:
     source = tmp_path / "module/src/main/java/example/App.java"
     source.parent.mkdir(parents=True)
@@ -212,6 +266,43 @@ def test_ai_repair_scope_uses_diagnostic_source_and_module_build_files(tmp_path:
         Path("module/src/main/java/example/App.java"),
         Path("pom.xml"),
     )
+
+
+def test_maven_dependencies_extracts_only_literal_versions() -> None:
+    content = """<project xmlns="http://maven.apache.org/POM/4.0.0">
+      <dependencies>
+        <dependency><groupId>io.milton</groupId><artifactId>milton-server-ce</artifactId><version>4.0.3</version></dependency>
+        <dependency><groupId>example</groupId><artifactId>managed</artifactId><version>${managed.version}</version></dependency>
+      </dependencies>
+    </project>"""
+
+    assert _maven_dependencies(content) == {("io.milton", "milton-server-ce", "4.0.3")}
+
+
+def test_new_maven_coordinate_is_checked_and_rejected(tmp_path: Path, monkeypatch) -> None:
+    pom = tmp_path / "pom.xml"
+    original = "<project><dependencies/></project>"
+    proposal = """<project><dependencies><dependency>
+      <groupId>io.milton</groupId><artifactId>milton-server-ce</artifactId><version>4.0.3</version>
+    </dependency></dependencies></project>"""
+    pom.write_text(proposal)
+    commands: list[list[str]] = []
+
+    def unavailable(command, **kwargs):
+        del kwargs
+        commands.append(command)
+        return type("Result", (), {"returncode": 1, "stderr": "artifact missing", "stdout": ""})()
+
+    monkeypatch.setattr("refinery_ai.agents.ai_repair.subprocess.run", unavailable)
+
+    error = _validate_new_maven_coordinates(
+        tmp_path, {pom: original}, {pom: proposal}
+    )
+
+    assert error is not None
+    assert "io.milton:milton-server-ce:4.0.3" in error
+    assert "did not resolve" in error
+    assert "-Dtransitive=false" in commands[0]
 
 
 def test_ai_repair_scope_finds_same_missing_symbol_across_modules(tmp_path: Path) -> None:
