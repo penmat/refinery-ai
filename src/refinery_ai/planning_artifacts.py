@@ -62,14 +62,10 @@ def load_migration_failures(
         if not isinstance(recipe, str):
             continue
         if payload.get("status") == "completed":
-            base_revision = payload.get("base_revision")
-            checkpoint = payload.get("checkpoint")
-            if not (
-                isinstance(base_revision, str)
-                and isinstance(checkpoint, str)
-                and base_revision == checkpoint
-            ):
-                completed_recipes.add(recipe)
+            # A green no-op is still authoritative evidence for the revision on
+            # which it ran. Remember it so the next planning cycle cannot select
+            # the same already-satisfied recipe and stall on a repeated plan.
+            completed_recipes.add(recipe)
             continue
         if payload.get("status") != "failed":
             continue

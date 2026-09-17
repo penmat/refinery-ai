@@ -4,7 +4,11 @@ from pathlib import Path
 
 from refinery_ai.migrations.openrewrite import _infer_recipe_artifact
 from refinery_ai.migrations.repair import MigrationRepairStage
-from refinery_ai.migrations.runner import MigrationRunner, migration_display_name
+from refinery_ai.migrations.runner import (
+    MigrationRunner,
+    _failure_score,
+    migration_display_name,
+)
 from refinery_ai.models import (
     BuildSystem,
     DiscoverySnapshot,
@@ -43,6 +47,57 @@ def initialize_git_repository(path: Path) -> None:
         "GIT_COMMITTER_EMAIL": "test@example.com",
     }
     subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=path, env=env, check=True)
+
+
+def test_failure_score_prefers_progress_to_a_later_maven_module() -> None:
+    earlier = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        duration_seconds=0,
+        stdout="""
+[INFO] module-a ......................................... SUCCESS
+[INFO] module-b ......................................... FAILURE
+[ERROR] /work/module-b/src/main/java/App.java:[10,1] cannot find symbol
+""",
+    )
+    later = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        duration_seconds=0,
+        stdout="""
+[INFO] module-a ......................................... SUCCESS
+[INFO] module-b ......................................... SUCCESS
+[INFO] module-c ......................................... FAILURE
+[ERROR] /work/module-c/src/main/java/Config.java:[10,1] cannot find symbol
+[ERROR] /work/module-c/src/main/java/Security.java:[20,1] cannot find symbol
+""",
+    )
+
+    assert _failure_score(later) < _failure_score(earlier)
+
+
+def test_failure_score_counts_unique_compiler_diagnostics() -> None:
+    repeated = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        duration_seconds=0,
+        stdout="""
+[ERROR] /work/src/main/java/App.java:[10,1] cannot find symbol
+[ERROR] /work/src/main/java/App.java:[10,1] cannot find symbol
+""",
+    )
+    two_errors = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        duration_seconds=0,
+        stdout="""
+[ERROR] /work/src/main/java/App.java:[10,1] cannot find symbol
+[ERROR] /work/src/main/java/App.java:[11,1] incompatible types: A cannot be converted to B
+""",
+    )
+
+    assert _failure_score(repeated) == (3, 0, 1)
+    assert _failure_score(two_errors) == (3, 0, 2)
 
 
 def test_migration_runner_loads_latest_plan_and_dispatches_by_type(tmp_path: Path) -> None:

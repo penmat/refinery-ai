@@ -44,29 +44,61 @@ from refinery_ai.telemetry import observe_llm
 from refinery_ai.verification import verification_command, verify
 
 
-def _failure_score(result: VerificationResult) -> tuple[int, int]:
-    """Rank red verification results so model repairs can be kept only when they improve."""
+def _reactor_success_count(diagnostic: str) -> int:
+    """Count modules Maven reports as successful before the failing module."""
 
-    if result.green:
-        return (0, 0)
-    diagnostic = f"{result.stdout}\n{result.stderr}"
-    compilation_markers = (
-        "COMPILATION ERROR",
-        "Compilation failure",
+    return len(
+        re.findall(r"(?m)^\[INFO\]\s+.+?\.{3,}\s+SUCCESS(?:\s|$)", diagnostic)
+    )
+
+
+def _unique_compilation_errors(diagnostic: str) -> int:
+    """Count distinct compiler diagnostics without Maven's repeated summary copy."""
+
+    errors: set[str] = set()
+    source_error = re.compile(
+        r"^\[ERROR\]\s+(.+?\.(?:java|kt|groovy)):\[(\d+)(?:,\d+)?\]\s+(.+)$"
+    )
+    for raw_line in diagnostic.splitlines():
+        line = raw_line.strip()
+        match = source_error.match(line)
+        if match:
+            # Worktree roots may vary between attempts, while the source suffix,
+            # line and diagnostic identify the same underlying compiler failure.
+            source = match.group(1).replace("\\", "/").rsplit("/src/", 1)[-1]
+            errors.add(f"{source}:{match.group(2)}:{match.group(3)}")
+    if errors:
+        return len(errors)
+
+    markers = (
         "cannot find symbol",
         "package does not exist",
         "incompatible types:",
     )
-    compilation_errors = sum(diagnostic.count(marker) for marker in compilation_markers)
+    fallback = {
+        line.strip()
+        for line in diagnostic.splitlines()
+        if any(marker in line for marker in markers)
+    }
+    return len(fallback)
+
+
+def _failure_score(result: VerificationResult) -> tuple[int, int, int]:
+    """Rank red verification results so model repairs can be kept only when they improve."""
+
+    if result.green:
+        return (0, 0, 0)
+    diagnostic = f"{result.stdout}\n{result.stderr}"
+    compilation_errors = _unique_compilation_errors(diagnostic)
     if compilation_errors:
-        return (3, compilation_errors)
+        return (3, -_reactor_success_count(diagnostic), compilation_errors)
     test_summaries = re.findall(
         r"Tests run:\s*\d+,\s*Failures:\s*(\d+),\s*Errors:\s*(\d+)", diagnostic
     )
     if test_summaries:
         failures, errors = test_summaries[-1]
-        return (2, int(failures) + int(errors))
-    return (4, 1)
+        return (2, 0, int(failures) + int(errors))
+    return (4, -_reactor_success_count(diagnostic), 1)
 
 
 class MigrationRunner:

@@ -269,7 +269,7 @@ def test_load_migration_failures_keeps_stdout_when_stderr_is_nonempty(
     assert "Conditions evaluation report" in history.context
 
 
-def test_no_change_migration_is_not_recorded_as_completed(tmp_path: Path) -> None:
+def test_no_change_migration_is_recorded_as_completed(tmp_path: Path) -> None:
     step = tmp_path / ".refinery/migration-runs/run-1/step-001"
     step.mkdir(parents=True)
     step.joinpath("step.json").write_text(
@@ -287,7 +287,9 @@ def test_no_change_migration_is_not_recorded_as_completed(tmp_path: Path) -> Non
 
     history = load_migration_failures(tmp_path, Path(".refinery"), 10_000)
 
-    assert history.completed_recipes == frozenset()
+    assert history.completed_recipes == frozenset(
+        {"org.openrewrite.java.spring.boot2.AddSpringBootStarterValidation"}
+    )
 
 
 def test_planning_evidence_facts_include_goal_and_retained_warnings(tmp_path: Path) -> None:
