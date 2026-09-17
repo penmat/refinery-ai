@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import Any
 
-from pydantic_ai import Agent, NativeOutput, RunContext
-from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
-from pydantic_ai.providers.ollama import OllamaProvider
-from pydantic_ai.providers.openai import OpenAIProvider
+from langchain.agents import create_agent
+from langchain.agents.structured_output import ToolStrategy
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage
+from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
 
 from refinery_ai.agents.contracts import PlanningDependencies, PlanningRequest
 from refinery_ai.models import (
@@ -19,7 +22,7 @@ from refinery_ai.recipes.catalog import (
     RecipeDetail,
     RecipeSummary,
 )
-from refinery_ai.telemetry import run_observed_agent
+from refinery_ai.telemetry import observe_llm, record_llm_usage
 
 PLANNING_SYSTEM_PROMPT = (
     "Given the project assessment artifacts and the compact OpenRewrite recipe catalog index, "
@@ -126,116 +129,114 @@ def planning_payload_metrics(prompt: str, deps: PlanningDependencies) -> dict[st
     return metrics
 
 
-def create_planning_agent(
+def _planning_model(
     model: str,
     *,
     ollama_base_url: str | None = None,
     openai_api_key: str | None = None,
-) -> Agent[PlanningDependencies, RecipePlan]:
-    """Create a planner that recommends catalog recipes but never executes them."""
+) -> BaseChatModel:
+    """Create the LangChain chat model used by the planner."""
 
-    planner_model: str | OpenAIChatModel | OpenAIResponsesModel = model
     if model.startswith("ollama:") and ollama_base_url:
         model_name = model.removeprefix("ollama:")
         base_url = ollama_base_url.rstrip("/")
         if not base_url.endswith("/v1"):
             base_url += "/v1"
-        planner_model = OpenAIChatModel(
-            model_name,
-            provider=OllamaProvider(base_url=base_url),
+        return ChatOpenAI(
+            model=model_name,
+            base_url=base_url,
+            api_key=SecretStr("ollama"),
+            max_retries=3,
         )
-    elif model.startswith("openai:"):
+    if model.startswith("openai:"):
         model_name = model.removeprefix("openai:")
-        planner_model = (
-            OpenAIResponsesModel(
-                model_name,
-                provider=OpenAIProvider(api_key=openai_api_key),
-            )
-            if openai_api_key
-            else OpenAIResponsesModel(model_name, provider="openai")
-        )
+        parameters: dict[str, Any] = {
+            "model": model_name,
+            "max_retries": 3,
+            "use_responses_api": True,
+        }
+        if openai_api_key:
+            parameters["api_key"] = SecretStr(openai_api_key)
+        return ChatOpenAI(**parameters)
+    return ChatOpenAI(model=model, max_retries=3)
 
-    agent: Agent[PlanningDependencies, RecipePlan] = Agent(
-        planner_model,
-        deps_type=PlanningDependencies,
-        output_type=NativeOutput(
-            RecipePlan,
-            name="submit_recipe_recommendations",
-            description=(
-                "Return only an object containing evidence-backed OpenRewrite recommendations. "
-                "Do not copy or return the recipe catalog."
-            ),
-            strict=False,
-        ),
-        retries=3,
-        system_prompt=PLANNING_SYSTEM_PROMPT,
-    )
 
-    @agent.instructions
-    def project_context(ctx: RunContext[PlanningDependencies]) -> str:
-        return render_planning_context(ctx.deps)
-
-    @agent.tool
-    def list_recipe_categories(
-        ctx: RunContext[PlanningDependencies], repository: str | None = None
-    ) -> list[RecipeCategory]:
-        """List recipe namespaces and counts, optionally for one source repository."""
-
-        return ctx.deps.recipe_catalog.list_categories(repository)
-
-    @agent.tool
-    def search_recipes(
-        ctx: RunContext[PlanningDependencies],
-        query: str,
-        repository: str | None = None,
-        limit: int = 10,
-    ) -> list[RecipeSummary]:
-        """Search cached recipe names and descriptions; returns at most 20 compact matches."""
-
-        return ctx.deps.recipe_catalog.search(query, repository, limit)
-
-    @agent.tool
-    def get_recipe(
-        ctx: RunContext[PlanningDependencies], recipe: str
-    ) -> RecipeDetail | None:
-        """Look up one exact recipe and its composed recipe list."""
-
-        return ctx.deps.recipe_catalog.get(recipe)
-
-    @agent.output_validator
-    def catalog_recipes_only(
-        ctx: RunContext[PlanningDependencies], output: RecipePlan
-    ) -> RecipePlan:
-        return grounded_recipe_plan(
-            output,
-            frozenset(ctx.deps.recipe_catalog.allowed_recipes),
-            ctx.deps.evidence_corpus,
-            ctx.deps.recipe_catalog.recipe_artifacts,
-            ctx.deps.failed_recipes,
-            ctx.deps.completed_recipes,
-        )
-
-    return agent
+def _usage_from_messages(messages: object) -> dict[str, int]:
+    usage = {"input_tokens": 0, "output_tokens": 0, "requests": 0}
+    if not isinstance(messages, list):
+        return usage
+    for message in messages:
+        if not isinstance(message, AIMessage) or not message.usage_metadata:
+            continue
+        usage["input_tokens"] += int(message.usage_metadata.get("input_tokens", 0))
+        usage["output_tokens"] += int(message.usage_metadata.get("output_tokens", 0))
+        usage["requests"] += 1
+    return usage
 
 
 @dataclass(frozen=True)
-class PydanticAIPlanner:
-    """Adapter exposing the current Pydantic AI planner through the Planner contract."""
+class LangGraphPlanner:
+    """Catalog-aware LangGraph planner with deterministic output grounding."""
 
-    agent: Agent[PlanningDependencies, RecipePlan]
-    model: str
+    model: BaseChatModel
+    model_name: str
 
     def plan(self, request: PlanningRequest) -> RecipePlan:
-        result = run_observed_agent(
-            self.agent,
-            request.prompt,
-            deps=request.dependencies,
-            phase="planning",
+        dependencies = request.dependencies
+
+        def list_recipe_categories(repository: str | None = None) -> list[RecipeCategory]:
+            """List recipe namespaces and counts, optionally for one source repository."""
+
+            return dependencies.recipe_catalog.list_categories(repository)
+
+        def search_recipes(
+            query: str,
+            repository: str | None = None,
+            limit: int = 10,
+        ) -> list[RecipeSummary]:
+            """Search cached recipe names and descriptions; return at most 20 matches."""
+
+            return dependencies.recipe_catalog.search(query, repository, limit)
+
+        def get_recipe(recipe: str) -> RecipeDetail | None:
+            """Look up one exact recipe and its composed recipe list."""
+
+            return dependencies.recipe_catalog.get(recipe)
+
+        agent = create_agent(
+            self.model,
+            tools=[list_recipe_categories, search_recipes, get_recipe],
+            system_prompt=f"{PLANNING_SYSTEM_PROMPT}\n\n{render_planning_context(dependencies)}",
+            response_format=ToolStrategy(RecipePlan),
+            name="refinery-planner",
+        )
+        with observe_llm(
+            "planning",
             run_id=request.run_id,
             plan_id=request.plan_id,
-            model=self.model,
+        ):
+            result = agent.invoke(
+                {"messages": [{"role": "user", "content": request.prompt}]},
+                config={
+                    "metadata": {
+                        "refinery.run.id": request.run_id,
+                        "refinery.plan.id": request.plan_id or "",
+                    }
+                },
+            )
+            record_llm_usage(
+                _usage_from_messages(result.get("messages")),
+                model=self.model_name,
+            )
+        output = RecipePlan.model_validate(result["structured_response"])
+        return grounded_recipe_plan(
+            output,
+            frozenset(dependencies.recipe_catalog.allowed_recipes),
+            dependencies.evidence_corpus,
+            dependencies.recipe_catalog.recipe_artifacts,
+            dependencies.failed_recipes,
+            dependencies.completed_recipes,
         )
-        return RecipePlan.model_validate(result.output)
 
 
 def create_planner(
@@ -243,11 +244,11 @@ def create_planner(
     *,
     ollama_base_url: str | None = None,
     openai_api_key: str | None = None,
-) -> PydanticAIPlanner:
-    """Create the default planner adapter without leaking its framework to callers."""
+) -> LangGraphPlanner:
+    """Create the native LangGraph planner."""
 
-    return PydanticAIPlanner(
-        create_planning_agent(
+    return LangGraphPlanner(
+        _planning_model(
             model,
             ollama_base_url=ollama_base_url,
             openai_api_key=openai_api_key,

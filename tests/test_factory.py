@@ -3,11 +3,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
-from pydantic_ai.models.openai import OpenAIResponsesModel
+from langchain_openai import ChatOpenAI
 from typer.testing import CliRunner
 
 from refinery_ai.agents.contracts import Planner, PlanningRequest
-from refinery_ai.agents.planning import create_planning_agent, grounded_recipe_plan
+from refinery_ai.agents.planning import create_planner, grounded_recipe_plan
 from refinery_ai.cli import app
 from refinery_ai.config import Settings
 from refinery_ai.context_graph.models import ContextGraphInfo
@@ -108,20 +108,23 @@ def test_planner_rules_capture_spring_boot_java_17_ordering() -> None:
 
 
 def test_planner_uses_the_configured_ollama_api_base() -> None:
-    planner = create_planning_agent(
+    planner = create_planner(
         "ollama:gemma4:latest", ollama_base_url="http://ollama.test:11434/"
     )
 
-    assert str(cast(Any, planner.model).base_url) == "http://ollama.test:11434/v1/"
+    assert str(cast(ChatOpenAI, planner.model).openai_api_base) == (
+        "http://ollama.test:11434/v1"
+    )
 
 
 def test_openai_planner_uses_the_responses_api_for_reasoning_tools() -> None:
-    planner = create_planning_agent(
+    planner = create_planner(
         "openai:gpt-5.6-luna",
         openai_api_key="test-key",
     )
 
-    assert isinstance(planner.model, OpenAIResponsesModel)
+    assert isinstance(planner.model, ChatOpenAI)
+    assert planner.model.use_responses_api is True
 
 
 def test_planner_filters_ungrounded_recommendations_instead_of_failing() -> None:
