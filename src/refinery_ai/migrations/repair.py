@@ -19,6 +19,15 @@ class MigrationRepairer(Protocol):
     ) -> VerificationResult: ...
 
 
+@runtime_checkable
+class TransactionalMigrationRepairer(Protocol):
+    """A repairer that can accept or undo its most recently applied proposal."""
+
+    def accept_last(self) -> None: ...
+
+    def rollback_last(self) -> None: ...
+
+
 @dataclass(frozen=True)
 class MigrationRepairStage:
     """One independently budgeted migration-repair strategy."""

@@ -144,6 +144,10 @@ def test_ai_repair_uses_scoped_full_file_replacement(tmp_path: Path, monkeypatch
     assert result.green
     assert source.read_text() == "class SwaggerConfiguration {}\n"
 
+    repairer.rollback_last()
+
+    assert source.read_text() == "import springfox.documentation.spring.web.plugins.Docket;\n"
+
 
 def test_ai_repair_rejects_a_noop_replacement(tmp_path: Path, monkeypatch) -> None:
     source = tmp_path / "src/main/java/SwaggerConfiguration.java"

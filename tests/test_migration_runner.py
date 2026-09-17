@@ -507,6 +507,91 @@ def test_migration_runner_budgets_deterministic_and_ai_repairs_separately(
     ]
 
 
+def test_migration_runner_rolls_back_ai_repairs_that_do_not_improve_verification(
+    tmp_path: Path,
+) -> None:
+    initialize_git_repository(tmp_path)
+    store = MigrationPlanStore(tmp_path)
+    store.root.mkdir(parents=True)
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.springdoc.SpringFoxToSpringDoc",
+        reason="Replace Springfox.",
+        evidence=["springfox"],
+        expected_benefit="Use Springdoc.",
+        priority="high",
+        confidence=1,
+    )
+    plan = PersistedMigrationPlan(
+        plan_id="transactional-ai-repair",
+        snapshot=DiscoverySnapshot(repository=tmp_path, build_system=BuildSystem.MAVEN),
+        steps=[step],
+    )
+    (store.root / "transactional-ai-repair.json").write_text(plan.model_dump_json())
+
+    class SpringdocRunner:
+        def run(self, snapshot, step, *, apply: bool, timeout: int, environment=None):
+            del step, timeout, environment
+            if apply:
+                Path(snapshot.repository, "contract.yml").write_text("one-failure")
+            return VerificationResult(command=["rewrite"], exit_code=0, duration_seconds=0)
+
+    class TransactionalAiRepairer:
+        def __init__(self) -> None:
+            self.previous = ""
+            self.target: Path | None = None
+            self.starts: list[str] = []
+            self.rollbacks = 0
+
+        def repair(self, repository, step, failure):
+            del step, failure
+            contract = Path(repository, "contract.yml")
+            self.target = contract
+            self.previous = contract.read_text()
+            self.starts.append(self.previous)
+            contract.write_text("five-failures")
+            return VerificationResult(command=["ai-repair"], exit_code=0, duration_seconds=0)
+
+        def accept_last(self) -> None:
+            self.previous = ""
+
+        def rollback_last(self) -> None:
+            self.rollbacks += 1
+            assert self.target is not None
+            self.target.write_text(self.previous)
+            self.previous = ""
+
+    repairer = TransactionalAiRepairer()
+    build_count = 0
+
+    def verifier(repository, command, **kwargs):
+        nonlocal build_count
+        del command, kwargs
+        build_count += 1
+        if build_count == 1:
+            return VerificationResult(command=["test"], exit_code=0, duration_seconds=0)
+        content = Path(repository, "contract.yml").read_text()
+        failures = 5 if content == "five-failures" else 1
+        return VerificationResult(
+            command=["test"],
+            exit_code=1,
+            stdout=f"Tests run: 10, Failures: {failures}, Errors: 0, Skipped: 0",
+            duration_seconds=0,
+        )
+
+    result = MigrationRunner(
+        store,
+        runners={ExecutionType.OPENREWRITE: SpringdocRunner()},
+        build_verifier=verifier,
+        repair_stages=(MigrationRepairStage("AI", repairer, 2, uses_model=True),),
+    ).run(apply=True)
+
+    assert result.status is RunStatus.FAILED
+    assert repairer.starts == ["one-failure", "one-failure"]
+    assert repairer.rollbacks == 2
+    assert result.steps[0].verification is not None
+    assert "Failures: 1" in result.steps[0].verification.stdout
+
+
 def test_migration_runner_stops_before_recipes_when_baseline_is_red(tmp_path: Path) -> None:
     initialize_git_repository(tmp_path)
     store = MigrationPlanStore(tmp_path)

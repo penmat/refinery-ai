@@ -83,10 +83,10 @@ def test_planner_and_repair_models_are_explicitly_configured() -> None:
     assert settings.repair_model == "openai:gpt-5.6-luna"
 
 
-def test_deterministic_and_ai_repairs_each_get_three_attempts() -> None:
+def test_deterministic_repairs_get_four_attempts_and_ai_gets_three() -> None:
     settings = Settings()
 
-    assert settings.max_deterministic_repair_attempts == 3
+    assert settings.max_deterministic_repair_attempts == 4
     assert settings.max_repair_attempts == 3
 
 

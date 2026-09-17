@@ -42,6 +42,7 @@ class AiRepairAgent:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._proposal_fingerprints: set[str] = set()
+        self._last_replacements: dict[Path, str] = {}
         if settings.repair_mode is RepairMode.LOCAL:
             _require_local_endpoint(settings.ollama_base_url)
         self.model = _repair_model(
@@ -126,9 +127,27 @@ class AiRepairAgent:
             for replacement in proposal.files
         ):
             return repair_result(1, "Repair proposal did not change any files")
+        self._last_replacements = {
+            repository / replacement.path: (repository / replacement.path).read_text(
+                errors="replace"
+            )
+            for replacement in proposal.files
+        }
         for replacement in proposal.files:
             (repository / replacement.path).write_text(replacement.content)
         return repair_result(0, stdout=proposal.summary)
+
+    def accept_last(self) -> None:
+        """Keep the most recent proposal after verification shows improvement."""
+
+        self._last_replacements.clear()
+
+    def rollback_last(self) -> None:
+        """Restore files changed by the most recent unsuccessful proposal."""
+
+        for path, content in self._last_replacements.items():
+            path.write_text(content)
+        self._last_replacements.clear()
 
 
 def _require_local_endpoint(api_base: str | None) -> None:

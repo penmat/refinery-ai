@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     otel_include_content: bool = False
     state_directory: Path = Path(".refinery")
     max_repair_attempts: int = 3
-    max_deterministic_repair_attempts: int = 3
+    max_deterministic_repair_attempts: int = 4
     repair_mode: RepairMode = RepairMode.DISABLED
     command_timeout_seconds: int = 900
     codegraph_timeout_seconds: int = 900

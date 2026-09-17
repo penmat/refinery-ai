@@ -17,7 +17,11 @@ from refinery_ai.jdks import (
 from refinery_ai.migrations.contracts import MigrationTypeRunner
 from refinery_ai.migrations.deterministic_repair import springdoc_repair_applicable
 from refinery_ai.migrations.openrewrite import OpenRewriteMigrationRunner
-from refinery_ai.migrations.repair import MigrationRepairer, MigrationRepairStage
+from refinery_ai.migrations.repair import (
+    MigrationRepairer,
+    MigrationRepairStage,
+    TransactionalMigrationRepairer,
+)
 from refinery_ai.migrations.spring_properties import (
     DEFER_DATASOURCE_INITIALIZATION_RECIPE,
     SpringPropertiesMigrationRunner,
@@ -38,6 +42,31 @@ from refinery_ai.models import (
 from refinery_ai.planning_artifacts import MigrationPlanStore
 from refinery_ai.telemetry import observe_llm
 from refinery_ai.verification import verification_command, verify
+
+
+def _failure_score(result: VerificationResult) -> tuple[int, int]:
+    """Rank red verification results so model repairs can be kept only when they improve."""
+
+    if result.green:
+        return (0, 0)
+    diagnostic = f"{result.stdout}\n{result.stderr}"
+    compilation_markers = (
+        "COMPILATION ERROR",
+        "Compilation failure",
+        "cannot find symbol",
+        "package does not exist",
+        "incompatible types:",
+    )
+    compilation_errors = sum(diagnostic.count(marker) for marker in compilation_markers)
+    if compilation_errors:
+        return (3, compilation_errors)
+    test_summaries = re.findall(
+        r"Tests run:\s*\d+,\s*Failures:\s*(\d+),\s*Errors:\s*(\d+)", diagnostic
+    )
+    if test_summaries:
+        failures, errors = test_summaries[-1]
+        return (2, int(failures) + int(errors))
+    return (4, 1)
 
 
 class MigrationRunner:
@@ -360,13 +389,29 @@ class MigrationRunner:
                             )
                             break
                         self.progress(f"Verifying {stage.name} repair {attempt}: {label}")
-                        build_result = self.build_verifier(
+                        candidate_result = self.build_verifier(
                             Path(step_snapshot.repository),
                             command,
                             timeout=self.timeout,
                             output_limit=self.output_limit,
                             environment=self._jdk_environment(current_java),
                         )
+                        if stage.uses_model and isinstance(
+                            stage.repairer, TransactionalMigrationRepairer
+                        ):
+                            if candidate_result.green or _failure_score(
+                                candidate_result
+                            ) < _failure_score(build_result):
+                                stage.repairer.accept_last()
+                                build_result = candidate_result
+                            else:
+                                stage.repairer.rollback_last()
+                                self.progress(
+                                    f"Rolled back {stage.name} repair {attempt}: "
+                                    "verification did not improve"
+                                )
+                        else:
+                            build_result = candidate_result
                     if build_result.green:
                         break
                 if not build_result.green:
