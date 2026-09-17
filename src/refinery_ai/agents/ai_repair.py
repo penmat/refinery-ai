@@ -5,13 +5,15 @@ from __future__ import annotations
 import re
 from hashlib import sha256
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field
-from pydantic_ai import Agent, ToolOutput
-from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
-from pydantic_ai.providers.ollama import OllamaProvider
-from pydantic_ai.providers.openai import OpenAIProvider
+from langchain.agents import create_agent
+from langchain.agents.structured_output import ToolStrategy
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage
+from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field, SecretStr
 
 from refinery_ai.config import Settings
 from refinery_ai.migrations.deterministic_repair import springdoc_repair_files
@@ -34,31 +36,27 @@ class RepairEditProposal(BaseModel):
 REPAIR_SYSTEM_PROMPT = "You repair Java migrations with minimal, behavior-preserving patches."
 
 
-class AiRepairAgent(Agent[None, RepairEditProposal]):
-    """Pydantic AI agent for validated, scoped source replacements."""
+class AiRepairAgent:
+    """LangGraph agent for validated, scoped source replacements."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._proposal_fingerprints: set[str] = set()
         if settings.repair_mode is RepairMode.LOCAL:
             _require_local_endpoint(settings.ollama_base_url)
-        repair_model = _repair_model(
+        self.model = _repair_model(
             settings.repair_model,
             ollama_base_url=settings.ollama_base_url,
             openai_api_key=(
                 settings.openai_api_key.get_secret_value() if settings.openai_api_key else None
             ),
         )
-        super().__init__(
-            repair_model,
-            output_type=ToolOutput(
-                RepairEditProposal,
-                name="submit_migration_repair",
-                description="Return complete replacements for the smallest safe set of files.",
-                strict=False,
-            ),
-            retries=3,
+        self.agent = create_agent(
+            self.model,
+            tools=[],
             system_prompt=REPAIR_SYSTEM_PROMPT,
+            response_format=ToolStrategy(RepairEditProposal),
+            name="refinery-repair",
         )
 
     def repair(
@@ -95,9 +93,15 @@ class AiRepairAgent(Agent[None, RepairEditProposal]):
             f"Build failure:\n{failure.model_dump_json()}\nSources:\n" + "\n".join(context)
         )
         try:
-            result = self.run_sync(prompt)
-            proposal = result.output
-            record_llm_usage(result.usage, model=self.settings.repair_model)
+            result = self.agent.invoke(
+                {"messages": [{"role": "user", "content": prompt}]},
+                config={"metadata": {"refinery.phase": "repair"}},
+            )
+            proposal = RepairEditProposal.model_validate(result["structured_response"])
+            record_llm_usage(
+                _usage_from_messages(result.get("messages")),
+                model=self.settings.repair_model,
+            )
         except Exception as error:
             return repair_result(1, f"Repair agent failed or returned invalid output: {error}")
         allowed_names = {str(path) for path in allowed}
@@ -140,24 +144,42 @@ def _repair_model(
     *,
     ollama_base_url: str | None,
     openai_api_key: str | None,
-) -> str | OpenAIChatModel | OpenAIResponsesModel:
+) -> BaseChatModel:
     if model.startswith("ollama:") and ollama_base_url:
         model_name = model.removeprefix("ollama:")
         base_url = ollama_base_url.rstrip("/")
         if not base_url.endswith("/v1"):
             base_url += "/v1"
-        return OpenAIChatModel(model_name, provider=OllamaProvider(base_url=base_url))
+        return ChatOpenAI(
+            model=model_name,
+            base_url=base_url,
+            api_key=SecretStr("ollama"),
+            max_retries=3,
+        )
     if model.startswith("openai:"):
         model_name = model.removeprefix("openai:")
-        return (
-            OpenAIResponsesModel(
-                model_name,
-                provider=OpenAIProvider(api_key=openai_api_key),
-            )
-            if openai_api_key
-            else OpenAIResponsesModel(model_name, provider="openai")
-        )
-    return model
+        parameters: dict[str, Any] = {
+            "model": model_name,
+            "max_retries": 3,
+            "use_responses_api": True,
+        }
+        if openai_api_key:
+            parameters["api_key"] = SecretStr(openai_api_key)
+        return ChatOpenAI(**parameters)
+    return ChatOpenAI(model=model, max_retries=3)
+
+
+def _usage_from_messages(messages: object) -> dict[str, int]:
+    usage = {"input_tokens": 0, "output_tokens": 0, "requests": 0}
+    if not isinstance(messages, list):
+        return usage
+    for message in messages:
+        if not isinstance(message, AIMessage) or not message.usage_metadata:
+            continue
+        usage["input_tokens"] += int(message.usage_metadata.get("input_tokens", 0))
+        usage["output_tokens"] += int(message.usage_metadata.get("output_tokens", 0))
+        usage["requests"] += 1
+    return usage
 
 
 def _repair_file_context(

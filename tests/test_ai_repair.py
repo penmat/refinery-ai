@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-from pydantic_ai.models.test import TestModel
 
 from refinery_ai.agents.ai_repair import AiRepairAgent, _repair_file_context
 from refinery_ai.config import Settings
@@ -25,6 +24,22 @@ from refinery_ai.migrations.repair import MigrationRepairChain, MigrationRepaire
 from refinery_ai.models import RecipeRecommendation, RepairMode, VerificationResult
 
 
+class FakeRepairGraph:
+    def __init__(self, proposal: dict[str, object]) -> None:
+        self.proposal = proposal
+
+    def invoke(self, input, config=None):
+        del input, config
+        return {"structured_response": self.proposal, "messages": []}
+
+
+def install_repair_graph(monkeypatch, proposal: dict[str, object]) -> None:
+    monkeypatch.setattr(
+        "refinery_ai.agents.ai_repair.create_agent",
+        lambda *args, **kwargs: FakeRepairGraph(proposal),
+    )
+
+
 def test_local_repair_requires_loopback_endpoint() -> None:
     with pytest.raises(ValueError, match="loopback"):
         AiMigrationRepairer(
@@ -35,12 +50,15 @@ def test_local_repair_requires_loopback_endpoint() -> None:
         )
 
 
-def test_repair_chain_uses_ai_after_deterministic_rules_do_not_match(tmp_path: Path) -> None:
+def test_repair_chain_uses_ai_after_deterministic_rules_do_not_match(
+    tmp_path: Path, monkeypatch
+) -> None:
     source = tmp_path / "src/main/java/SwaggerConfiguration.java"
     source.parent.mkdir(parents=True)
     source.write_text("import springfox.documentation.spring.web.plugins.Docket;\n")
-    model = TestModel(
-        custom_output_args={
+    install_repair_graph(
+        monkeypatch,
+        {
             "diagnosis": "Springfox remains",
             "summary": "Converted Docket",
             "files": [
@@ -49,7 +67,7 @@ def test_repair_chain_uses_ai_after_deterministic_rules_do_not_match(tmp_path: P
                     "content": "class SwaggerConfiguration {}\n",
                 }
             ],
-        }
+        },
     )
     ai_repair = AiRepairAgent(Settings(repair_mode=RepairMode.CONFIGURED_PROVIDER))
     repairer = MigrationRepairChain(
@@ -57,19 +75,18 @@ def test_repair_chain_uses_ai_after_deterministic_rules_do_not_match(tmp_path: P
         ai_repair,
     )
 
-    with ai_repair.override(model=model):
-        result = repairer.repair(
-            tmp_path,
-            RecipeRecommendation(
-                recipe="org.openrewrite.java.springdoc.SpringFoxToSpringDoc",
-                reason="convert",
-                evidence=["springfox"],
-                expected_benefit="springdoc",
-                priority="high",
-                confidence=1,
-            ),
-            VerificationResult(command=["mvn", "test"], exit_code=1, duration_seconds=0),
-        )
+    result = repairer.repair(
+        tmp_path,
+        RecipeRecommendation(
+            recipe="org.openrewrite.java.springdoc.SpringFoxToSpringDoc",
+            reason="convert",
+            evidence=["springfox"],
+            expected_benefit="springdoc",
+            priority="high",
+            confidence=1,
+        ),
+        VerificationResult(command=["mvn", "test"], exit_code=1, duration_seconds=0),
+    )
 
     assert result.green
     assert result.stdout == "Converted Docket"
@@ -91,12 +108,13 @@ def test_ai_repair_satisfies_framework_neutral_contract() -> None:
     )
 
 
-def test_ai_repair_uses_scoped_full_file_replacement(tmp_path: Path) -> None:
+def test_ai_repair_uses_scoped_full_file_replacement(tmp_path: Path, monkeypatch) -> None:
     source = tmp_path / "src/main/java/SwaggerConfiguration.java"
     source.parent.mkdir(parents=True)
     source.write_text("import springfox.documentation.spring.web.plugins.Docket;\n")
-    model = TestModel(
-        custom_output_args={
+    install_repair_graph(
+        monkeypatch,
+        {
             "diagnosis": "Springfox remains",
             "summary": "Converted Docket",
             "files": [
@@ -105,7 +123,7 @@ def test_ai_repair_uses_scoped_full_file_replacement(tmp_path: Path) -> None:
                     "content": "class SwaggerConfiguration {}\n",
                 }
             ],
-        }
+        },
     )
     repairer = AiRepairAgent(Settings(repair_mode=RepairMode.CONFIGURED_PROVIDER))
     step = RecipeRecommendation(
@@ -117,28 +135,28 @@ def test_ai_repair_uses_scoped_full_file_replacement(tmp_path: Path) -> None:
         confidence=1,
     )
 
-    with repairer.override(model=model):
-        result = repairer.repair(
-            tmp_path,
-            step,
-            VerificationResult(command=["mvn", "test"], exit_code=1, duration_seconds=0),
-        )
+    result = repairer.repair(
+        tmp_path,
+        step,
+        VerificationResult(command=["mvn", "test"], exit_code=1, duration_seconds=0),
+    )
 
     assert result.green
     assert source.read_text() == "class SwaggerConfiguration {}\n"
 
 
-def test_ai_repair_rejects_a_noop_replacement(tmp_path: Path) -> None:
+def test_ai_repair_rejects_a_noop_replacement(tmp_path: Path, monkeypatch) -> None:
     source = tmp_path / "src/main/java/SwaggerConfiguration.java"
     source.parent.mkdir(parents=True)
     original = "import springfox.documentation.spring.web.plugins.Docket;\n"
     source.write_text(original)
-    model = TestModel(
-        custom_output_args={
+    install_repair_graph(
+        monkeypatch,
+        {
             "diagnosis": "No change",
             "summary": "No change",
             "files": [{"path": str(source.relative_to(tmp_path)), "content": original}],
-        }
+        },
     )
     repairer = AiRepairAgent(Settings(repair_mode=RepairMode.CONFIGURED_PROVIDER))
     step = RecipeRecommendation(
@@ -150,12 +168,11 @@ def test_ai_repair_rejects_a_noop_replacement(tmp_path: Path) -> None:
         confidence=1,
     )
 
-    with repairer.override(model=model):
-        result = repairer.repair(
-            tmp_path,
-            step,
-            VerificationResult(command=["mvn", "test"], exit_code=1, duration_seconds=0),
-        )
+    result = repairer.repair(
+        tmp_path,
+        step,
+        VerificationResult(command=["mvn", "test"], exit_code=1, duration_seconds=0),
+    )
 
     assert not result.green
     assert "did not change any files" in result.stderr
