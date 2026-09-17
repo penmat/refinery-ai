@@ -6,6 +6,7 @@ from typing import Any, cast
 from pydantic_ai.models.openai import OpenAIResponsesModel
 from typer.testing import CliRunner
 
+from refinery_ai.agents.contracts import Planner, PlanningRequest
 from refinery_ai.agents.planning import create_planning_agent, grounded_recipe_plan
 from refinery_ai.cli import app
 from refinery_ai.config import Settings
@@ -53,12 +54,15 @@ class FakeContextGraph:
 
 
 class FakePlanner:
-    def __init__(self) -> None:
+    def __init__(self, output: RecipePlan | None = None) -> None:
         self.deps = None
+        self.request: PlanningRequest | None = None
+        self.output = output or RecipePlan()
 
-    def run_sync(self, prompt: str, *, deps: object) -> SimpleNamespace:
-        self.deps = deps
-        return SimpleNamespace(output=RecipePlan())
+    def plan(self, request: PlanningRequest) -> RecipePlan:
+        self.request = request
+        self.deps = request.dependencies
+        return self.output
 
 
 RECIPE_SOURCES = [
@@ -692,7 +696,7 @@ def test_prepare_persists_reports(tmp_path: Path) -> None:
     assert (tmp_path / f".refinery/runs/{report.run_id}.md").exists()
 
 
-def test_ai_prepare_persists_migration_plan_handoff(tmp_path: Path, monkeypatch) -> None:
+def test_ai_prepare_persists_migration_plan_handoff(tmp_path: Path) -> None:
     (tmp_path / "pom.xml").write_text("<project><modelVersion>4.0.0</modelVersion></project>")
     recommendation = RecipeRecommendation(
         recipe="org.openrewrite.java.migrate.UpgradeToJava17",
@@ -702,16 +706,10 @@ def test_ai_prepare_persists_migration_plan_handoff(tmp_path: Path, monkeypatch)
         priority="high",
         confidence=0.9,
     )
-    planner = FakePlanner()
-    planner.run_sync = lambda prompt, *, deps: SimpleNamespace(  # type: ignore[method-assign]
-        output=RecipePlan(recommendations=[recommendation])
-    )
-    monkeypatch.setattr(
-        "refinery_ai.factory.create_planning_agent", lambda model, **kwargs: planner
-    )
+    planner = FakePlanner(RecipePlan(recommendations=[recommendation]))
 
     report = ModernizationFactory(
-        context_graph=FakeContextGraph(), recipe_sources=RECIPE_SOURCES
+        context_graph=FakeContextGraph(), recipe_sources=RECIPE_SOURCES, planner=planner
     ).prepare(
         tmp_path,
         ModernizationGoal(description="Upgrade Java", target_java=17),
@@ -723,17 +721,14 @@ def test_ai_prepare_persists_migration_plan_handoff(tmp_path: Path, monkeypatch)
     assert persisted["steps"] == [recommendation.model_dump(mode="json")]
 
 
-def test_ai_prepare_supplies_graph_and_assessment_context(tmp_path: Path, monkeypatch) -> None:
+def test_ai_prepare_supplies_graph_and_assessment_context(tmp_path: Path) -> None:
     (tmp_path / "pom.xml").write_text("<project><modelVersion>4.0.0</modelVersion></project>")
     planner = FakePlanner()
-    monkeypatch.setattr(
-        "refinery_ai.factory.create_planning_agent",
-        lambda model, **kwargs: planner,
-    )
 
     report = ModernizationFactory(
         context_graph=FakeContextGraph(),
         recipe_sources=RECIPE_SOURCES,
+        planner=planner,
     ).prepare(
         tmp_path,
         ModernizationGoal(description="Upgrade Java", target_java=17),
@@ -760,9 +755,13 @@ def test_ai_prepare_supplies_graph_and_assessment_context(tmp_path: Path, monkey
     )
     assert planner.deps.failed_recipes == frozenset()
     assert planner.deps.completed_recipes == frozenset()
+    assert planner.request is not None
+    assert planner.request.run_id == report.run_id
+    assert planner.request.plan_id == report.run_id
+    assert "Recommend applicable Java migration recipes" in planner.request.prompt
 
 
-def test_ai_prepare_supplies_previous_migration_failures(tmp_path: Path, monkeypatch) -> None:
+def test_ai_prepare_supplies_previous_migration_failures(tmp_path: Path) -> None:
     (tmp_path / "pom.xml").write_text("<project><modelVersion>4.0.0</modelVersion></project>")
     failed_step = tmp_path / ".refinery/migration-runs/run-1/step-001"
     failed_step.mkdir(parents=True)
@@ -777,13 +776,11 @@ def test_ai_prepare_supplies_previous_migration_failures(tmp_path: Path, monkeyp
         )
     )
     planner = FakePlanner()
-    monkeypatch.setattr(
-        "refinery_ai.factory.create_planning_agent", lambda model, **kwargs: planner
-    )
 
     ModernizationFactory(
         context_graph=FakeContextGraph(),
         recipe_sources=RECIPE_SOURCES,
+        planner=planner,
     ).prepare(
         tmp_path,
         ModernizationGoal(description="Upgrade Java", target_java=17),
@@ -796,6 +793,10 @@ def test_ai_prepare_supplies_previous_migration_failures(tmp_path: Path, monkeyp
     )
     assert "compilation failed" in planner.deps.migration_failure_context
     assert "compilation failed" in planner.deps.evidence_corpus
+
+
+def test_fake_planner_satisfies_framework_neutral_contract() -> None:
+    assert isinstance(FakePlanner(), Planner)
 
 
 def test_apply_stops_on_unknown_build_system(tmp_path: Path) -> None:

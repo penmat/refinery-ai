@@ -3,23 +3,23 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from pydantic_ai import Agent, NativeOutput, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
+from refinery_ai.agents.contracts import PlanningDependencies, PlanningRequest
 from refinery_ai.models import (
-    DiscoverySnapshot,
     RecipePlan,
 )
 from refinery_ai.recipes.catalog import (
-    RecipeCatalogSession,
     RecipeCategory,
     RecipeDetail,
     RecipeSummary,
 )
+from refinery_ai.telemetry import run_observed_agent
 
 PLANNING_SYSTEM_PROMPT = (
     "Given the project assessment artifacts and the compact OpenRewrite recipe catalog index, "
@@ -76,23 +76,6 @@ def grounded_recipe_plan(
             else recommendation
         )
     return RecipePlan(recommendations=recommendations)
-
-
-@dataclass(frozen=True)
-class PlanningDependencies:
-    snapshot: DiscoverySnapshot
-    graph_summary: str
-    graph_context: str = ""
-    artifact_context: str = "No persisted project artifacts are available."
-    planner_rules: str = "No additional planner rules are configured."
-    recipe_catalog: RecipeCatalogSession = field(
-        default_factory=lambda: RecipeCatalogSession([])
-    )
-    evidence_corpus: str = ""
-    evidence_facts: list[str] = field(default_factory=list)
-    migration_failure_context: str = "No previous migration failures are recorded."
-    failed_recipes: frozenset[str] = frozenset()
-    completed_recipes: frozenset[str] = frozenset()
 
 
 def render_planning_context(deps: PlanningDependencies) -> str:
@@ -233,3 +216,41 @@ def create_planning_agent(
         )
 
     return agent
+
+
+@dataclass(frozen=True)
+class PydanticAIPlanner:
+    """Adapter exposing the current Pydantic AI planner through the Planner contract."""
+
+    agent: Agent[PlanningDependencies, RecipePlan]
+    model: str
+
+    def plan(self, request: PlanningRequest) -> RecipePlan:
+        result = run_observed_agent(
+            self.agent,
+            request.prompt,
+            deps=request.dependencies,
+            phase="planning",
+            run_id=request.run_id,
+            plan_id=request.plan_id,
+            model=self.model,
+        )
+        return RecipePlan.model_validate(result.output)
+
+
+def create_planner(
+    model: str,
+    *,
+    ollama_base_url: str | None = None,
+    openai_api_key: str | None = None,
+) -> PydanticAIPlanner:
+    """Create the default planner adapter without leaking its framework to callers."""
+
+    return PydanticAIPlanner(
+        create_planning_agent(
+            model,
+            ollama_base_url=ollama_base_url,
+            openai_api_key=openai_api_key,
+        ),
+        model,
+    )

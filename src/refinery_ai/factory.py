@@ -7,9 +7,9 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
+from refinery_ai.agents.contracts import Planner, PlanningDependencies, PlanningRequest
 from refinery_ai.agents.planning import (
-    PlanningDependencies,
-    create_planning_agent,
+    create_planner,
     planning_payload_metrics,
 )
 from refinery_ai.config import Settings
@@ -46,7 +46,6 @@ from refinery_ai.recipes.catalog import RecipeCatalogSession
 from refinery_ai.recipes.sources import RecipeSource, fetch_recipe_sources
 from refinery_ai.reporting import to_markdown
 from refinery_ai.repository import RepositoryEnvironment
-from refinery_ai.telemetry import run_observed_agent
 
 logger = get_logger(__name__)
 
@@ -173,12 +172,14 @@ class ModernizationFactory:
         context_graph: ContextGraphBuildService | None = None,
         environment: RepositoryEnvironment | None = None,
         recipe_sources: list[RecipeSource] | None = None,
+        planner: Planner | None = None,
     ) -> None:
         self.settings = settings or Settings()
         self.environment = environment
         self.context_graph = context_graph
         self.rewrite = rewrite
         self.recipe_sources = recipe_sources
+        self.planner = planner
 
     def _environment(self, repository: Path) -> RepositoryEnvironment:
         if self.environment is not None:
@@ -308,15 +309,17 @@ class ModernizationFactory:
                     migration_failure_context,
                 )
             )
-            planner = create_planning_agent(
-                self.settings.planner_model,
-                ollama_base_url=self.settings.ollama_base_url,
-                openai_api_key=(
-                    self.settings.openai_api_key.get_secret_value()
-                    if self.settings.openai_api_key
-                    else None
-                ),
-            )
+            planner = self.planner
+            if planner is None:
+                planner = create_planner(
+                    self.settings.planner_model,
+                    ollama_base_url=self.settings.ollama_base_url,
+                    openai_api_key=(
+                        self.settings.openai_api_key.get_secret_value()
+                        if self.settings.openai_api_key
+                        else None
+                    ),
+                )
             planner_prompt = (
                 "Recommend applicable Java migration recipes for this goal: "
                 f"{goal.model_dump_json()}. Use only the supplied project artifacts and "
@@ -349,16 +352,15 @@ class ModernizationFactory:
                 payload_metrics["estimated_tokens"],
                 component_metrics,
             )
-            result = run_observed_agent(
-                planner,
-                planner_prompt,
-                deps=planning_deps,
-                phase="planning",
-                run_id=run_id,
-                plan_id=run_id,
-                model=self.settings.planner_model,
+            planned_recipes = planner.plan(
+                PlanningRequest(
+                    prompt=planner_prompt,
+                    dependencies=planning_deps,
+                    run_id=run_id,
+                    plan_id=run_id,
+                )
             )
-            plan = _with_deterministic_prerequisites(result.output, snapshot)
+            plan = _with_deterministic_prerequisites(planned_recipes, snapshot)
             if profile is not None:
                 plan = profile.filter_plan(plan)
         else:

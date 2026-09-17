@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 
 from refinery_ai.agents.ai_repair import AiRepairAgent, _repair_file_context
@@ -22,7 +21,7 @@ from refinery_ai.migrations.deterministic_repair import (
     springdoc_repair_files,
     use_explicit_ant_path_request_matchers,
 )
-from refinery_ai.migrations.repair import MigrationRepairChain
+from refinery_ai.migrations.repair import MigrationRepairChain, MigrationRepairer
 from refinery_ai.models import RecipeRecommendation, RepairMode, VerificationResult
 
 
@@ -86,9 +85,9 @@ def test_springdoc_repair_scope_contains_only_residual_java(tmp_path: Path) -> N
     assert springdoc_repair_files(tmp_path) == (Path("src/main/java/SwaggerConfiguration.java"),)
 
 
-def test_ai_repair_is_a_pydantic_ai_agent() -> None:
+def test_ai_repair_satisfies_framework_neutral_contract() -> None:
     assert isinstance(
-        AiRepairAgent(Settings(repair_mode=RepairMode.CONFIGURED_PROVIDER)), Agent
+        AiRepairAgent(Settings(repair_mode=RepairMode.CONFIGURED_PROVIDER)), MigrationRepairer
     )
 
 

@@ -2,10 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from refinery_ai.agents.planning import (
-    PlanningDependencies,
-    planning_payload_metrics,
-)
+from refinery_ai.agents.contracts import PlanningDependencies
+from refinery_ai.agents.planning import planning_payload_metrics
 from refinery_ai.models import (
     BuildSystem,
     DiscoverySnapshot,
