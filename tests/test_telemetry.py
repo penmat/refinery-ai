@@ -1,11 +1,39 @@
+import os
+
 from refinery_ai.config import Settings
 from refinery_ai.telemetry import (
     _headers,
     _signal_endpoint,
+    configure_langsmith,
     configure_telemetry,
     observe_llm,
     record_llm_usage,
 )
+
+
+def test_langsmith_settings_from_dotenv_are_exported(tmp_path, monkeypatch) -> None:
+    tmp_path.joinpath(".env").write_text(
+        "LANGSMITH_API_KEY=test-langsmith-key\n"
+        "LANGSMITH_TRACING=true\n"
+        "LANGSMITH_PROJECT=refinery-test\n"
+        "LANGSMITH_ENDPOINT=https://langsmith.example.test\n"
+    )
+    monkeypatch.chdir(tmp_path)
+    for name in (
+        "LANGSMITH_API_KEY",
+        "LANGSMITH_TRACING",
+        "LANGSMITH_PROJECT",
+        "LANGSMITH_ENDPOINT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    active = configure_langsmith(Settings())
+
+    assert active is True
+    assert os.environ["LANGSMITH_API_KEY"] == "test-langsmith-key"
+    assert os.environ["LANGSMITH_TRACING"] == "true"
+    assert os.environ["LANGSMITH_PROJECT"] == "refinery-test"
+    assert os.environ["LANGSMITH_ENDPOINT"] == "https://langsmith.example.test"
 
 
 def test_telemetry_can_be_disabled() -> None:

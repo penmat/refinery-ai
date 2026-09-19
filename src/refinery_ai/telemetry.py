@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -19,6 +20,20 @@ _request_counter: Any = None
 _observation: ContextVar[dict[str, str | int] | None] = ContextVar(
     "refinery_llm_observation", default=None
 )
+
+
+def configure_langsmith(settings: Settings | None = None) -> bool:
+    """Export LangSmith settings loaded by Pydantic from the project .env file."""
+
+    config = settings or Settings()
+    if config.langsmith_api_key is not None:
+        os.environ["LANGSMITH_API_KEY"] = config.langsmith_api_key.get_secret_value()
+    os.environ["LANGSMITH_TRACING"] = "true" if config.langsmith_tracing else "false"
+    if config.langsmith_project:
+        os.environ["LANGSMITH_PROJECT"] = config.langsmith_project
+    if config.langsmith_endpoint:
+        os.environ["LANGSMITH_ENDPOINT"] = config.langsmith_endpoint
+    return config.langsmith_tracing and config.langsmith_api_key is not None
 
 
 def _signal_endpoint(base: str, signal: str) -> str:

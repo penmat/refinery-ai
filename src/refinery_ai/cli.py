@@ -46,7 +46,7 @@ from refinery_ai.profile_run import ProfileRunner, VerifiedCheckpoint
 from refinery_ai.profiles import load_profile
 from refinery_ai.summary import ProjectSummaryService, SummaryError
 from refinery_ai.summary.reporting import summary_markdown
-from refinery_ai.telemetry import configure_telemetry
+from refinery_ai.telemetry import configure_langsmith, configure_telemetry
 from refinery_ai.tools import RepositoryEvidenceTools
 
 app = typer.Typer(help="Safe, auditable Java modernization.", no_args_is_help=True)
@@ -208,7 +208,9 @@ def configure_cli_logging() -> None:
     """Enable progress logging for commands and inspection tools."""
 
     configure_logging()
-    configure_telemetry(Settings())
+    settings = Settings()
+    configure_langsmith(settings)
+    configure_telemetry(settings)
 
 
 def _print(report: RunReport) -> None:

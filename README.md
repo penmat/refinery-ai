@@ -376,14 +376,18 @@ Settings use the `REFINERY_` prefix and may be placed in `.env`. See `.env.examp
 | Setting | Default | Purpose |
 |---|---:|---|
 | `OPENAI_API_KEY` | none | OpenAI API key loaded from the environment or `.env` |
-| `REFINERY_PLANNER_MODEL` | `openai:gpt-5.6-luna` | Pydantic AI planner model identifier |
-| `REFINERY_REPAIR_MODEL` | `openai:gpt-5.6-luna` | Pydantic AI repair model identifier |
+| `REFINERY_PLANNER_MODEL` | `openai:gpt-5.6-luna` | LangChain planner model identifier |
+| `REFINERY_REPAIR_MODEL` | `openai:gpt-5.6-luna` | LangChain repair model identifier |
 | `REFINERY_OLLAMA_BASE_URL` | none | Optional Ollama base URL, such as `http://localhost:11434` |
-| `REFINERY_OTEL_ENABLED` | `false` | Export Pydantic AI and LiteLLM telemetry over OTLP/HTTP |
+| `REFINERY_OTEL_ENABLED` | `false` | Export Refinery workflow and LiteLLM telemetry over OTLP/HTTP |
 | `REFINERY_OTEL_SERVICE_NAME` | `refinery-ai` | OpenTelemetry service name |
 | `REFINERY_OTEL_ENDPOINT` | `http://localhost:4318` | OTLP/HTTP base endpoint; signal paths are added automatically |
 | `REFINERY_OTEL_HEADERS` | none | Comma-separated, URL-encoded OTLP headers such as `Authorization=Basic%20...` |
 | `REFINERY_OTEL_INCLUDE_CONTENT` | `false` | Include prompts, responses, tool arguments, and binary content in spans |
+| `LANGSMITH_API_KEY` | none | LangSmith API key; loaded from `.env` and exported for LangChain tracing |
+| `LANGSMITH_TRACING` | `false` | Enable automatic LangChain and LangGraph tracing to LangSmith |
+| `LANGSMITH_PROJECT` | none | Optional LangSmith tracing project name |
+| `LANGSMITH_ENDPOINT` | LangSmith default | Optional LangSmith API endpoint for regional or self-hosted deployments |
 | `REFINERY_MAX_REPAIR_ATTEMPTS` | `3` | Repair-loop attempt limit |
 | `REFINERY_REPAIR_MODE` | `disabled` | Semantic repair policy: `disabled`, `local`, or `configured-provider` |
 | `REFINERY_COMMAND_TIMEOUT_SECONDS` | `900` | Build command timeout |
@@ -412,9 +416,10 @@ REFINERY_OTEL_ENDPOINT=http://localhost:4318
 REFINERY_OTEL_SERVICE_NAME=refinery-ai
 ```
 
-Pydantic AI and direct LiteLLM calls share the same OpenTelemetry trace and meter providers.
-They emit model request spans, latency, errors, token-usage metrics, and cost data when the model
-provider supplies it. Prompt and response content is excluded by default; set
+Refinery workflow instrumentation and direct LiteLLM calls share the same OpenTelemetry trace and
+meter providers. They emit phase spans and token-usage metrics, plus LiteLLM request latency,
+errors, and cost data when the model provider supplies it. Prompt and response content is excluded
+by default; set
 `REFINERY_OTEL_INCLUDE_CONTENT=true` only when the destination and data-retention policy are
 appropriate for repository content.
 
@@ -428,6 +433,17 @@ For a hosted OTLP endpoint such as Langfuse, also set `REFINERY_OTEL_HEADERS` to
 URL-encoded authorization header supplied by that service. Code using Refinery as a library can
 enable the same integration explicitly with `configure_telemetry(Settings())` before running an
 agent or calling `run_tool_loop`.
+
+LangSmith tracing can be enabled independently in the same `.env` file:
+
+```dotenv
+LANGSMITH_API_KEY=your-key
+LANGSMITH_TRACING=true
+LANGSMITH_PROJECT=refinery-ai
+```
+
+The CLI exports these values before constructing LangChain agents or invoking LangGraph, so they
+do not need to be sourced separately in the shell.
 
 ## LiteLLM tool loop
 

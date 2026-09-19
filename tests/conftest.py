@@ -9,6 +9,8 @@ def disable_telemetry_export(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep tests isolated from developer and CI OpenTelemetry configuration."""
 
     monkeypatch.setenv("REFINERY_OTEL_ENABLED", "false")
+    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "test-langsmith-key")
 
 
 @pytest.fixture
