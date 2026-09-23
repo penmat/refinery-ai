@@ -52,13 +52,17 @@ def test_corpus_runner_uses_ai_repair_by_default(tmp_path: Path, monkeypatch: An
 
     monkeypatch.setattr(CorpusRunner, "_execute", staticmethod(execute))
     monkeypatch.setattr(CorpusRunner, "_revision", staticmethod(lambda repository: "abc123"))
-    monkeypatch.setattr(CorpusRunner, "_profile_state", lambda self, repository: (2, True))
+    monkeypatch.setattr(
+        CorpusRunner, "_profile_state", lambda self, repository, profile=None: (2, True)
+    )
     result = CorpusRunner(corpus, tmp_path / "run", profile="profile").run([corpus.projects[0]])
 
     assert result.projects[0].status == "completed"
     assert result.projects[0].source_revision == "abc123"
     assert result.projects[0].requested_ref == "v2.6.2"
     assert result.projects[0].profile_cycles == 2
+    assert result.profiles == ["profile"]
+    assert [stage.profile for stage in result.projects[0].profile_stages] == ["profile"]
     assert result.projects[0].tier == "easy"
     assert result.projects[0].baseline_test is True
     assert corpus.projects[0].baseline_migrations == [
@@ -71,6 +75,67 @@ def test_corpus_runner_uses_ai_repair_by_default(tmp_path: Path, monkeypatch: An
     assert "--repair-mode" in commands[2]
     assert commands[2][commands[2].index("--repair-mode") + 1] == "configured-provider"
     assert (tmp_path / "run" / "summary.json").is_file()
+
+
+def test_corpus_runner_applies_profiles_in_order_to_the_same_checkout(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    corpus = load_corpus(_corpus(tmp_path / "corpus.yaml"))
+    commands: list[list[str]] = []
+    revisions = iter(["source", "source", "java17", "java17", "java21"])
+
+    def execute(command: list[str], log: Any, *, timeout: int) -> tuple[int, None]:
+        commands.append(command)
+        return 0, None
+
+    monkeypatch.setattr(CorpusRunner, "_execute", staticmethod(execute))
+    monkeypatch.setattr(CorpusRunner, "_revision", staticmethod(lambda repository: next(revisions)))
+    monkeypatch.setattr(
+        CorpusRunner, "_profile_state", lambda self, repository, profile=None: (1, True)
+    )
+
+    result = CorpusRunner(
+        corpus,
+        tmp_path / "run",
+        profiles=["java17", "java21"],
+    ).run([corpus.projects[1]])
+
+    run_commands = commands[1:]
+    assert [command[command.index("--profile") + 1] for command in run_commands] == [
+        "java17",
+        "java21",
+    ]
+    project = result.projects[0]
+    assert project.status == "completed"
+    assert project.result_revision == "java21"
+    assert [stage.source_revision for stage in project.profile_stages] == ["source", "java17"]
+    assert [stage.result_revision for stage in project.profile_stages] == ["java17", "java21"]
+
+
+def test_corpus_runner_stops_profile_pipeline_after_failure(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    corpus = load_corpus(_corpus(tmp_path / "corpus.yaml"))
+    commands: list[list[str]] = []
+    exit_codes = iter([(0, None), (1, "java17 failed")])
+
+    def execute(command: list[str], log: Any, *, timeout: int) -> tuple[int, str | None]:
+        commands.append(command)
+        return next(exit_codes)
+
+    monkeypatch.setattr(CorpusRunner, "_execute", staticmethod(execute))
+    monkeypatch.setattr(CorpusRunner, "_revision", staticmethod(lambda repository: "revision"))
+
+    result = CorpusRunner(
+        corpus,
+        tmp_path / "run",
+        profiles=["java17", "java21"],
+    ).run([corpus.projects[1]])
+
+    assert len(commands) == 2
+    assert result.projects[0].status == "failed"
+    assert [stage.profile for stage in result.projects[0].profile_stages] == ["java17"]
+    assert result.projects[0].profile_stages[0].error == "java17 failed"
 
 
 def test_corpus_runner_runs_projects_concurrently_and_preserves_order(
@@ -141,6 +206,37 @@ def test_run_corpus_can_disable_ai_and_select_projects(tmp_path: Path, monkeypat
 
     assert result.exit_code == 0
     assert calls == [(["second"], False)]
+
+
+def test_run_corpus_accepts_an_ordered_profile_pipeline(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    corpus_path = _corpus(tmp_path / "corpus.yaml")
+    calls: list[list[str]] = []
+
+    class FakeRunner:
+        def __init__(self, corpus: Any, output: Path, **kwargs: Any) -> None:
+            calls.append(kwargs["profiles"])
+
+        def run(self, projects: Any) -> Any:
+            return type("Result", (), {"projects": []})()
+
+    monkeypatch.setattr("refinery_ai.cli.CorpusRunner", FakeRunner)
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-corpus",
+            str(corpus_path),
+            "--profile",
+            "spring-boot-3.2-java-17",
+            "--profile",
+            "spring-boot-3.5-java-21",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == [["spring-boot-3.2-java-17", "spring-boot-3.5-java-21"]]
+    assert "spring-boot-3.2-java-17 -> spring-boot-3.5-java-21" in result.output
 
 
 def test_run_corpus_skips_projects_needing_test_configuration_by_default(

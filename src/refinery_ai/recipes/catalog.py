@@ -134,7 +134,7 @@ class RecipeCatalogSession:
         for source in sources:
             self.allowed_recipes.add(source.recipe)
             artifact = source.repository.rsplit("/", maxsplit=1)[-1]
-            self.recipe_artifacts[source.recipe] = (
+            self.recipe_artifacts[source.recipe] = source.artifact or (
                 f"org.openrewrite.recipe:{artifact}:RELEASE"
             )
 

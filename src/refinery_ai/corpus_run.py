@@ -35,6 +35,17 @@ class CorpusDefinition(BaseModel):
     projects: list[CorpusProject]
 
 
+class CorpusProfileStageResult(BaseModel):
+    profile: str
+    status: str
+    source_revision: str | None = None
+    result_revision: str | None = None
+    exit_code: int | None = None
+    error: str | None = None
+    profile_cycles: int | None = None
+    profile_completed: bool | None = None
+
+
 class CorpusProjectResult(BaseModel):
     id: str
     name: str
@@ -57,11 +68,13 @@ class CorpusProjectResult(BaseModel):
     error: str | None = None
     profile_cycles: int | None = None
     profile_completed: bool | None = None
+    profile_stages: list[CorpusProfileStageResult] = Field(default_factory=list)
 
 
 class CorpusRunResult(BaseModel):
     corpus_id: str
     profile: str
+    profiles: list[str] = Field(default_factory=list)
     ai_patching: bool
     jobs: int = 1
     started_at: datetime
@@ -139,7 +152,8 @@ class CorpusRunner:
         corpus: CorpusDefinition,
         output_directory: Path,
         *,
-        profile: str,
+        profile: str | None = None,
+        profiles: list[str] | None = None,
         ai_patching: bool = True,
         max_cycles: int = 20,
         timeout_seconds: int = 14_400,
@@ -150,7 +164,12 @@ class CorpusRunner:
             raise ValueError("jobs must be at least 1")
         self.corpus = corpus
         self.output_directory = output_directory.expanduser().resolve()
-        self.profile = profile
+        selected_profiles = profiles or ([profile] if profile is not None else [])
+        if not selected_profiles:
+            raise ValueError("at least one profile is required")
+        self.profiles = tuple(selected_profiles)
+        # Retained for callers and summaries that expect the original single target field.
+        self.profile = self.profiles[-1]
         self.ai_patching = ai_patching
         self.max_cycles = max_cycles
         self.timeout_seconds = timeout_seconds
@@ -165,6 +184,7 @@ class CorpusRunner:
         result = CorpusRunResult(
             corpus_id=str(self.corpus.corpus.get("id", "unnamed-corpus")),
             profile=self.profile,
+            profiles=list(self.profiles),
             ai_patching=self.ai_patching,
             jobs=self.jobs,
             started_at=started_at,
@@ -247,6 +267,7 @@ class CorpusRunner:
         result_revision: str | None = None
         profile_cycles: int | None = None
         profile_completed: bool | None = None
+        profile_stages: list[CorpusProfileStageResult] = []
         clone_completed = False
 
         with log_path.open("w") as log:
@@ -262,31 +283,52 @@ class CorpusRunner:
                 )
             if exit_code == 0:
                 source_revision = self._revision(repository)
-                command = [
-                    sys.executable,
-                    "-m",
-                    "refinery_ai.cli",
-                    "run",
-                    "--repository",
-                    str(repository),
-                    "--profile",
-                    self.profile,
-                    "--apply",
-                    "--max-cycles",
-                    str(self.max_cycles),
-                    "--repair-mode",
-                    "configured-provider" if self.ai_patching else "disabled",
-                ]
-                exit_code, error = self._execute(command, log, timeout=self.timeout_seconds)
-                result_revision = self._revision(repository)
-                profile_cycles, profile_completed = self._profile_state(repository)
-                status = (
-                    "completed"
-                    if exit_code == 0
-                    else "timed-out"
-                    if exit_code is None
-                    else "failed"
-                )
+                for profile in self.profiles:
+                    stage_source_revision = self._revision(repository)
+                    self._log(log, f"\nProfile stage: {profile}\n")
+                    command = [
+                        sys.executable,
+                        "-m",
+                        "refinery_ai.cli",
+                        "run",
+                        "--repository",
+                        str(repository),
+                        "--profile",
+                        profile,
+                        "--apply",
+                        "--max-cycles",
+                        str(self.max_cycles),
+                        "--repair-mode",
+                        "configured-provider" if self.ai_patching else "disabled",
+                    ]
+                    exit_code, error = self._execute(
+                        command, log, timeout=self.timeout_seconds
+                    )
+                    result_revision = self._revision(repository)
+                    profile_cycles, profile_completed = self._profile_state(
+                        repository, profile
+                    )
+                    status = (
+                        "completed"
+                        if exit_code == 0
+                        else "timed-out"
+                        if exit_code is None
+                        else "failed"
+                    )
+                    profile_stages.append(
+                        CorpusProfileStageResult(
+                            profile=profile,
+                            status=status,
+                            source_revision=stage_source_revision,
+                            result_revision=result_revision,
+                            exit_code=exit_code,
+                            error=error,
+                            profile_cycles=profile_cycles,
+                            profile_completed=profile_completed,
+                        )
+                    )
+                    if exit_code != 0:
+                        break
             else:
                 status = "checkout-failed" if clone_completed else "clone-failed"
 
@@ -313,6 +355,7 @@ class CorpusRunner:
             error=error,
             profile_cycles=profile_cycles,
             profile_completed=profile_completed,
+            profile_stages=profile_stages,
         )
 
     def _execute(
@@ -361,8 +404,11 @@ class CorpusRunner:
         )
         return completed.stdout.strip() if completed.returncode == 0 else None
 
-    def _profile_state(self, repository: Path) -> tuple[int | None, bool | None]:
-        path = repository / ".refinery" / "profile-runs" / f"{self.profile}.json"
+    def _profile_state(
+        self, repository: Path, profile: str | None = None
+    ) -> tuple[int | None, bool | None]:
+        selected_profile = profile or self.profile
+        path = repository / ".refinery" / "profile-runs" / f"{selected_profile}.json"
         try:
             state = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError):

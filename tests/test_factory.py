@@ -20,10 +20,12 @@ from refinery_ai.factory import (
     _with_boot3_before_mybatis3,
     _with_boot3_before_springdoc2,
     _with_datasource_initialization_prerequisite,
+    _with_maven_boot_target_finalizer,
     _with_springfox_before_boot27,
     _with_utf8_prerequisite,
 )
 from refinery_ai.models import (
+    BuildSystem,
     DiscoverySnapshot,
     ModernizationGoal,
     RecipePlan,
@@ -31,6 +33,7 @@ from refinery_ai.models import (
     RunStatus,
 )
 from refinery_ai.planning_artifacts import load_migration_failures, load_planner_rules
+from refinery_ai.profiles import load_profile
 from refinery_ai.recipes.sources import RecipeSource
 
 
@@ -88,6 +91,43 @@ def test_deterministic_repairs_get_four_attempts_and_ai_gets_three() -> None:
 
     assert settings.max_deterministic_repair_attempts == 4
     assert settings.max_repair_attempts == 3
+
+
+def test_custom_maven_boot_property_gets_profile_target_finalizer(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pom.xml").write_text(
+        "<project><properties><spring-boot.version>2.7.18</spring-boot.version>"
+        "</properties></project>\n"
+    )
+    boot_recipe = "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2"
+    plan = RecipePlan(
+        recommendations=[
+            RecipeRecommendation(
+                recipe=boot_recipe,
+                reason="Reach Boot 3.2.",
+                evidence=["profile target"],
+                expected_benefit="Modern Boot baseline.",
+                priority="high",
+                confidence=1,
+            )
+        ]
+    )
+    snapshot = DiscoverySnapshot(
+        repository=tmp_path,
+        build_system=BuildSystem.MAVEN,
+        spring_boot_version="2.7.18",
+    )
+
+    result = _with_maven_boot_target_finalizer(
+        plan, snapshot, load_profile("spring-boot-3.2-java-17")
+    )
+
+    assert [item.execution_type.value for item in result.recommendations] == [
+        "openrewrite",
+        "maven-property",
+    ]
+    assert result.recommendations[1].depends_on == [boot_recipe]
 
 
 def test_planner_rules_capture_spring_boot_java_17_ordering() -> None:

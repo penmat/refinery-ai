@@ -50,6 +50,8 @@ description: Not a recipe
             "repository": "openrewrite/rewrite-migrate-java",
             "file_path": "src/main/resources/META-INF/rewrite/java-version-21.yml",
             "recipe_list": ["org.openrewrite.java.migrate.UpgradeToJava17"],
+            "source_revision": None,
+            "artifact": None,
         }
     ]
 

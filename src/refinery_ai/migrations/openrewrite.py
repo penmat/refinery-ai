@@ -2,6 +2,7 @@
 
 from refinery_ai.models import DiscoverySnapshot, RecipeRecommendation, VerificationResult
 from refinery_ai.openrewrite import OpenRewriteAdapter
+from refinery_ai.recipes.sources import RECIPE_RELEASES
 
 
 class OpenRewriteMigrationRunner:
@@ -35,4 +36,5 @@ def _infer_recipe_artifact(recipe: str) -> str:
         "org.openrewrite.java.springdoc.",
     )
     artifact = "rewrite-spring" if recipe.startswith(spring_namespaces) else "rewrite-migrate-java"
-    return f"org.openrewrite.recipe:{artifact}:RELEASE"
+    repository = f"openrewrite/{artifact}"
+    return f"org.openrewrite.recipe:{artifact}:{RECIPE_RELEASES[repository]}"

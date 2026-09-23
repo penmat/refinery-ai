@@ -57,6 +57,10 @@ class ModernizationProfile(BaseModel):
     goal: str
     target_java: int | None = Field(default=None, ge=8)
     target_spring_boot: str | None = Field(default=None, pattern=r"^\d+\.\d+$")
+    target_spring_boot_version: str | None = Field(
+        default=None, pattern=r"^\d+\.\d+\.\d+$"
+    )
+    target_recipes: dict[str, str] = Field(default_factory=dict)
     include_recipes: list[str] = Field(default_factory=list)
     exclude_recipes: list[str] = Field(default_factory=list)
     evidence: ProfileEvidencePolicy = Field(default_factory=ProfileEvidencePolicy)

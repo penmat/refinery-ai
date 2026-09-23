@@ -139,6 +139,16 @@ class AiRepairAgent:
             )
             for replacement in proposal.files
         }
+        safety_error = _validate_repair_safety(
+            self._last_replacements,
+            {
+                repository / replacement.path: replacement.content
+                for replacement in proposal.files
+            },
+        )
+        if safety_error:
+            self._last_replacements.clear()
+            return repair_result(1, safety_error)
         for replacement in proposal.files:
             (repository / replacement.path).write_text(replacement.content)
         dependency_error = _validate_new_maven_coordinates(
@@ -243,6 +253,24 @@ def _validate_new_maven_coordinates(
             return (
                 f"Rejected proposed Maven dependency {coordinate}: it did not resolve from "
                 f"the configured repositories. {diagnostic}"
+            )
+    return None
+
+
+def _validate_repair_safety(
+    originals: dict[Path, str], proposals: dict[Path, str]
+) -> str | None:
+    """Reject build hooks that mutate checked-in source during verification."""
+
+    for path, proposed in proposals.items():
+        if path.name != "pom.xml" or proposed == originals.get(path, ""):
+            continue
+        if "maven-antrun-plugin" in proposed and any(
+            marker in proposed for marker in ("src/main", "src/test", "<replace", "<replaceregexp")
+        ):
+            return (
+                "Rejected repair that makes the Maven build mutate checked-in source files; "
+                "repair the source or configuration directly instead"
             )
     return None
 

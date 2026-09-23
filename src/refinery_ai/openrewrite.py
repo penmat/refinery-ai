@@ -13,7 +13,7 @@ class OpenRewriteAdapter:
     """Construct and run allowlisted OpenRewrite commands."""
 
     MAVEN_PLUGIN = "org.openrewrite.maven:rewrite-maven-plugin:6.46.1:dryRun"
-    JAVA_RECIPE_ARTIFACT = "org.openrewrite.recipe:rewrite-migrate-java:RELEASE"
+    JAVA_RECIPE_ARTIFACT = "org.openrewrite.recipe:rewrite-migrate-java:3.42.1"
 
     def __init__(self, allowed_recipes: frozenset[str] | None = None) -> None:
         self.allowed_recipes = allowed_recipes or frozenset(

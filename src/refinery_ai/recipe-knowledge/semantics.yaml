@@ -1,0 +1,39 @@
+schema_version: 1
+
+leaf_effects:
+  org.openrewrite.java.migrate.UpgradeJavaVersion:
+    - property: build.java.target
+      operation: set_exact
+      value_from: version
+
+recipe_patterns:
+  - pattern: '^org\.openrewrite\.java\.migrate\.Upgrade(?:Build)?ToJava(?P<version>\d+)$'
+    effects:
+      - property: build.java.target
+        operation: set_exact
+        value_from_match: version
+  - pattern: '^org\.openrewrite\.java\.migrate\.UpgradePluginsForJava(?P<version>\d+)$'
+    effects:
+      - property: build.java.plugins
+        operation: ensure_compatible
+        value_from_match: version
+  - pattern: '^org\.openrewrite\.java\.spring\.boot3\.UpgradeSpringBoot_3_(?P<minor>\d+)$'
+    effects:
+      - property: spring_boot.version
+        operation: set_line
+        value_template: '3.{minor}'
+
+compatibility:
+  spring_boot:
+    '3.5':
+      java_minimum: 17
+      java_maximum: 25
+      maven_minimum: '3.6.3'
+      gradle_minimum: '7.6.4'
+      sources:
+        - https://docs.spring.io/spring-boot/3.5/system-requirements.html
+  gradle_runtime:
+    '21':
+      minimum: '8.5'
+      sources:
+        - https://docs.gradle.org/current/userguide/compatibility.html

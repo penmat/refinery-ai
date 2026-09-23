@@ -9,6 +9,24 @@ uv run refinery run-corpus \
   evals/corpora/refinery-java8-spring-boot-test-corpus.yaml
 ```
 
+Repeat `--profile` to apply an ordered profile pipeline to each checkout. For example, migrate the
+baseline Java 8 projects first to Java 17/Spring Boot 3.2 and then, only after that stage succeeds,
+to Java 21/Spring Boot 3.5:
+
+```bash
+uv run refinery run-corpus \
+  evals/corpora/refinery-java8-spring-boot-test-corpus.yaml \
+  --baseline-tests-only \
+  --profile spring-boot-3.2-java-17 \
+  --profile spring-boot-3.5-java-21 \
+  --jobs 3
+```
+
+Each project is cloned once. Profile stages operate on the same checkout in order, and a failed
+stage prevents later stages from running for that project. The summary retains the final target in
+`profile`, lists the complete pipeline in `profiles`, and records each project's details in
+`profile_stages`.
+
 Each repository is cloned into a separate directory. The command writes a continuously updated
 `summary.json` and one complete log per project under `.refinery/corpus-runs/<timestamp>/`. A
 failed clone or conversion is recorded and the remaining projects continue. The command exits

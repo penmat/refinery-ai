@@ -809,7 +809,7 @@ def test_first_failed_migration_does_not_publish_unchanged_starting_revision(
 
 def test_old_spring_plan_infers_rewrite_spring_artifact() -> None:
     assert _infer_recipe_artifact("org.openrewrite.java.springdoc.SpringFoxToSpringDoc") == (
-        "org.openrewrite.recipe:rewrite-spring:RELEASE"
+        "org.openrewrite.recipe:rewrite-spring:6.37.1"
     )
 
 
@@ -818,3 +818,6 @@ def test_migration_display_name_formats_java_and_camel_case_recipes() -> None:
     assert migration_display_name("org.openrewrite.SpringFoxToSpringDoc") == (
         "Spring Fox → Spring Doc"
     )
+    assert migration_display_name(
+        "refinery.maven.set-spring-boot-version.3.5.16"
+    ) == "Set Spring Boot version to 3.5.16"

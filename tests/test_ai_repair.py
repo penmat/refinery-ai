@@ -7,11 +7,13 @@ from refinery_ai.agents.ai_repair import (
     _maven_dependencies,
     _repair_file_context,
     _validate_new_maven_coordinates,
+    _validate_repair_safety,
 )
 from refinery_ai.config import Settings
 from refinery_ai.migrations.ai_repair import AiMigrationRepairer, _ai_repair_files
 from refinery_ai.migrations.deterministic_repair import (
     DeterministicMigrationRepairer,
+    align_spring_boot_32_property,
     configure_boot3_test_compatibility,
     configure_boot_validation_starter,
     configure_openapi_generator_for_springdoc,
@@ -23,6 +25,7 @@ from refinery_ai.migrations.deterministic_repair import (
     repair_springdoc_info_constructor,
     springdoc_repair_applicable,
     springdoc_repair_files,
+    upgrade_maven_wrapper,
     use_explicit_ant_path_request_matchers,
 )
 from refinery_ai.migrations.repair import MigrationRepairChain, MigrationRepairer
@@ -185,6 +188,22 @@ def test_ai_repair_rejects_a_noop_replacement(tmp_path: Path, monkeypatch) -> No
 
     assert not result.green
     assert "did not change any files" in result.stderr
+
+
+def test_ai_repair_rejects_build_hook_that_mutates_sources(tmp_path: Path) -> None:
+    pom = tmp_path / "pom.xml"
+    original = "<project><build><plugins/></build></project>"
+    proposed = (
+        "<project><build><plugins><plugin>"
+        "<artifactId>maven-antrun-plugin</artifactId><configuration><target>"
+        '<replace dir="${project.basedir}/src/main/java" token="old" value="new"/>'
+        "</target></configuration></plugin></plugins></build></project>"
+    )
+
+    error = _validate_repair_safety({pom: original}, {pom: proposed})
+
+    assert error is not None
+    assert "mutate checked-in source" in error
 
 
 def test_ai_repair_rolls_back_an_unresolvable_dependency(tmp_path: Path, monkeypatch) -> None:
@@ -679,6 +698,112 @@ def test_deterministic_boot_27_repair_configures_validation_starter(tmp_path: Pa
     assert result.green
     assert "managed validation starter" in result.stdout
     assert "spring-boot-starter-validation" in pom.read_text()
+
+
+def test_boot_24_repair_adds_validation_starter_for_provider_import(
+    tmp_path: Path,
+) -> None:
+    pom = tmp_path / "pom.xml"
+    pom.write_text("<project><dependencies>\n</dependencies></project>\n")
+    failure = VerificationResult(
+        command=["./mvnw", "clean", "test"],
+        exit_code=1,
+        stderr="package org.hibernate.validator does not exist",
+        duration_seconds=0,
+    )
+
+    result = DeterministicMigrationRepairer().repair(
+        tmp_path,
+        RecipeRecommendation(
+            recipe="org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_4",
+            reason="upgrade",
+            evidence=["test"],
+            expected_benefit="upgrade",
+            priority="high",
+            confidence=1,
+        ),
+        failure,
+    )
+
+    assert result.green
+    assert "spring-boot-starter-validation" in pom.read_text()
+
+
+def test_boot_32_repair_adds_validation_starter_for_provider_import(
+    tmp_path: Path,
+) -> None:
+    pom = tmp_path / "pom.xml"
+    pom.write_text("<project><dependencies>\n</dependencies></project>\n")
+    failure = VerificationResult(
+        command=["mvn", "clean", "test"],
+        exit_code=1,
+        stderr="package org.hibernate.validator does not exist",
+        duration_seconds=0,
+    )
+
+    result = DeterministicMigrationRepairer().repair(
+        tmp_path,
+        RecipeRecommendation(
+            recipe="org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2",
+            reason="upgrade",
+            evidence=["test"],
+            expected_benefit="upgrade",
+            priority="high",
+            confidence=1,
+        ),
+        failure,
+    )
+
+    assert result.green
+    assert "spring-boot-starter-validation" in pom.read_text()
+
+
+def test_boot_32_repair_aligns_custom_boot_property(tmp_path: Path) -> None:
+    pom = tmp_path / "pom.xml"
+    pom.write_text(
+        "<project><properties><spring-boot.version>2.7.18</spring-boot.version>"
+        "</properties></project>\n"
+    )
+    failure = VerificationResult(
+        command=["mvn", "clean", "test"],
+        exit_code=1,
+        stderr="method does not override or implement a method from a supertype",
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2",
+        reason="upgrade",
+        evidence=["test"],
+        expected_benefit="upgrade",
+        priority="high",
+        confidence=1,
+    )
+
+    assert align_spring_boot_32_property(tmp_path, step, failure)
+    assert "<spring-boot.version>3.2.12</spring-boot.version>" in pom.read_text()
+
+
+@pytest.mark.parametrize("version", ["3.5.3", "3.6.0"])
+def test_maven_wrapper_repair_raises_distribution_to_minimum(
+    tmp_path: Path, version: str
+) -> None:
+    properties = tmp_path / ".mvn/wrapper/maven-wrapper.properties"
+    properties.parent.mkdir(parents=True)
+    properties.write_text(
+        "distributionUrl=https://repo.maven.apache.org/maven2/org/apache/maven/"
+        f"apache-maven/{version}/apache-maven-{version}-bin.zip\n"
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "clean", "test"],
+        exit_code=1,
+        stderr=(
+            "maven-clean-plugin:3.4.1 requires Maven version 3.6.3"
+        ),
+        duration_seconds=0,
+    )
+
+    assert upgrade_maven_wrapper(tmp_path, failure)
+    assert "apache-maven/3.6.3/apache-maven-3.6.3-bin.zip" in properties.read_text()
 
 
 def test_deterministic_boot_23_repair_adds_missing_validation_starter(
@@ -1798,7 +1923,7 @@ def test_deterministic_boot_30_repair_finishes_method_security_migration(
         "configuration.EnableMethodSecurity;\n"
         "import org.springframework.security.config.annotation.method."
         "configuration.GlobalMethodSecurityConfiguration;\n"
-        "@EnableMethodSecurity\n"
+        "@EnableMethodSecurity(securedEnabled = true)\n"
         "class MethodSecurityConfig extends GlobalMethodSecurityConfiguration {}\n"
     )
     failure = VerificationResult(
@@ -1821,6 +1946,77 @@ def test_deterministic_boot_30_repair_finishes_method_security_migration(
     assert result.green
     assert "legacy GlobalMethodSecurityConfiguration inheritance" in result.stdout
     assert "extends GlobalMethodSecurityConfiguration" not in source.read_text()
+    assert "prePostEnabled = true" in source.read_text()
+
+
+def test_deterministic_boot_30_repair_removes_duplicate_legacy_annotation(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "src/main/java/example/MethodSecurityConfig.java"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "import org.springframework.security.config.annotation.method.configuration."
+        "EnableMethodSecurity;\n"
+        "import org.springframework.security.config.annotation.method.configuration."
+        "GlobalMethodSecurityConfiguration;\n"
+        "@EnableMethodSecurity(securedEnabled = true)\n"
+        "@org.springframework.security.config.annotation.method.configuration."
+        "EnableGlobalMethodSecurity(prePostEnabled = true)\n"
+        "class MethodSecurityConfig extends GlobalMethodSecurityConfiguration {}\n"
+    )
+    failure = VerificationResult(
+        command=["./mvnw", "test"],
+        exit_code=1,
+        stdout="EnableGlobalMethodSecurity is not a repeatable annotation type",
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0",
+        reason="upgrade",
+        evidence=["test"],
+        expected_benefit="upgrade",
+        priority="high",
+        confidence=1,
+    )
+
+    result = DeterministicMigrationRepairer().repair(tmp_path, step, failure)
+
+    assert result.green
+    updated = source.read_text()
+    assert "EnableGlobalMethodSecurity" not in updated
+    assert "extends GlobalMethodSecurityConfiguration" not in updated
+    assert "prePostEnabled = true" in updated
+
+
+def test_deterministic_boot_30_repair_upgrades_milton_for_jakarta(tmp_path: Path) -> None:
+    pom = tmp_path / "pom.xml"
+    pom.write_text(
+        "<project><dependencies><dependency>"
+        "<groupId>io.milton</groupId><artifactId>milton-server-ce</artifactId>"
+        "<version>3.1.1.413</version>"
+        "</dependency></dependencies></project>"
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stdout=(
+            "io.milton.servlet.MiltonFilter cannot be converted to jakarta.servlet.Filter"
+        ),
+        duration_seconds=0,
+    )
+    step = RecipeRecommendation(
+        recipe="org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_0",
+        reason="upgrade",
+        evidence=["test"],
+        expected_benefit="upgrade",
+        priority="high",
+        confidence=1,
+    )
+
+    result = DeterministicMigrationRepairer().repair(tmp_path, step, failure)
+
+    assert result.green
+    assert "<version>4.2.0.2712</version>" in pom.read_text()
 
 
 def test_deterministic_repair_removes_obsolete_junit_platform_provider(
@@ -2132,6 +2328,45 @@ def test_boot3_repair_preserves_generated_validation_and_updates_legacy_jpql(
     assert "WHERE visit.pet.id=" in updated
     assert "WHERE pet.type.id=" in updated
     assert springdoc_repair_applicable(tmp_path, failure)
+
+
+def test_boot35_repair_preserves_trailing_slash_routes_and_delete_order(
+    tmp_path: Path,
+) -> None:
+    controller = tmp_path / "src/main/java/example/OwnerController.java"
+    controller.parent.mkdir(parents=True)
+    controller.write_text(
+        'class OwnerController {\n  @GetMapping(value = "", produces = "application/json")\n'
+        "  void get() {}\n}\n"
+    )
+    repository = tmp_path / "src/main/java/example/jpa/JpaPetTypeRepositoryImpl.java"
+    repository.parent.mkdir(parents=True)
+    repository.write_text(
+        "class JpaPetTypeRepositoryImpl {\n"
+        "  void delete(PetType petType) {\n"
+        "    this.em.remove(this.em.contains(petType) ? petType : this.em.merge(petType));\n"
+        '    this.em.createQuery("DELETE FROM PetType pettype WHERE id=" + petType.getId())'
+        ".executeUpdate();\n"
+        "  }\n}\n"
+    )
+    failure = VerificationResult(
+        command=["mvn", "test"],
+        exit_code=1,
+        stdout=(
+            "Status expected:<200> but was:<400>\n"
+            "InvalidDataAccessApiUsage org.hibernate.TransientObjectException: persistent "
+            "instance references an unsaved transient instance of "
+            "'org.springframework.samples.petclinic.model.PetType'"
+        ),
+        duration_seconds=0,
+    )
+
+    repairs = configure_boot3_test_compatibility(tmp_path, failure)
+
+    assert repairs
+    assert '@GetMapping(value = {"", "/"}' in controller.read_text()
+    assert "this.em.remove" not in repository.read_text()
+    assert "this.em.clear();" in repository.read_text()
 
 
 def test_boot3_repair_requires_nonempty_openapi_request_fields(tmp_path: Path) -> None:

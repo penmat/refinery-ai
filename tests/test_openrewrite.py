@@ -37,7 +37,7 @@ def test_uses_recipe_specific_artifact(tmp_path: Path) -> None:
     command = OpenRewriteAdapter._command(
         snapshot,
         "org.openrewrite.java.springdoc.SpringFoxToSpringDoc",
-        recipe_artifact="org.openrewrite.recipe:rewrite-spring:RELEASE",
+        recipe_artifact="org.openrewrite.recipe:rewrite-spring:6.37.1",
     )
 
-    assert any("rewrite-spring:RELEASE" in argument for argument in command)
+    assert any("rewrite-spring:6.37.1" in argument for argument in command)

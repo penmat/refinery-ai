@@ -63,7 +63,13 @@ def run_corpus(
         Path | None,
         typer.Option("--output-directory", "-o", help="Directory for clones, logs, and summary"),
     ] = None,
-    profile_name: Annotated[str, typer.Option("--profile")] = "spring-boot-3.2-java-17",
+    profile_names: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--profile",
+            help="Ordered modernization profile; repeat to run multiple stages",
+        ),
+    ] = None,
     ai_patching: Annotated[
         bool,
         typer.Option(
@@ -129,7 +135,9 @@ def run_corpus(
     """Clone and convert every selected project in an evaluation corpus."""
 
     corpus = load_corpus(corpus_file)
-    load_profile(profile_name)
+    selected_profiles = profile_names or ["spring-boot-3.2-java-17"]
+    for profile_name in selected_profiles:
+        load_profile(profile_name)
     if only_new and rerun_failed_from is not None:
         typer.echo("--only-new cannot be combined with --rerun-failed-from.", err=True)
         raise typer.Exit(code=2)
@@ -184,12 +192,13 @@ def run_corpus(
     destination = output_directory or Path(".refinery") / "corpus-runs" / timestamp
     typer.echo(
         f"Running {len(selected)} project(s) with AI patching "
-        f"{'enabled' if ai_patching else 'disabled'} using {jobs} concurrent job(s)."
+        f"{'enabled' if ai_patching else 'disabled'} using {jobs} concurrent job(s) "
+        f"through {' -> '.join(selected_profiles)}."
     )
     result = CorpusRunner(
         corpus,
         destination,
-        profile=profile_name,
+        profiles=selected_profiles,
         ai_patching=ai_patching,
         max_cycles=max_cycles,
         timeout_seconds=timeout_seconds,

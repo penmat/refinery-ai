@@ -1,0 +1,27 @@
+name: spring-boot-3.5-java-21
+description: Production baseline using Java 21 and Spring Boot 3.5 without optional language rewrites.
+goal: >-
+  Reach a verified Java 21 and Spring Boot 3.5 baseline. Apply only the platform upgrade and
+  migrations required for compatibility. Do not modernize source code to use records, pattern
+  matching, switch expressions, text blocks, var, virtual threads, or other optional Java idioms.
+target_java: 21
+target_spring_boot: "3.5"
+target_spring_boot_version: "3.5.16"
+target_recipes:
+  java: org.openrewrite.java.migrate.UpgradeBuildToJava21
+  spring_boot: org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_5
+evidence:
+  context_graph: "off"
+  sonarqube: "off"
+exclude_recipes:
+  - "*UpgradeToJava2[2-9]"
+  - "*UpgradeToJava[3-9][0-9]"
+  - "*UpgradeSpringBoot_3_[6-9]"
+  - "*UpgradeSpringBoot_4*"
+  - "*UseRecord*"
+  - "*UsePatternMatching*"
+  - "*PatternMatching*"
+  - "*UseSwitchExpression*"
+  - "*UseTextBlock*"
+  - "*UseVar*"
+  - "*VirtualThread*"

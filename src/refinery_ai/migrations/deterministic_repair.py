@@ -17,6 +17,7 @@ _MISSING_GENERATED_JAVAX_APIS = (
     "package javax.annotation does not exist",
 )
 _BOOT3_VALIDATION_FAILURE = "Status expected:<400> but was:<201>"
+_BOOT35_TRAILING_SLASH_FAILURE = re.compile(r"Status expected:<(?:200|201|404)> but was:<400>")
 _HIBERNATE6_QUERY_FAILURE = "InvalidDataAccessApiUsage"
 _JDBC_QUERY_FAILURE = "BadSqlGrammar"
 _INVALID_INFO_CONSTRUCTOR = "constructor Info in class io.swagger.v3.oas.models.info.Info"
@@ -25,13 +26,21 @@ _SUREFIRE_CONSOLE_LOGGER_FAILURE = "org.apache.maven.plugin.surefire.log.api.Con
 _MISSING_HIBERNATE_VALIDATOR_CONSTRAINTS = (
     "package org.hibernate.validator.constraints does not exist"
 )
+_MISSING_HIBERNATE_VALIDATOR_PACKAGE = "package org.hibernate.validator does not exist"
 _MISSING_JAVAX_VALIDATION = "package javax.validation does not exist"
+_MAVEN_VERSION_FAILURE = "requires Maven version 3.6.3"
 _CIRCULAR_SECURITY_CONFIGURATION = "BeanCurrentlyInCreationException"
 _REQUEST_MATCHER_SIGNATURE_FAILURE = (
     "java.lang.String cannot be converted to "
     "org.springframework.security.web.util.matcher.RequestMatcher"
 )
 _LEGACY_METHOD_SECURITY_CONFIGURATION_FAILURE = "EnableGlobalMethodSecurity is required"
+_DUPLICATE_GLOBAL_METHOD_SECURITY_FAILURE = (
+    "EnableGlobalMethodSecurity is not a repeatable annotation type"
+)
+_MILTON_JAVAX_FILTER_FAILURE = (
+    "io.milton.servlet.MiltonFilter cannot be converted to jakarta.servlet.Filter"
+)
 _PRIVATE_BEAN_METHOD_FAILURE = "@Bean method"
 _H2_MISSING_COMMENT_ID = 'NULL not allowed for column "COMMENT_ID"'
 _BROKEN_FASTJSON2_CACHE_CONFIG = "ObjectReaderProvider cannot be converted to"
@@ -64,6 +73,9 @@ _SPRING_SECURITY_58_RECIPE = "org.openrewrite.java.spring.security5.UpgradeSprin
 _SPRINGFOX_TO_SPRINGDOC_RECIPE = "org.openrewrite.java.springdoc.SpringFoxToSpringDoc"
 _BOOT_2_UPGRADE_RECIPE = re.compile(
     r"org\.openrewrite\.java\.spring\.boot2\.UpgradeSpringBoot_2_[3-7]"
+)
+_BOOT_UPGRADE_RECIPE = re.compile(
+    r"org\.openrewrite\.java\.spring\.boot[23]\.UpgradeSpringBoot_[23]_\d+"
 )
 
 
@@ -544,7 +556,11 @@ def configure_boot_validation_starter(repository: Path, failure: VerificationRes
     diagnostic = f"{failure.stdout}\n{failure.stderr}"
     if not any(
         marker in diagnostic
-        for marker in (_MISSING_HIBERNATE_VALIDATOR_CONSTRAINTS, _MISSING_JAVAX_VALIDATION)
+        for marker in (
+            _MISSING_HIBERNATE_VALIDATOR_CONSTRAINTS,
+            _MISSING_HIBERNATE_VALIDATOR_PACKAGE,
+            _MISSING_JAVAX_VALIDATION,
+        )
     ):
         return False
     pom = repository / "pom.xml"
@@ -561,7 +577,13 @@ def configure_boot_validation_starter(repository: Path, failure: VerificationRes
     match = validation_api.search(content)
     if match is None:
         if (
-            _MISSING_JAVAX_VALIDATION not in diagnostic
+            not any(
+                marker in diagnostic
+                for marker in (
+                    _MISSING_HIBERNATE_VALIDATOR_PACKAGE,
+                    _MISSING_JAVAX_VALIDATION,
+                )
+            )
             or "<artifactId>spring-boot-starter-validation</artifactId>" in content
         ):
             return False
@@ -588,6 +610,61 @@ def configure_boot_validation_starter(repository: Path, failure: VerificationRes
         )
     pom.write_text(content[: match.start()] + replacement + content[match.end() :])
     return True
+
+
+def upgrade_maven_wrapper(repository: Path, failure: VerificationResult) -> bool:
+    """Raise an obsolete checked-in Maven distribution to Boot 3's minimum."""
+
+    diagnostic = f"{failure.stdout}\n{failure.stderr}"
+    if _MAVEN_VERSION_FAILURE not in diagnostic:
+        return False
+    properties = repository / ".mvn" / "wrapper" / "maven-wrapper.properties"
+    if not properties.is_file():
+        return False
+    content = properties.read_text(errors="replace")
+    updated = re.sub(
+        r"(?<=/apache-maven/)(?:3\.[0-5]\.\d+|3\.6\.[0-2])"
+        r"(?=/apache-maven-(?:3\.[0-5]\.\d+|3\.6\.[0-2])-bin\.zip)",
+        "3.6.3",
+        content,
+    )
+    updated = re.sub(
+        r"(?<=/apache-maven-)(?:3\.[0-5]\.\d+|3\.6\.[0-2])(?=-bin\.zip)",
+        "3.6.3",
+        updated,
+    )
+    if updated == content:
+        return False
+    properties.write_text(updated)
+    return True
+
+
+def align_spring_boot_32_property(
+    repository: Path,
+    step: RecipeRecommendation,
+    failure: VerificationResult,
+) -> bool:
+    """Finish a Boot 3.2 composite that left a custom Boot property on 2.x."""
+
+    if step.recipe != "org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2":
+        return False
+    diagnostic = f"{failure.stdout}\n{failure.stderr}"
+    if "method does not override or implement a method from a supertype" not in diagnostic:
+        return False
+    repaired = False
+    for pom in sorted(repository.rglob("pom.xml")):
+        if ".refinery" in pom.relative_to(repository).parts:
+            continue
+        content = pom.read_text(errors="replace")
+        updated = re.sub(
+            r"(<spring-boot\.version>\s*)2\.[^<]+(\s*</spring-boot\.version>)",
+            r"\g<1>3.2.12\g<2>",
+            content,
+        )
+        if updated != content:
+            pom.write_text(updated)
+            repaired = True
+    return repaired
 
 
 def _project_dependencies_end(content: str) -> int:
@@ -1357,7 +1434,13 @@ def remove_legacy_global_method_security_inheritance(
     """Finish Security 6 annotation migration by removing its legacy superclass."""
 
     diagnostic = f"{failure.stdout}\n{failure.stderr}"
-    if _LEGACY_METHOD_SECURITY_CONFIGURATION_FAILURE not in diagnostic:
+    if not any(
+        marker in diagnostic
+        for marker in (
+            _LEGACY_METHOD_SECURITY_CONFIGURATION_FAILURE,
+            _DUPLICATE_GLOBAL_METHOD_SECURITY_FAILURE,
+        )
+    ):
         return ()
     repaired: list[str] = []
     inheritance = re.compile(
@@ -1373,11 +1456,58 @@ def remove_legacy_global_method_security_inheritance(
         if "@EnableMethodSecurity" not in content:
             continue
         updated, replacements = inheritance.subn(r"\g<name>", content, count=1)
-        if not replacements:
+        updated = re.sub(
+            r"(?m)^\s*@(?:org\.springframework\.security\.config\.annotation\.method\."
+            r"configuration\.)?EnableGlobalMethodSecurity\([^\n]*\)\s*\n",
+            "",
+            updated,
+        )
+        updated = re.sub(
+            r"(?m)^import\s+org\.springframework\.security\.config\.annotation\.method\."
+            r"configuration\.EnableGlobalMethodSecurity;\s*\n",
+            "",
+            updated,
+        )
+        method_security = re.search(r"@EnableMethodSecurity(?:\((?P<body>.*?)\))?", updated, re.S)
+        if method_security and "prePostEnabled" not in (method_security.group("body") or ""):
+            body = (method_security.group("body") or "").strip()
+            replacement = "@EnableMethodSecurity(prePostEnabled = true"
+            if body:
+                replacement += ",\n        " + body
+            replacement += ")"
+            updated = updated[: method_security.start()] + replacement + updated[method_security.end() :]
+        if not replacements and updated == content:
             continue
         updated = legacy_import.sub("", updated, count=1)
         path.write_text(updated)
         repaired.append(str(path.relative_to(repository)))
+    return tuple(repaired)
+
+
+def upgrade_milton_for_jakarta_servlet(
+    repository: Path, failure: VerificationResult
+) -> tuple[str, ...]:
+    """Upgrade Milton's legacy javax Servlet implementation for Spring Boot 3."""
+
+    diagnostic = f"{failure.stdout}\n{failure.stderr}"
+    if _MILTON_JAVAX_FILTER_FAILURE not in diagnostic:
+        return ()
+    repaired: list[str] = []
+    for path in repository.rglob("pom.xml"):
+        if ".refinery" in path.relative_to(repository).parts:
+            continue
+        content = path.read_text(errors="replace")
+        updated = re.sub(
+            r"(<groupId>\s*io\.milton\s*</groupId>\s*"
+            r"<artifactId>\s*milton-server-ce\s*</artifactId>\s*"
+            r"<version>\s*)[^<]+(\s*</version>)",
+            r"\g<1>4.2.0.2712\2",
+            content,
+            count=1,
+        )
+        if updated != content:
+            path.write_text(updated)
+            repaired.append(str(path.relative_to(repository)))
     return tuple(repaired)
 
 
@@ -1456,6 +1586,19 @@ def configure_boot3_test_compatibility(
     diagnostic = f"{failure.stdout}\n{failure.stderr}"
     repairs: list[str] = []
     pom = repository / "pom.xml"
+    if _BOOT35_TRAILING_SLASH_FAILURE.search(diagnostic):
+        for path in repository.glob("src/main/java/**/*Controller.java"):
+            content = path.read_text(errors="replace")
+            updated = re.sub(
+                r"@(Get|Post|Put|Patch|Delete)Mapping\(value\s*=\s*\"\"",
+                r'@\1Mapping(value = {"", "/"}',
+                content,
+            )
+            if updated != content:
+                path.write_text(updated)
+                repairs.append(
+                    f"preserved trailing-slash routes in {path.relative_to(repository)}"
+                )
     if _BOOT3_VALIDATION_FAILURE in diagnostic and pom.is_file():
         content = pom.read_text(errors="replace")
         if "openapi-generator-maven-plugin" in content and "<useBeanValidation>" not in content:
@@ -1494,6 +1637,34 @@ def configure_boot3_test_compatibility(
             if updated != content:
                 path.write_text(updated)
                 repairs.append(f"updated Hibernate 6 JPQL in {path.relative_to(repository)}")
+        transient_pet_type = (
+            "TransientObjectException: persistent instance references an unsaved transient "
+            "instance of 'org.springframework.samples.petclinic.model.PetType'"
+        )
+        if transient_pet_type in diagnostic:
+            for path in repository.glob("src/main/java/**/*PetTypeRepositoryImpl.java"):
+                content = path.read_text(errors="replace")
+                updated = re.sub(
+                    r"(?m)^\s*this\.em\.remove\(this\.em\.contains\(petType\) \? petType : "
+                    r"this\.em\.merge\(petType\)\);\s*\n",
+                    "",
+                    content,
+                    count=1,
+                )
+                if updated != content and "this.em.clear();" not in updated:
+                    updated = re.sub(
+                        r'(this\.em\.createQuery\("DELETE FROM PetType pettype WHERE id="[^\n]+'
+                        r"\.executeUpdate\(\);)",
+                        r"\1\n        this.em.clear();",
+                        updated,
+                        count=1,
+                    )
+                if updated != content:
+                    path.write_text(updated)
+                    repairs.append(
+                        "deferred PetType deletion until after its dependent pets in "
+                        f"{path.relative_to(repository)}"
+                    )
     if _JDBC_QUERY_FAILURE in diagnostic:
         replacements = {
             "WHERE visit.pet.id=": "WHERE pet_id=",
@@ -1595,8 +1766,23 @@ def springdoc_repair_applicable(repository: Path, failure: VerificationResult) -
             _MISSING_HIBERNATE_VALIDATOR_CONSTRAINTS in diagnostic
             and "<artifactId>validation-api</artifactId>" in pom.read_text(errors="replace")
         )
+        or _MISSING_HIBERNATE_VALIDATOR_PACKAGE in diagnostic
         or _MISSING_JAVAX_VALIDATION in diagnostic
     )
+    partial_boot3_property_upgrade = (
+        "method does not override or implement a method from a supertype" in diagnostic
+        and any(
+            re.search(
+                r"<spring-boot\.version>\s*2\.",
+                candidate.read_text(errors="replace"),
+            )
+            for candidate in repository.rglob("pom.xml")
+            if ".refinery" not in candidate.relative_to(repository).parts
+        )
+    )
+    obsolete_maven_wrapper = _MAVEN_VERSION_FAILURE in diagnostic and (
+        repository / ".mvn" / "wrapper" / "maven-wrapper.properties"
+    ).is_file()
     circular_security_configuration = (
         _CIRCULAR_SECURITY_CONFIGURATION in diagnostic
         and "webSecurityConfig" in diagnostic
@@ -1614,7 +1800,13 @@ def springdoc_repair_applicable(repository: Path, failure: VerificationResult) -
         )
     )
     legacy_method_security_configuration = (
-        _LEGACY_METHOD_SECURITY_CONFIGURATION_FAILURE in diagnostic
+        any(
+            marker in diagnostic
+            for marker in (
+                _LEGACY_METHOD_SECURITY_CONFIGURATION_FAILURE,
+                _DUPLICATE_GLOBAL_METHOD_SECURITY_FAILURE,
+            )
+        )
         and any(
             "@EnableMethodSecurity" in (content := path.read_text(errors="replace"))
             and "extends GlobalMethodSecurityConfiguration" in content
@@ -1707,6 +1899,7 @@ def springdoc_repair_applicable(repository: Path, failure: VerificationResult) -
             and "target" not in path.relative_to(repository).parts
         )
     )
+    incompatible_milton_filter = _MILTON_JAVAX_FILTER_FAILURE in diagnostic
     return (
         bool(springdoc_repair_files(repository))
         or generated_annotation_failure
@@ -1714,6 +1907,8 @@ def springdoc_repair_applicable(repository: Path, failure: VerificationResult) -
         or invalid_info_constructor
         or obsolete_surefire_provider
         or missing_validation_implementation
+        or partial_boot3_property_upgrade
+        or obsolete_maven_wrapper
         or circular_security_configuration
         or request_matcher_signature_failure
         or legacy_method_security_configuration
@@ -1733,6 +1928,7 @@ def springdoc_repair_applicable(repository: Path, failure: VerificationResult) -
         or legacy_hibernate4_integration_failure
         or removed_hibernate6_api_failure
         or incomplete_security_6_authentication
+        or incompatible_milton_filter
         or (
             _PRIVATE_BEAN_METHOD_FAILURE in diagnostic
             and "must not be private or final" in diagnostic
@@ -1756,8 +1952,12 @@ class DeterministicMigrationRepairer:
         generator_repaired = configure_openapi_generator_for_springdoc(repository, failure)
         boot3_repairs = configure_boot3_test_compatibility(repository, failure)
         validation_repaired = bool(
-            _BOOT_2_UPGRADE_RECIPE.fullmatch(step.recipe)
+            _BOOT_UPGRADE_RECIPE.fullmatch(step.recipe)
         ) and configure_boot_validation_starter(repository, failure)
+        maven_wrapper_repaired = upgrade_maven_wrapper(repository, failure)
+        boot_property_repaired = align_spring_boot_32_property(
+            repository, step, failure
+        )
         encoder_repairs = (
             make_password_encoder_bean_independent(repository, failure)
             if step.recipe == _BOOT_26_RECIPE
@@ -1817,12 +2017,15 @@ class DeterministicMigrationRepairer:
         bean_method_repairs = make_bean_methods_non_private(repository, failure)
         h2_seed_repairs = add_missing_h2_seed_ids(repository, failure)
         fastjson_repairs = restore_fastjson1_cache_configuration(repository, failure)
+        milton_repairs = upgrade_milton_for_jakarta_servlet(repository, failure)
         if not (
             info_repairs
             or surefire_repaired
             or generator_repaired
             or boot3_repairs
             or validation_repaired
+            or maven_wrapper_repaired
+            or boot_property_repaired
             or encoder_repairs
             or request_matcher_repairs
             or method_security_repairs
@@ -1846,6 +2049,7 @@ class DeterministicMigrationRepairer:
             or bean_method_repairs
             or h2_seed_repairs
             or fastjson_repairs
+            or milton_repairs
         ):
             return _result(1, "No deterministic migration repair matched the failure")
         if validation_repaired:
@@ -1854,6 +2058,18 @@ class DeterministicMigrationRepairer:
                 stdout=(
                     "Replaced the bare Bean Validation API with Spring Boot's managed "
                     "validation starter"
+                ),
+            )
+        if maven_wrapper_repaired:
+            return _result(
+                0,
+                stdout="Upgraded the checked-in Maven wrapper distribution to Maven 3.6.3",
+            )
+        if boot_property_repaired:
+            return _result(
+                0,
+                stdout=(
+                    "Aligned a custom spring-boot.version property with the Boot 3.2 target"
                 ),
             )
         if encoder_repairs:
@@ -1880,6 +2096,14 @@ class DeterministicMigrationRepairer:
                     "Removed legacy GlobalMethodSecurityConfiguration inheritance from "
                     "Spring Security 6 configuration: "
                     f"{', '.join(method_security_repairs)}"
+                ),
+            )
+        if milton_repairs:
+            return _result(
+                0,
+                stdout=(
+                    "Upgraded Milton to its Jakarta Servlet-compatible release: "
+                    f"{', '.join(milton_repairs)}"
                 ),
             )
         if springfox_repairs:

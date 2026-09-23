@@ -5,6 +5,10 @@ goal: >-
   when API documentation is present. Stop at Spring Boot 3.2 and Java 17.
 target_java: 17
 target_spring_boot: "3.2"
+target_spring_boot_version: "3.2.12"
+target_recipes:
+  java: org.openrewrite.java.migrate.UpgradeToJava17
+  spring_boot: org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_2
 evidence:
   context_graph: "off"
   sonarqube: "off"

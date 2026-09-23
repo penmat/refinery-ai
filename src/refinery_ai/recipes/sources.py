@@ -22,8 +22,12 @@ RECIPE_REPOSITORIES = (
     "openrewrite/rewrite-migrate-java",
     "openrewrite/rewrite-spring",
 )
+RECIPE_RELEASES = {
+    "openrewrite/rewrite-migrate-java": "3.42.1",
+    "openrewrite/rewrite-spring": "6.37.1",
+}
 TRANSIENT_HTTP_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
-RECIPE_CACHE_SCHEMA_VERSION = 2
+RECIPE_CACHE_SCHEMA_VERSION = 3
 
 
 def _ssl_context(verify_ssl: bool) -> ssl.SSLContext:
@@ -46,6 +50,8 @@ class RecipeSource(BaseModel):
     repository: str
     file_path: str
     recipe_list: list[str | dict[str, Any]] = Field(default_factory=list)
+    source_revision: str | None = None
+    artifact: str | None = None
 
 
 def parse_recipe_yaml(
@@ -88,7 +94,8 @@ def _fetch_repository_recipes(
 ) -> list[RecipeSource]:
     """Download one trusted GitHub repository and extract its declarative recipes."""
 
-    archive_url = f"https://github.com/{repository}/archive/refs/heads/main.zip"
+    release = RECIPE_RELEASES[repository]
+    archive_url = f"https://github.com/{repository}/archive/refs/tags/v{release}.zip"
     request = Request(archive_url, headers={"User-Agent": "refinery-ai/0.1"})
     context: ssl.SSLContext = _ssl_context(verify_ssl)
     with urlopen(request, timeout=timeout, context=context) as response:
@@ -110,7 +117,16 @@ def _fetch_repository_recipes(
             recipes.extend(parse_recipe_yaml(content, relative, repository=repository))
     if not recipes:
         raise ValueError(f"{repository} archive contained no declarative recipes")
-    return recipes
+    artifact = repository.rsplit("/", maxsplit=1)[-1]
+    return [
+        recipe.model_copy(
+            update={
+                "source_revision": f"v{release}",
+                "artifact": f"org.openrewrite.recipe:{artifact}:{release}",
+            }
+        )
+        for recipe in recipes
+    ]
 
 
 def _cache_path(cache_directory: Path, repository: str) -> Path:

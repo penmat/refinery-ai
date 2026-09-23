@@ -101,6 +101,7 @@ class ExecutionType(StrEnum):
     OPENREWRITE = "openrewrite"
     UTF8 = "utf8"
     SPRING_PROPERTIES = "spring-properties"
+    MAVEN_PROPERTY = "maven-property"
 
 
 class RepairMode(StrEnum):
@@ -126,7 +127,9 @@ class RecipeRecommendation(BaseModel):
 class RecipePlan(BaseModel):
     """Non-executing output from the catalog-aware planner."""
 
-    recommendations: list[RecipeRecommendation] = Field(default_factory=list, max_length=10)
+    # The planner is bounded to ten suggestions; profile completion may append
+    # one canonical recipe per structured target and a target-state finalizer afterward.
+    recommendations: list[RecipeRecommendation] = Field(default_factory=list, max_length=13)
 
 
 class PersistedMigrationPlan(BaseModel):

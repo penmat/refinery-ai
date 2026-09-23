@@ -17,6 +17,7 @@ from refinery_ai.context_graph.contracts import ContextGraphBuildService
 from refinery_ai.context_graph.models import ContextGraphInfo
 from refinery_ai.harness import AssessmentHarnessPolicy, HarnessRepositoryEnvironment
 from refinery_ai.logging import get_logger
+from refinery_ai.migrations.maven_property import SET_SPRING_BOOT_VERSION_PREFIX
 from refinery_ai.migrations.spring_properties import DEFER_DATASOURCE_INITIALIZATION_RECIPE
 from refinery_ai.migrations.utf8 import UTF8_APPLICATION_PROPERTIES_RECIPE
 from refinery_ai.models import (
@@ -43,6 +44,7 @@ from refinery_ai.planning_artifacts import (
 )
 from refinery_ai.profiles import ModernizationProfile
 from refinery_ai.recipes.catalog import RecipeCatalogSession
+from refinery_ai.recipes.knowledge import build_recipe_knowledge, schedule_recipe_plan
 from refinery_ai.recipes.sources import RecipeSource, fetch_recipe_sources
 from refinery_ai.reporting import to_markdown
 from refinery_ai.repository import RepositoryEnvironment
@@ -274,6 +276,8 @@ class ModernizationFactory:
                     refresh=refresh_recipe_catalog,
                 )
             )
+            recipe_knowledge = build_recipe_knowledge(recipe_sources)
+            recipe_knowledge.persist(state_dir / "cache" / "recipe-knowledge.json")
             permitted_recipe_sources = [
                 source
                 for source in recipe_sources
@@ -365,6 +369,18 @@ class ModernizationFactory:
             plan = _with_deterministic_prerequisites(planned_recipes, snapshot)
             if profile is not None:
                 plan = profile.filter_plan(plan)
+                plan = schedule_recipe_plan(
+                    plan,
+                    recipe_knowledge,
+                    target_java=profile.target_java,
+                    target_gaps={
+                        gap.target for gap in profile.unresolved_targets(snapshot)
+                    },
+                    target_recipes=profile.target_recipes,
+                )
+                plan = _with_maven_boot_target_finalizer(
+                    plan, snapshot, profile
+                )
         else:
             plan = rule_based_plan(snapshot, goal)
             validate_plan(plan)
@@ -531,6 +547,52 @@ def _with_utf8_prerequisite(
     return RecipePlan(recommendations=[conversion, *ordered])
 
 
+def _with_maven_boot_target_finalizer(
+    plan: RecipePlan,
+    snapshot: DiscoverySnapshot,
+    profile: ModernizationProfile,
+) -> RecipePlan:
+    """Finalize custom Maven Boot properties after the source migration."""
+
+    version = profile.target_spring_boot_version
+    if (
+        snapshot.build_system.value != "maven"
+        or version is None
+        or not any(gap.target == "spring_boot" for gap in profile.unresolved_targets(snapshot))
+    ):
+        return plan
+    repository = Path(snapshot.repository)
+    property_pattern = re.compile(r"<spring-boot\.version>\s*[^<]+</spring-boot\.version>")
+    if not any(
+        property_pattern.search(path.read_text(errors="replace"))
+        for path in repository.rglob("pom.xml")
+        if ".refinery" not in path.relative_to(repository).parts
+        and "target" not in path.relative_to(repository).parts
+    ):
+        return plan
+    recipe = f"{SET_SPRING_BOOT_VERSION_PREFIX}{version}"
+    if any(item.recipe == recipe for item in plan.recommendations):
+        return plan
+    boot_recipe = profile.target_recipes.get("spring_boot")
+    dependencies = (
+        [boot_recipe]
+        if boot_recipe is not None
+        and any(item.recipe == boot_recipe for item in plan.recommendations)
+        else []
+    )
+    finalizer = RecipeRecommendation(
+        execution_type=ExecutionType.MAVEN_PROPERTY,
+        recipe=recipe,
+        reason="The profile target must update the project's custom Spring Boot property.",
+        evidence=["discovery.maven_property=spring-boot.version"],
+        expected_benefit=f"Establishes Spring Boot {version} as the effective Maven baseline.",
+        priority=RecipePriority.HIGH,
+        depends_on=dependencies,
+        confidence=1,
+    )
+    return RecipePlan(recommendations=[*plan.recommendations, finalizer])
+
+
 def _with_datasource_initialization_prerequisite(
     plan: RecipePlan, snapshot: DiscoverySnapshot
 ) -> RecipePlan:
@@ -603,7 +665,7 @@ def _with_springfox_before_boot27(
     if springfox is None and uses_springfox:
         springfox = RecipeRecommendation(
             recipe=springfox_recipe,
-            recipe_artifact="org.openrewrite.recipe:rewrite-spring:RELEASE",
+            recipe_artifact="org.openrewrite.recipe:rewrite-spring:6.37.1",
             reason="Springfox must be converted before upgrading Spring Boot to 2.7.",
             evidence=["discovery.dependency=io.springfox"],
             expected_benefit=(

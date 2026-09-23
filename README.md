@@ -223,7 +223,7 @@ uv run refinery plan \
 ```
 
 Use a named modernization profile to keep recommendations within a defined target. Profiles live
-under `src/refinery_ai/profiles/`; the initial profile permits prerequisite migrations while
+under `src/refinery_ai/profiles/`. The Java 17 profile permits prerequisite migrations while
 excluding upgrades beyond Java 17, Spring Boot 3.2, and Springdoc 2.5:
 
 ```bash
@@ -234,6 +234,20 @@ uv run refinery migrate /path/to/java-project \
   --profile spring-boot-3.2-java-17 \
   --apply
 ```
+
+For the next platform baseline, use `spring-boot-3.5-java-21`:
+
+```bash
+uv run refinery run \
+  --repository /path/to/java-project \
+  --profile spring-boot-3.5-java-21 \
+  --apply
+```
+
+This profile upgrades the required platform versions and compatibility prerequisites only. It
+deliberately excludes optional Java-language modernization such as records, pattern matching,
+switch expressions, text blocks, `var`, and virtual threads. Those remain separate incremental
+modernization choices rather than side effects of the platform upgrade.
 
 The selected profile is stored with the plan. Supplying a different profile to `migrate` is
 rejected, which prevents accidentally executing a plan against a different modernization target.
@@ -272,6 +286,18 @@ uv run refinery run-corpus \
   --jobs 3
 ```
 
+To apply multiple modernization profiles incrementally to the same checkout, repeat `--profile`
+in the required order. A project advances only after its preceding profile succeeds:
+
+```bash
+uv run refinery run-corpus \
+  evals/corpora/refinery-java8-spring-boot-test-corpus.yaml \
+  --baseline-tests-only \
+  --profile spring-boot-3.2-java-17 \
+  --profile spring-boot-3.5-java-21 \
+  --jobs 3
+```
+
 By default, history is read from `.refinery/corpus-runs` and projects marked as requiring test
 configuration remain skipped. Use `--run-history /path/to/corpus-runs` for another history location,
 or `--include-test-configuration-needed` to include those projects.
@@ -299,10 +325,32 @@ with TLS interception, verification can be explicitly disabled for this request 
 warning whenever this protection is disabled.
 
 Planner recipe definitions are loaded from the declarative YAML catalogs in both
-`openrewrite/rewrite-migrate-java` and `openrewrite/rewrite-spring`. Each definition retains its
-source repository and file path. The normalized catalogs are cached beneath
+`openrewrite/rewrite-migrate-java` and `openrewrite/rewrite-spring`. The source repositories and
+runtime artifacts are pinned to matching releases so planning semantics cannot silently drift
+away from execution. Each definition retains its source repository, release, artifact coordinate,
+and file path. The normalized catalogs are cached beneath
 `.refinery/cache/recipe-sources/`; subsequent plans read that cache without contacting GitHub.
 Use `--refresh-recipe-catalog` to explicitly download fresh definitions.
+
+At catalog load time Refinery recursively expands composite recipes and writes a normalized
+knowledge snapshot to `.refinery/cache/recipe-knowledge.json`. The snapshot records transitive
+effects with their full recipe path, artifact provenance, compatibility facts, and fingerprints
+of both the source catalog and maintained semantic rules. The deterministic scheduler uses this
+graph to repair contradictory planner ordering—for example, a Spring Boot composite that
+transitively sets Java 17 must precede the recipes that establish the profile's final Java 21
+build and plugin state.
+
+Profiles also declare the canonical recipe for each measurable target. If the model omits an
+unsatisfied target, Refinery adds its canonical recipe deterministically. When a target recipe has
+a transitive effect that would invalidate another profile target, the scheduler adds that target's
+finalizer to the same plan. This makes the constraint hold across profile cycles as well as within
+a single model-generated plan.
+
+Facts that cannot be derived from recipe composition, such as supported Java ranges and build-tool
+runtime requirements, live in the versioned
+`src/refinery_ai/recipe-knowledge/semantics.yaml` document with upstream documentation links. This
+keeps discovered recipe behavior separate from maintained ecosystem compatibility policy and
+leaves room for future profile-specific platform, Java-idiom, and security constraints.
 
 The full catalog is not placed in the planner prompt. The planner receives bounded tools to list
 recipe categories, search compact recipe summaries, and inspect one exact recipe definition. A

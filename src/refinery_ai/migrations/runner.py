@@ -16,6 +16,10 @@ from refinery_ai.jdks import (
 )
 from refinery_ai.migrations.contracts import MigrationTypeRunner
 from refinery_ai.migrations.deterministic_repair import springdoc_repair_applicable
+from refinery_ai.migrations.maven_property import (
+    SET_SPRING_BOOT_VERSION_PREFIX,
+    MavenPropertyMigrationRunner,
+)
 from refinery_ai.migrations.openrewrite import OpenRewriteMigrationRunner
 from refinery_ai.migrations.repair import (
     MigrationRepairer,
@@ -125,6 +129,7 @@ class MigrationRunner:
             ExecutionType.OPENREWRITE: OpenRewriteMigrationRunner(),
             ExecutionType.UTF8: Utf8PropertiesMigrationRunner(),
             ExecutionType.SPRING_PROPERTIES: SpringPropertiesMigrationRunner(),
+            ExecutionType.MAVEN_PROPERTY: MavenPropertyMigrationRunner(),
         }
         self.timeout = timeout
         self.output_limit = output_limit
@@ -559,6 +564,9 @@ def migration_display_name(recipe: str) -> str:
         return "Convert application properties to UTF-8"
     if recipe == DEFER_DATASOURCE_INITIALIZATION_RECIPE:
         return "Defer datasource initialization"
+    if recipe.startswith(SET_SPRING_BOOT_VERSION_PREFIX):
+        version = recipe.removeprefix(SET_SPRING_BOOT_VERSION_PREFIX)
+        return f"Set Spring Boot version to {version}"
     name = recipe.rsplit(".", maxsplit=1)[-1]
     java_upgrade = re.fullmatch(r"Java(\d+)(?:to|To)Java(\d+)", name)
     if java_upgrade:
