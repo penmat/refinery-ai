@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from refinery_ai.build_tools import maven_command_prefix
+from refinery_ai.build_tools import build_directory, maven_command_prefix
 from refinery_ai.models import BuildSystem, DiscoverySnapshot, VerificationResult
 from refinery_ai.verification import verify
 
@@ -36,7 +36,12 @@ class OpenRewriteAdapter:
         if recipe not in self.allowed_recipes:
             raise ValueError(f"Recipe is not allowlisted: {recipe}")
         command = self._command(snapshot, recipe)
-        return verify(snapshot.repository, command, timeout=timeout, environment=environment)
+        return verify(
+            self._working_directory(snapshot),
+            command,
+            timeout=timeout,
+            environment=environment,
+        )
 
     def run(
         self,
@@ -52,10 +57,17 @@ class OpenRewriteAdapter:
 
         if recipe not in self.allowed_recipes:
             raise ValueError(f"Recipe is not allowlisted: {recipe}")
-        command = self._command(
-            snapshot, recipe, apply=apply, recipe_artifact=recipe_artifact
+        command = self._command(snapshot, recipe, apply=apply, recipe_artifact=recipe_artifact)
+        return verify(
+            self._working_directory(snapshot),
+            command,
+            timeout=timeout,
+            environment=environment,
         )
-        return verify(snapshot.repository, command, timeout=timeout, environment=environment)
+
+    @staticmethod
+    def _working_directory(snapshot: DiscoverySnapshot) -> Path:
+        return snapshot.repository / build_directory(snapshot.build_files)
 
     @staticmethod
     def _command(
@@ -65,7 +77,7 @@ class OpenRewriteAdapter:
         apply: bool = False,
         recipe_artifact: str | None = None,
     ) -> list[str]:
-        root: Path = snapshot.repository
+        root = OpenRewriteAdapter._working_directory(snapshot)
         if snapshot.build_system is BuildSystem.MAVEN:
             goal = OpenRewriteAdapter.MAVEN_PLUGIN
             if apply:

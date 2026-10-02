@@ -17,6 +17,7 @@ from refinery_ai.assessment.models import (
     Finding,
     ToolIdentity,
 )
+from refinery_ai.build_tools import build_directory
 from refinery_ai.inspectors.contracts import InspectionRequest
 from refinery_ai.inspectors.dependencies.collectors import ResolvedDependencyCollector
 from refinery_ai.inspectors.dependencies.models import (
@@ -72,7 +73,9 @@ class DependencyAnalyzer:
             "normalizationVersion": "1",
         }
         try:
-            dependencies = self.collector.collect(repository, snapshot.build_system)
+            dependencies = self.collector.collect(
+                repository / build_directory(snapshot.build_files), snapshot.build_system
+            )
             purls = [maven_purl(dependency) for dependency in dependencies]
             vulnerabilities = self.osv.query(purls)
         except DependencyAnalysisTimeout as error:

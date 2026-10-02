@@ -3,7 +3,18 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from pathlib import Path
+
+
+def build_directory(build_files: Iterable[Path]) -> Path:
+    """Select the nearest authoritative build root represented by discovery."""
+
+    files = list(build_files)
+    if not files:
+        return Path(".")
+    build_file = min(files, key=lambda path: (len(path.parts), path.as_posix()))
+    return build_file.parent
 
 
 def maven_command_prefix(repository: Path) -> list[str]:

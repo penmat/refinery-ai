@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -41,3 +42,30 @@ def test_uses_recipe_specific_artifact(tmp_path: Path) -> None:
     )
 
     assert any("rewrite-spring:6.37.1" in argument for argument in command)
+
+
+def test_nested_maven_project_runs_openrewrite_from_its_build_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = tmp_path / "backend"
+    backend.mkdir()
+    (backend / "pom.xml").touch()
+    snapshot = DiscoverySnapshot(
+        repository=tmp_path,
+        build_system=BuildSystem.MAVEN,
+        build_files=[Path("backend/pom.xml")],
+    )
+    working_directories: list[Path] = []
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        working_directories.append(Path(str(kwargs["cwd"])))
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    result = OpenRewriteAdapter(allowed_recipes=frozenset({"recipe"})).run(
+        snapshot, "recipe", apply=True
+    )
+
+    assert result.green
+    assert working_directories == [backend]

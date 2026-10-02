@@ -8,7 +8,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from refinery_ai.build_tools import maven_command_prefix
+from refinery_ai.build_tools import build_directory, maven_command_prefix
 from refinery_ai.logging import get_logger, log_command
 from refinery_ai.models import BuildSystem, DiscoverySnapshot, VerificationResult
 
@@ -36,13 +36,13 @@ def _clean_stderr(value: str, exit_code: int, limit: int) -> str:
 
 def verification_command(snapshot: DiscoverySnapshot) -> list[str] | None:
     root = snapshot.repository
-    build_directory = _build_directory(snapshot)
+    build_root = build_directory(snapshot.build_files)
     if snapshot.build_system is BuildSystem.MAVEN:
-        if build_directory == Path("."):
+        if build_root == Path("."):
             return [*maven_command_prefix(root), "clean", "test"]
-        module_root = root / build_directory
+        module_root = root / build_root
         wrapper = module_root / "mvnw"
-        build_file = build_directory / "pom.xml"
+        build_file = build_root / "pom.xml"
         if not wrapper.is_file():
             prefix = ["mvn"]
         else:
@@ -50,25 +50,16 @@ def verification_command(snapshot: DiscoverySnapshot) -> list[str] | None:
             prefix = [wrapper_path] if os.access(wrapper, os.X_OK) else ["sh", wrapper_path]
         return [*prefix, "-f", build_file.as_posix(), "clean", "test"]
     if snapshot.build_system is BuildSystem.GRADLE:
-        if build_directory == Path("."):
+        if build_root == Path("."):
             return ["./gradlew", "test"] if (root / "gradlew").exists() else ["gradle", "test"]
-        module_wrapper = root / build_directory / "gradlew"
+        module_wrapper = root / build_root / "gradlew"
         executable = (
             f"./{module_wrapper.relative_to(root).as_posix()}"
             if module_wrapper.is_file()
             else "gradle"
         )
-        return [executable, "-p", build_directory.as_posix(), "test"]
+        return [executable, "-p", build_root.as_posix(), "test"]
     return None
-
-
-def _build_directory(snapshot: DiscoverySnapshot) -> Path:
-    """Select the nearest authoritative build root represented by discovery."""
-
-    if not snapshot.build_files:
-        return Path(".")
-    build_file = min(snapshot.build_files, key=lambda path: (len(path.parts), path.as_posix()))
-    return build_file.parent
 
 
 def verify(

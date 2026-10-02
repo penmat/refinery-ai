@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from refinery_ai.assessment.models import AnalyzerResult, AnalyzerStatus, ToolIdentity
+from refinery_ai.build_tools import build_directory
 from refinery_ai.inspectors.contracts import InspectionRequest, Inspector
 from refinery_ai.models import BuildSystem
 
@@ -98,10 +99,11 @@ class BuildInspector:
         started = time.monotonic()
         repository = request.repository
         snapshot = request.snapshot
+        build_root = repository / build_directory(snapshot.build_files)
         wrapper = (
-            (repository / "mvnw").is_file()
+            (build_root / "mvnw").is_file()
             if snapshot.build_system is BuildSystem.MAVEN
-            else (repository / "gradlew").is_file()
+            else (build_root / "gradlew").is_file()
             if snapshot.build_system is BuildSystem.GRADLE
             else False
         )

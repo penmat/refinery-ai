@@ -121,6 +121,30 @@ def test_maven_collector_reads_resolved_transitive_tree(
     assert dependencies[1].direct is False
 
 
+def test_dependency_analyzer_collects_from_nested_build_root(tmp_path: Path) -> None:
+    backend = tmp_path / "backend"
+    backend.mkdir()
+    (backend / "pom.xml").write_text("<project/>")
+
+    class RecordingCollector(FakeCollector):
+        repository: Path | None = None
+
+        def collect(self, repository: Path, build_system: BuildSystem) -> list[ResolvedDependency]:
+            self.repository = repository
+            return super().collect(repository, build_system)
+
+    collector = RecordingCollector([])
+    analyzer = DependencyAnalyzer(
+        options(),
+        collector=collector,  # type: ignore[arg-type]
+        osv=FakeOsv({}),  # type: ignore[arg-type]
+    )
+
+    analyzer.analyze(tmp_path, discover(tmp_path))
+
+    assert collector.repository == backend
+
+
 def test_maven_collector_uses_shell_for_non_executable_wrapper(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -138,9 +162,7 @@ def test_maven_collector_uses_shell_for_non_executable_wrapper(
 
     monkeypatch.setattr(subprocess, "run", run)
 
-    ResolvedDependencyCollector("3.11.0", 20, 1000).collect(
-        tmp_path, BuildSystem.MAVEN
-    )
+    ResolvedDependencyCollector("3.11.0", 20, 1000).collect(tmp_path, BuildSystem.MAVEN)
 
     assert commands[0][:2] == ["sh", "./mvnw"]
 
@@ -158,8 +180,7 @@ def test_maven_collector_retries_old_wrapper_without_transfer_progress(
                 command,
                 1,
                 "",
-                "Unable to parse command line options: "
-                "Unrecognized option: --no-transfer-progress",
+                "Unable to parse command line options: Unrecognized option: --no-transfer-progress",
             )
         output_argument = next(item for item in command if item.startswith("-DoutputFile="))
         Path(output_argument.split("=", 1)[1]).write_text(

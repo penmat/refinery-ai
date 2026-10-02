@@ -48,14 +48,6 @@ projects:
   notes: >-
     Established multi-module administration system with multi-tenancy and substantial
     project history; a strong target for module mapping and modernization discovery.
-- id: springwolf-core
-  name: springwolf-core
-  repo_url: https://github.com/springwolf/springwolf-core
-  tier: advanced
-  category: asyncapi-library
-  notes: >-
-    Multi-module Spring library for generating AsyncAPI documentation across messaging
-    integrations; especially useful for public API, extension-point, and architecture summaries.
 - id: java-spring-boot-boilerplate
   name: java-spring-boot-boilerplate
   repo_url: https://github.com/mewebstudio/java-spring-boot-boilerplate
@@ -89,14 +81,6 @@ projects:
   notes: >-
     Full commerce platform with a large application surface. The v3.4 release is pinned
     because the default branch has moved to Spring Boot 4; v3.4 uses Spring Boot 3.4.x.
-- id: springboot-modular-monolith-boilerplate
-  name: springboot-modular-monolith-boilerplate
-  repo_url: https://github.com/subhashadhikari057/springboot-modular-monolith-boilerplate
-  tier: normal
-  category: modular-monolith
-  notes: >-
-    Modular-monolith reference application suited to assessment of boundaries, dependency
-    direction, build structure, testing strategy, and architectural documentation.
 - id: keycloak-integration-with-spring-boot-3
   name: keycloak-integration-with-spring-boot-3
   repo_url: https://github.com/ali-bouali/keycloak-integration-with-spring-boot-3
