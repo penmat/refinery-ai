@@ -4,9 +4,11 @@
 
 # Refinery AI
 
-Refinery AI is an early-stage, safe-by-default modernization factory for Java applications. It discovers a repository, builds a local context graph, creates a typed migration plan, routes deterministic work toward OpenRewrite, and verifies every approved step.
+Refinery AI is an early-stage, safe-by-default modernization factory for Java applications. It discovers the contents of a project, builds a local context graph, creates a typed migration plan, routes deterministic work through OpenRewrite, uses AI for patching when needed, and verifies every approved step. Its model layer is provider-neutral: planning, chat, and the current AI repair path can use hosted models or local open models served by Ollama.
 
-Version **0.1.0** is a runnable architectural foundation. Discovery, CodeGraph indexing, deterministic planning, safety gates, OpenRewrite dry runs, build verification, repair budgets, typed Pydantic AI agent boundaries, and run reports are implemented. Repository investigation now uses a read-only Pydantic AI Harness FileSystem/RepoContext pilot and safe assessment Shell profile behind the `RepositoryEnvironment` seam. Source-changing OpenRewrite and AI execution remain explicitly review-gated.
+Version **0.1.0** is a runnable architectural foundation. Discovery, CodeGraph indexing, catalog-constrained planning, safety gates, OpenRewrite execution, build verification, repair budgets, structured model outputs, and run reports are implemented. Repository investigation uses a read-only Harness FileSystem/RepoContext pilot and a safe assessment Shell profile behind the `RepositoryEnvironment` seam.
+
+AI source editing is intentionally small at this stage. When explicitly enabled for a migration, the repair model receives a build failure and a narrow allowlist of relevant files, returns complete replacement content for the smallest necessary set, and gets a bounded number of attempts. Refinery rejects out-of-scope or unsafe proposals, rolls back unsuccessful edits, and retains a repair only after the project verifies. This is a focused patch mechanism, not yet an integration with general-purpose coding agents.
 
 ## Architecture
 
@@ -36,7 +38,7 @@ Version **0.1.0** is a runnable architectural foundation. Discovery, CodeGraph i
                 └───────────────────┘
 ```
 
-The factory—not an unconstrained model—owns control flow, repository mutation, validation, and limits. Pydantic AI agents return validated Pydantic models at bounded reasoning points.
+The factory—not an unconstrained model—owns control flow, repository mutation, validation, and limits. LangGraph/LangChain model calls return validated Pydantic structures at bounded reasoning points.
 
 ## What v0.1 does
 
@@ -51,7 +53,7 @@ The factory—not an unconstrained model—owns control flow, repository mutatio
 - Stores the normalized graph under `.refinery/context/context-graph.json` while retaining
   provider-native artifacts for diagnostics.
 - Produces and validates an ordered `ModernizationPlan`.
-- Provides typed Pydantic AI planning, migration, and repair agents.
+- Provides a catalog-constrained model planner and a narrowly scoped AI repair path with typed outputs.
 - Runs allowlisted OpenRewrite recipes in dry-run mode.
 - Selects Maven or Gradle verification commands without invoking a shell.
 - Refuses apply-mode operation on a dirty worktree by default.
@@ -78,7 +80,7 @@ The factory—not an unconstrained model—owns control flow, repository mutatio
   `PATH`, SDKMAN, and conventional macOS/Linux JDK locations
 - Network access to configured artifact repositories and OSV for dependency analysis
 - Docker when running the default SonarQube-backed assessment
-- An AI provider API key only when using the Pydantic AI agents
+- An API key when using a hosted model; no hosted-model key is required when using Ollama locally
 
 ## Setup
 
@@ -389,12 +391,17 @@ After execution, apply mode fast-forwards the source checkout to the last verifi
 default. Thus, successful recipes are applied even when a later recipe fails and is rolled back.
 Use `--no-apply-result` to leave all verified changes isolated in their worktrees instead.
 
-Semantic repair is disabled by default. `--repair-mode local` permits a bounded repair only when
-an OpenRewrite migration leaves recognized Springfox source behind and verification fails. Local
-mode requires `REFINERY_OLLAMA_BASE_URL` to point to `localhost`, `127.0.0.1`, or `::1`; only the
-residual Java files, relevant `pom.xml` content, recipe name, and build failure are sent to that
-endpoint. `--repair-mode configured-provider` uses the configured Pydantic AI repair model.
-Every proposed patch is file-scoped, checked by Git, and must pass the build before checkpointing.
+AI repair is disabled by default for individual `migrate` and `run` commands. The current mechanism
+is deliberately minimal: after deterministic repair has been tried, the model receives the failed
+recipe, build diagnostics, and a narrow allowlist of relevant source and build files. It returns
+complete replacement content rather than running commands or editing arbitrary files.
+
+`--repair-mode local` sends that bounded context only to the configured Ollama endpoint and requires
+`REFINERY_OLLAMA_BASE_URL` to resolve to `localhost`, `127.0.0.1`, or `::1`.
+`--repair-mode configured-provider` uses `REFINERY_REPAIR_MODEL`, which may name either an OpenAI
+model or an Ollama model. Every proposal is file-scoped and safety-checked. Refinery rolls it back
+unless the build improves, and only a green build can be checkpointed. Corpus runs enable the
+configured-provider repair path by default; pass `--no-ai-patching` to disable it.
 
 Subsequent planning runs read the retained failed-step records as repository-specific evidence.
 Previously failed recipes are shown to the planner and excluded from the next persisted plan, so
@@ -421,12 +428,28 @@ Without `--apply`, `run` is non-mutating and behaves like `plan`.
 
 Settings use the `REFINERY_` prefix and may be placed in `.env`. See `.env.example`.
 
+### Local and open models
+
+Refinery can run its planner, chat command, and AI repair mechanism against open models hosted by
+Ollama. Point both model settings at Ollama model names and provide the local endpoint:
+
+```dotenv
+REFINERY_PLANNER_MODEL=ollama:gemma4:latest
+REFINERY_REPAIR_MODEL=ollama:gemma4:latest
+REFINERY_OLLAMA_BASE_URL=http://localhost:11434
+```
+
+No `OPENAI_API_KEY` is needed for this configuration. Model capability still matters: planning
+uses tools and structured output, while repair must reliably return typed, file-scoped replacement
+content. You can also mix providers—for example, use a local model for planning and a hosted model
+for repair—by configuring the two model settings independently.
+
 | Setting | Default | Purpose |
 |---|---:|---|
 | `OPENAI_API_KEY` | none | OpenAI API key loaded from the environment or `.env` |
-| `REFINERY_PLANNER_MODEL` | `openai:gpt-5.6-luna` | LangChain planner model identifier |
-| `REFINERY_REPAIR_MODEL` | `openai:gpt-5.6-luna` | LangChain repair model identifier |
-| `REFINERY_OLLAMA_BASE_URL` | none | Optional Ollama base URL, such as `http://localhost:11434` |
+| `REFINERY_PLANNER_MODEL` | `openai:gpt-5.6-luna` | Planner/chat model; supports `openai:` and `ollama:` identifiers |
+| `REFINERY_REPAIR_MODEL` | `openai:gpt-5.6-luna` | AI repair model; supports `openai:` and `ollama:` identifiers |
+| `REFINERY_OLLAMA_BASE_URL` | none | Ollama endpoint, such as `http://localhost:11434` |
 | `REFINERY_OTEL_ENABLED` | `false` | Export Refinery workflow and LiteLLM telemetry over OTLP/HTTP |
 | `REFINERY_OTEL_SERVICE_NAME` | `refinery-ai` | OpenTelemetry service name |
 | `REFINERY_OTEL_ENDPOINT` | `http://localhost:4318` | OTLP/HTTP base endpoint; signal paths are added automatically |
@@ -541,7 +564,7 @@ the model does not confuse absent evidence with proof that a relationship does n
 
 ```text
 src/refinery_ai/
-├── agents.py        # typed Pydantic AI agents
+├── agents/          # catalog-constrained planner and scoped AI repair
 ├── cli.py           # CLI boundary
 ├── config.py        # environment configuration
 ├── context.py       # typed durable context receipts and artifacts
@@ -573,7 +596,8 @@ Refinery AI separates facts, decisions, and effects:
 6. Only the factory may run commands or apply changes.
 7. Every step defines acceptance checks.
 8. OpenRewrite recipes are allowlisted and initially run in dry-run mode.
-9. Generated patches are proposals; v0.1 never applies them automatically.
+9. AI repair is opt-in for individual migrations, restricted to an allowlist of files, and applied
+   only inside the migration worktree; failed proposals are rolled back.
 10. Failures stop the run, and repair attempts have hard budgets.
 
 Subprocesses receive argument lists directly and are never invoked through a shell. Stored command output is bounded.
@@ -588,16 +612,23 @@ Subprocesses receive argument lists directly and are never invoked through a she
   source and configuration analysis; deeper Java type resolution, runtime topology, dynamically
   constructed SQL, topics, and Redis keys are not yet inferred.
 - OpenRewrite dry runs require the plugin/recipe dependencies to be resolvable by the target build.
-- OpenRewrite source application is review-gated.
-- AI agents are available as typed boundaries but are not invoked by the default CLI workflow.
+- OpenRewrite source application requires `--apply`; successful profile migrations can then be
+  published from their isolated worktrees to the source checkout.
+- The AI source-editing capability is currently a narrow build-repair mechanism. It does not give
+  a model a shell, a general editing tool, autonomous repository exploration, or code-agent
+  orchestration.
 - Harness is the sole built-in assessment environment and is used for repository investigation, context controls, and one build/runtime specialist. CodeGraph and OpenRewrite remain Refinery-owned domain tools behind that environment; the architect/planner, persistence, and other specialists remain unchanged.
 - Harness Shell command checks are policy guardrails, not OS-level network isolation. Assessment configuration denies network authority, and no network-capable command is exposed, but hard egress isolation requires a future sandbox/container execution environment.
-- Proposed AI patches are not automatically applied.
+- AI repair is disabled by default for individual migrations, but corpus runs enable the configured
+  provider unless `--no-ai-patching` is supplied.
 - No web service, UI, pull-request automation, or remote-repository cloning.
 
 ## Roadmap
 
-The next milestone will feed scoped CodeGraph queries into the executable planning and repair agents, then add fixture-based real-build integration tests.
+The next milestone will feed scoped CodeGraph queries into planning and repair, then add
+fixture-based real-build integration tests. Broader code-agent integrations can build on the same
+worktree, policy, verification, and audit boundaries without making the current repair model an
+unconstrained repository actor.
 
 ## License
 
