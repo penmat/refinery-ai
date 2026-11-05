@@ -13,9 +13,13 @@ from pathlib import Path
 EXCLUDED = {".git", "target", "build", ".gradle", ".refinery", ".codegraph", "graphify-out"}
 
 
-def _entries(root: Path) -> dict[Path, tuple[int, str]]:
+def _walk_error(error: OSError) -> None:
+    raise error
+
+
+def _entries(root: Path, *, read_contents: bool = True) -> dict[Path, tuple[int, str]]:
     entries: dict[Path, tuple[int, str]] = {}
-    for parent, directories, files in os.walk(root, followlinks=False):
+    for parent, directories, files in os.walk(root, followlinks=False, onerror=_walk_error):
         directories[:] = [name for name in directories if name not in EXCLUDED]
         for name in [*directories, *files]:
             if name in EXCLUDED:
@@ -24,6 +28,10 @@ def _entries(root: Path) -> dict[Path, tuple[int, str]]:
             mode = path.lstat().st_mode
             if stat.S_ISLNK(mode):
                 value = os.readlink(path)
+            elif not read_contents:
+                if stat.S_ISDIR(mode):
+                    path.chmod(stat.S_IMODE(mode) | 0o700)
+                value = ""
             elif stat.S_ISREG(mode):
                 with path.open("rb") as source:
                     value = hashlib.file_digest(source, "sha256").hexdigest()
@@ -40,6 +48,7 @@ class RepairSnapshot:
 
     def __init__(self, repository: Path) -> None:
         self.repository = repository.resolve()
+        self.root_mode = self.repository.stat().st_mode
         self.storage = tempfile.TemporaryDirectory(prefix="refinery-repair-")
         self.backup = Path(self.storage.name)
         self.entries = _entries(self.repository)
@@ -83,7 +92,10 @@ class RepairSnapshot:
         return _entries(self.repository) != self.entries
 
     def restore(self) -> None:
-        current = _entries(self.repository)
+        self.repository.chmod(stat.S_IMODE(self.root_mode) | 0o700)
+        # Enumerate structure only: agent-created pipes or unreadable files must
+        # never prevent us restoring the known-good bytes from our snapshot.
+        current = _entries(self.repository, read_contents=False)
         # Remove children first, without traversing a link at any level.
         for relative in sorted(current, key=lambda path: len(path.parts), reverse=True):
             path = self.repository / relative
@@ -100,12 +112,15 @@ class RepairSnapshot:
             path = self.repository / relative
             if stat.S_ISDIR(mode):
                 path.mkdir(exist_ok=True)
-                path.chmod(stat.S_IMODE(mode))
             elif not path.exists() and not path.is_symlink():
                 if stat.S_ISLNK(mode):
                     path.symlink_to(os.readlink(self.backup / relative))
                 else:
                     shutil.copy2(self.backup / relative, path)
+        for relative, (mode, _) in self.entries.items():
+            if stat.S_ISDIR(mode):
+                (self.repository / relative).chmod(stat.S_IMODE(mode))
+        self.repository.chmod(stat.S_IMODE(self.root_mode))
         # HEAD may be symbolic in callers other than migration's detached worktrees.
         if self.head.startswith(b"ref: "):
             ref = self.head.decode().strip().removeprefix("ref: ")

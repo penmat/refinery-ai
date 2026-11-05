@@ -235,3 +235,45 @@ def test_generated_only_changes_are_not_a_candidate(tmp_path: Path) -> None:
     result = repairer.repair(root, STEP, FAILURE)
     assert not result.green
     assert "did not change" in result.stderr
+
+
+def test_sigterm_of_profile_process_stops_pi_and_restores_sources(tmp_path: Path) -> None:
+    import signal
+    import subprocess
+
+    root = repository(tmp_path)
+    target = root / "target"
+    target.mkdir()
+    child = "import time; from pathlib import Path; time.sleep(2); Path('late').write_text('bad')"
+    script = executable(
+        target,
+        "import subprocess,sys,time\nfrom pathlib import Path\n"
+        f"subprocess.Popen([sys.executable,'-c',{child!r}])\n"
+        "Path('source').write_text('partial')\ntime.sleep(20)\n",
+    )
+    harness = (
+        "from pathlib import Path\n"
+        "from refinery_ai.agents.pi_repair import PiRepairAgent\n"
+        "from refinery_ai.config import Settings\n"
+        "from refinery_ai.models import RecipeRecommendation, VerificationResult\n"
+        f"agent = PiRepairAgent(Settings(_env_file=None, pi_executable={str(script)!r}))\n"
+        f"agent.repair(Path({str(root)!r}), "
+        'RecipeRecommendation(recipe="test",reason="test",evidence=["test"],'
+        'expected_benefit="test",priority="high",confidence=1), '
+        'VerificationResult(command=["test"],exit_code=1,duration_seconds=0))\n'
+    )
+    process = subprocess.Popen([sys.executable, "-c", harness])
+    try:
+        deadline = time.monotonic() + 10
+        while (root / "source").read_bytes() != b"partial" and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert (root / "source").read_bytes() == b"partial"
+        process.send_signal(signal.SIGTERM)
+        process.wait(timeout=5)
+        assert (root / "source").read_bytes() == b"original\x00"
+        time.sleep(2.1)
+        assert not (root / "late").exists()
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()

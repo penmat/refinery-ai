@@ -826,7 +826,17 @@ def test_migration_display_name_formats_java_and_camel_case_recipes() -> None:
     )
 
 
-@pytest.mark.parametrize("behavior", ["green", "improve", "reject", "partial_failure"])
+@pytest.mark.parametrize(
+    "behavior",
+    [
+        "green",
+        "improve",
+        "reject",
+        "partial_failure",
+        "verification_error",
+        "verification_interrupt",
+    ],
+)
 def test_runner_verifies_real_pi_candidates_and_restores_rejected_edits(
     tmp_path: Path,
     behavior: str,
@@ -888,6 +898,10 @@ if behavior == 'partial_failure' and attempt == 1:
     def verifier(repository, command, **kwargs):
         nonlocal builds
         builds += 1
+        if builds == 3 and behavior == "verification_error":
+            raise RuntimeError("verifier failed")
+        if builds == 3 and behavior == "verification_interrupt":
+            raise KeyboardInterrupt
         if builds == 1:
             return VerificationResult(command=["test"], exit_code=0, duration_seconds=0)
         content = Path(repository, "migration-source").read_text()
@@ -900,12 +914,22 @@ if behavior == 'partial_failure' and attempt == 1:
         )
 
     repairer = PiRepairAgent(Settings(_env_file=None, pi_executable=str(script)))
-    result = MigrationRunner(
+    runner = MigrationRunner(
         store,
         runners={ExecutionType.OPENREWRITE: RecipeRunner()},
         build_verifier=verifier,
         repair_stages=(MigrationRepairStage("pi", repairer, 2, uses_model=True),),
-    ).run(apply=True)
+    )
+    if behavior.startswith("verification_"):
+        error = RuntimeError if behavior == "verification_error" else KeyboardInterrupt
+        with pytest.raises(error):
+            runner.run(apply=True)
+        sources = list((root / ".refinery" / "worktrees").glob("*/step-*/migration-source"))
+        assert len(sources) == 1
+        assert sources[0].read_text() == "recipe"
+        assert not (sources[0].parent / "agent-new-source").exists()
+        return
+    result = runner.run(apply=True)
     if behavior == "reject":
         assert result.status is RunStatus.FAILED
         assert starts.read_text().splitlines() == ["recipe", "recipe"]

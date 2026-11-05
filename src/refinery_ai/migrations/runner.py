@@ -51,18 +51,14 @@ from refinery_ai.verification import verification_command, verify
 def _reactor_success_count(diagnostic: str) -> int:
     """Count modules Maven reports as successful before the failing module."""
 
-    return len(
-        re.findall(r"(?m)^\[INFO\]\s+.+?\.{3,}\s+SUCCESS(?:\s|$)", diagnostic)
-    )
+    return len(re.findall(r"(?m)^\[INFO\]\s+.+?\.{3,}\s+SUCCESS(?:\s|$)", diagnostic))
 
 
 def _unique_compilation_errors(diagnostic: str) -> int:
     """Count distinct compiler diagnostics without Maven's repeated summary copy."""
 
     errors: set[str] = set()
-    source_error = re.compile(
-        r"^\[ERROR\]\s+(.+?\.(?:java|kt|groovy)):\[(\d+)(?:,\d+)?\]\s+(.+)$"
-    )
+    source_error = re.compile(r"^\[ERROR\]\s+(.+?\.(?:java|kt|groovy)):\[(\d+)(?:,\d+)?\]\s+(.+)$")
     for raw_line in diagnostic.splitlines():
         line = raw_line.strip()
         match = source_error.match(line)
@@ -432,13 +428,20 @@ class MigrationRunner:
                                 continue
                             break
                         self.progress(f"Verifying {stage.name} repair {attempt}: {label}")
-                        candidate_result = self.build_verifier(
-                            Path(step_snapshot.repository),
-                            command,
-                            timeout=self.timeout,
-                            output_limit=self.output_limit,
-                            environment=self._jdk_environment(current_java),
-                        )
+                        try:
+                            candidate_result = self.build_verifier(
+                                Path(step_snapshot.repository),
+                                command,
+                                timeout=self.timeout,
+                                output_limit=self.output_limit,
+                                environment=self._jdk_environment(current_java),
+                            )
+                        except BaseException:
+                            if stage.uses_model and isinstance(
+                                stage.repairer, TransactionalMigrationRepairer
+                            ):
+                                stage.repairer.rollback_last()
+                            raise
                         if stage.uses_model and isinstance(
                             stage.repairer, TransactionalMigrationRepairer
                         ):

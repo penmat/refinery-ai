@@ -8,13 +8,32 @@ import selectors
 import signal
 import subprocess
 import tempfile
+import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 from refinery_ai.agents.repair_snapshot import RepairSnapshot
 from refinery_ai.config import Settings
 from refinery_ai.migrations.repair import repair_result
 from refinery_ai.models import RecipeRecommendation, VerificationResult
+
+
+def _terminate(signum: int, frame: object) -> None:
+    raise SystemExit(128 + signum)
+
+
+@contextlib.contextmanager
+def _termination_guard() -> Iterator[None]:
+    """Let corpus SIGTERM unwind through process cleanup and source rollback."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous = signal.signal(signal.SIGTERM, _terminate)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def _stop_process_group(process: subprocess.Popen[bytes]) -> None:
@@ -116,13 +135,14 @@ class PiRepairAgent:
         )
         try:
             self._snapshot = RepairSnapshot.capture(repository)
-            result = _invoke(
-                command,
-                repository,
-                prompt,
-                self.settings.command_timeout_seconds,
-                self.settings.max_output_characters,
-            )
+            with _termination_guard():
+                result = _invoke(
+                    command,
+                    repository,
+                    prompt,
+                    self.settings.command_timeout_seconds,
+                    self.settings.max_output_characters,
+                )
             if self._snapshot.git_state_changed():
                 result = result.model_copy(
                     update={

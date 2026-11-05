@@ -87,3 +87,31 @@ def test_restore_removes_new_source_tree_containing_generated_output(tmp_path: P
     snapshot.restore()
     assert not (root / "new-module").exists()
     snapshot.close()
+
+
+def test_restore_removes_agent_created_fifo_without_opening_it(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    snapshot = RepairSnapshot.capture(root)
+    (root / "source").write_text("partial")
+    os.mkfifo(root / "unexpected-pipe")
+    snapshot.restore()
+    assert not (root / "unexpected-pipe").exists()
+    assert (root / "source").read_bytes() == b"original\x00"
+    snapshot.close()
+
+
+def test_restore_recovers_sources_in_agent_restricted_directory(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    folder = root / "module"
+    folder.mkdir()
+    (folder / "source").write_text("keep")
+    snapshot = RepairSnapshot.capture(root)
+    (folder / "source").write_text("partial")
+    folder.chmod(0)
+    try:
+        snapshot.restore()
+        assert (folder / "source").read_text() == "keep"
+        assert folder.stat().st_mode & 0o777 == 0o755
+    finally:
+        folder.chmod(0o755)
+        snapshot.close()

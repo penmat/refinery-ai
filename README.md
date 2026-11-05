@@ -8,7 +8,7 @@ Refinery AI is an early-stage, safe-by-default modernization factory for Java ap
 
 Version **0.1.0** is a runnable architectural foundation. Discovery, CodeGraph indexing, catalog-constrained planning, safety gates, OpenRewrite execution, build verification, repair budgets, structured model outputs, and run reports are implemented. Repository investigation uses a read-only Harness FileSystem/RepoContext pilot and a safe assessment Shell profile behind the `RepositoryEnvironment` seam.
 
-AI repair is optional and supports two backends. The default `internal` backend sends the build failure and a narrow allowlist of relevant files to a model, which returns typed file replacements. The `pi` backend runs an installed coding agent in the migration worktree so it can investigate across files and run build commands. Both receive a bounded number of attempts. Internal repair rejects out-of-scope or unsafe proposals. Refinery rolls back unsuccessful edits and retains a repair only after the project verifies. This is a focused patch mechanism, not yet an integration with general-purpose coding agents.
+AI repair is optional and supports two backends. The default `internal` backend sends the build failure and a narrow allowlist of relevant files to a model, which returns typed file replacements. The `pi` backend runs an installed coding agent in the migration worktree so it can investigate across files and run build commands. Both receive a bounded number of attempts. Internal repair rejects out-of-scope or unsafe proposals. Refinery verifies candidates, rolls back non-improving edits, and checkpoints only green migrations.
 
 ## Architecture
 
@@ -457,17 +457,20 @@ After execution, apply mode fast-forwards the source checkout to the last verifi
 default. Thus, successful recipes are applied even when a later recipe fails and is rolled back.
 Use `--no-apply-result` to leave all verified changes isolated in their worktrees instead.
 
-AI repair is disabled by default for individual `migrate` and `run` commands. The current mechanism
-is deliberately minimal: after deterministic repair has been tried, the model receives the failed
-recipe, build diagnostics, and a narrow allowlist of relevant source and build files. It returns
-complete replacement content rather than running commands or editing arbitrary files.
+AI repair is disabled by default for individual `migrate` and `run` commands. After deterministic
+repair has been tried, the selected backend receives the failed recipe and build diagnostics.
+The default internal backend uses a narrow allowlist of relevant files and typed replacements;
+pi can investigate the migration worktree and edit files directly.
 
-`--repair-mode local` sends that bounded context only to the configured Ollama endpoint and requires
-`REFINERY_OLLAMA_BASE_URL` to resolve to `localhost`, `127.0.0.1`, or `::1`.
-`--repair-mode configured-provider` uses `REFINERY_REPAIR_MODEL`, which may name either an OpenAI
-model or an Ollama model. Every proposal is file-scoped and safety-checked. Refinery rolls it back
-unless the build improves, and only a green build can be checkpointed. Corpus runs enable the
-configured-provider repair path by default; pass `--no-ai-patching` to disable it.
+For internal repair, `--repair-mode local` requires `REFINERY_OLLAMA_BASE_URL` to resolve to
+`localhost`, `127.0.0.1`, or `::1`. Internal configured-provider repair uses
+`REFINERY_REPAIR_MODEL`. For pi, use configured-provider policy with the model/provider already
+configured in pi, or supply external agent overrides as described in
+[Choosing a repair backend](#choosing-a-repair-backend).
+
+Refinery rolls back candidates unless the build improves, and only a green build can be
+checkpointed. Corpus runs enable configured-provider repair by default;
+pass `--no-ai-patching` to disable it.
 
 Subsequent planning runs read the retained failed-step records as repository-specific evidence.
 Previously failed recipes are shown to the planner and excluded from the next persisted plan, so
@@ -659,14 +662,14 @@ Refinery AI separates facts, decisions, and effects:
 3. The context builder deterministically merges provider fragments into a versioned graph.
 4. Planning produces typed proposals; the agent boundary accepts scoped repository context.
 5. Policy code validates plans before execution.
-6. Only the factory may run commands or apply changes.
+6. The factory authorizes migration execution; the optional pi backend may run commands and edit its worktree.
 7. Every step defines acceptance checks.
 8. OpenRewrite recipes are allowlisted and initially run in dry-run mode.
-9. AI repair is opt-in for individual migrations, restricted to an allowlist of files, and applied
-   only inside the migration worktree; failed proposals are rolled back.
+9. AI repair is opt-in for individual migrations. Internal repair restricts proposals to an
+   allowlist of files; pi receives the full migration worktree. Non-improving edits are rolled back.
 10. Failures stop the run, and repair attempts have hard budgets.
 
-Subprocesses receive argument lists directly and are never invoked through a shell. Stored command output is bounded.
+Refinery launches subprocesses with explicit argument lists. The optional pi agent can use its own shell tools. Stored command output is bounded.
 
 ## Current limitations
 
@@ -692,9 +695,8 @@ Subprocesses receive argument lists directly and are never invoked through a she
 ## Roadmap
 
 The next milestone will feed scoped CodeGraph queries into planning and repair, then add
-fixture-based real-build integration tests. Broader code-agent integrations can build on the same
-worktree, policy, verification, and audit boundaries without making the current repair model an
-unconstrained repository actor.
+fixture-based real-build integration tests. Additional coding agents can join internal repair and
+pi through the same repair contracts, worktree verification, and checkpoint boundaries.
 
 ## License
 
