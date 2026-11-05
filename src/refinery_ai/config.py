@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from refinery_ai.models import RepairMode
@@ -15,6 +15,17 @@ class Settings(BaseSettings):
 
     planner_model: str = "openai:gpt-5.6-luna"
     repair_model: str = "openai:gpt-5.6-luna"
+    pi_executable: str = "pi"
+    coding_agent_model: str | None = None
+    coding_agent_provider: str | None = None
+
+    @field_validator("pi_executable", "coding_agent_model", "coding_agent_provider")
+    @classmethod
+    def nonblank_agent_setting(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("Coding agent settings must not be blank")
+        return value
+
     ollama_base_url: str | None = None
     openai_api_key: SecretStr | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     langsmith_api_key: SecretStr | None = Field(
