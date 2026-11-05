@@ -104,6 +104,11 @@ class ExecutionType(StrEnum):
     MAVEN_PROPERTY = "maven-property"
 
 
+class RepairBackend(StrEnum):
+    INTERNAL = "internal"
+    PI = "pi"
+
+
 class RepairMode(StrEnum):
     DISABLED = "disabled"
     LOCAL = "local"

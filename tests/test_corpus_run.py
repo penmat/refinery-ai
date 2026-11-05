@@ -208,9 +208,7 @@ def test_run_corpus_can_disable_ai_and_select_projects(tmp_path: Path, monkeypat
     assert calls == [(["second"], False)]
 
 
-def test_run_corpus_accepts_an_ordered_profile_pipeline(
-    tmp_path: Path, monkeypatch: Any
-) -> None:
+def test_run_corpus_accepts_an_ordered_profile_pipeline(tmp_path: Path, monkeypatch: Any) -> None:
     corpus_path = _corpus(tmp_path / "corpus.yaml")
     calls: list[list[str]] = []
 
@@ -448,3 +446,35 @@ def test_corpus_runner_distinguishes_checkout_failure(tmp_path: Path, monkeypatc
 
     assert result.projects[0].status == "checkout-failed"
     assert result.projects[0].error == "unknown ref"
+
+
+def test_corpus_forwards_explicit_agent_configuration_to_child(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    corpus = load_corpus(_corpus(tmp_path / "corpus.yaml"))
+    commands = []
+    monkeypatch.setattr(
+        CorpusRunner,
+        "_execute",
+        staticmethod(lambda command, log, **kwargs: (commands.append(command) or 0, None)),
+    )
+    monkeypatch.setattr(CorpusRunner, "_revision", staticmethod(lambda repository: "abc"))
+    monkeypatch.setattr(CorpusRunner, "_profile_state", lambda *args: (1, True))
+    CorpusRunner(
+        corpus,
+        tmp_path / "out",
+        profile="test",
+        repair_backend="pi",
+        coding_agent_model="local/model",
+        coding_agent_provider="custom",
+        pi_executable="/custom/pi",
+        ai_patching=False,
+    ).run([corpus.projects[1]])
+    command = commands[-1]
+    for flag, value in [
+        ("--repair-backend", "pi"),
+        ("--coding-agent-model", "local/model"),
+        ("--coding-agent-provider", "custom"),
+        ("--repair-mode", "disabled"),
+    ]:
+        assert command[command.index(flag) + 1] == value

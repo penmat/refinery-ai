@@ -10,7 +10,7 @@ from typing import Annotated, Literal
 
 import typer
 
-from refinery_ai.agents.ai_repair import AiRepairAgent
+from refinery_ai.agents.repair_backend import build_repair_stages, validate_repair_policy
 from refinery_ai.assessment.comparison import compare
 from refinery_ai.assessment.dependency_artifacts import write_dependency_artifact
 from refinery_ai.assessment.engine import AssessmentEngine
@@ -30,13 +30,12 @@ from refinery_ai.jdks import JdkResolver, project_runtime_java, selected_jdk
 from refinery_ai.llm import run_tool_loop
 from refinery_ai.logging import configure_logging, get_logger
 from refinery_ai.mcp import run_mcp_server
-from refinery_ai.migrations.deterministic_repair import DeterministicMigrationRepairer
-from refinery_ai.migrations.repair import MigrationRepairStage
 from refinery_ai.migrations.runner import MigrationRunner
 from refinery_ai.models import (
     MigrationRun,
     ModernizationGoal,
     RecipePlan,
+    RepairBackend,
     RepairMode,
     RunReport,
     RunStatus,
@@ -52,6 +51,29 @@ from refinery_ai.tools import RepositoryEvidenceTools
 app = typer.Typer(help="Safe, auditable Java modernization.", no_args_is_help=True)
 assessment_app = typer.Typer(help="Inspect and compare saved assessments.", no_args_is_help=True)
 app.add_typer(assessment_app, name="assessment")
+
+
+def _configure_repair(
+    settings: Settings,
+    backend: RepairBackend | None,
+    model: str | None,
+    provider: str | None,
+    executable: str | None,
+) -> None:
+    try:
+        if backend is not None:
+            settings.repair_backend = backend
+        for field, value in (
+            ("coding_agent_model", model),
+            ("coding_agent_provider", provider),
+            ("pi_executable", executable),
+        ):
+            if value is not None:
+                Settings.nonblank_agent_setting(value)
+                setattr(settings, field, value)
+        validate_repair_policy(settings)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
 
 
 @app.command("run-corpus")
@@ -131,9 +153,31 @@ def run_corpus(
         int,
         typer.Option("--jobs", "-j", min=1, help="Number of projects to run concurrently"),
     ] = 1,
+    repair_backend: Annotated[
+        RepairBackend | None,
+        typer.Option("--repair-backend", help="Repair implementation: internal or pi"),
+    ] = None,
+    coding_agent_model: Annotated[
+        str | None,
+        typer.Option("--coding-agent-model", help="Override the external agent model for this run"),
+    ] = None,
+    coding_agent_provider: Annotated[
+        str | None,
+        typer.Option(
+            "--coding-agent-provider", help="Override the external agent provider for this run"
+        ),
+    ] = None,
+    pi_executable: Annotated[
+        str | None, typer.Option("--pi-executable", help="Installed pi executable name or path")
+    ] = None,
 ) -> None:
     """Clone and convert every selected project in an evaluation corpus."""
 
+    settings = Settings()
+    settings.repair_mode = RepairMode.CONFIGURED_PROVIDER if ai_patching else RepairMode.DISABLED
+    _configure_repair(
+        settings, repair_backend, coding_agent_model, coding_agent_provider, pi_executable
+    )
     corpus = load_corpus(corpus_file)
     selected_profiles = profile_names or ["spring-boot-3.2-java-17"]
     for profile_name in selected_profiles:
@@ -200,6 +244,10 @@ def run_corpus(
         destination,
         profiles=selected_profiles,
         ai_patching=ai_patching,
+        repair_backend=settings.repair_backend,
+        coding_agent_model=settings.coding_agent_model,
+        coding_agent_provider=settings.coding_agent_provider,
+        pi_executable=settings.pi_executable,
         max_cycles=max_cycles,
         timeout_seconds=timeout_seconds,
         jobs=jobs,
@@ -653,6 +701,23 @@ def migrate(
             help="Semantic repair policy: disabled, local, or configured-provider",
         ),
     ] = None,
+    repair_backend: Annotated[
+        RepairBackend | None,
+        typer.Option("--repair-backend", help="Repair implementation: internal or pi"),
+    ] = None,
+    coding_agent_model: Annotated[
+        str | None,
+        typer.Option("--coding-agent-model", help="Override the external agent model for this run"),
+    ] = None,
+    coding_agent_provider: Annotated[
+        str | None,
+        typer.Option(
+            "--coding-agent-provider", help="Override the external agent provider for this run"
+        ),
+    ] = None,
+    pi_executable: Annotated[
+        str | None, typer.Option("--pi-executable", help="Installed pi executable name or path")
+    ] = None,
 ) -> None:
     """Execute a persisted planner handoff through type-specific migration runners."""
 
@@ -661,6 +726,9 @@ def migrate(
         load_profile(profile_name)
     if repair_mode is not None:
         settings.repair_mode = repair_mode
+    _configure_repair(
+        settings, repair_backend, coding_agent_model, coding_agent_provider, pi_executable
+    )
     root = repository.expanduser().resolve()
     log_path = (
         root
@@ -669,29 +737,7 @@ def migrate(
         / f"migrate-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.log"
     )
     configure_logging(logging.DEBUG, console_level=logging.WARNING, log_file=log_path)
-    repair_stages = (
-        (
-            MigrationRepairStage(
-                "deterministic",
-                DeterministicMigrationRepairer(),
-                settings.max_deterministic_repair_attempts,
-            ),
-        )
-        if settings.repair_mode is RepairMode.DISABLED
-        else (
-            MigrationRepairStage(
-                "deterministic",
-                DeterministicMigrationRepairer(),
-                settings.max_deterministic_repair_attempts,
-            ),
-            MigrationRepairStage(
-                "AI",
-                AiRepairAgent(settings),
-                settings.max_repair_attempts,
-                uses_model=True,
-            ),
-        )
-    )
+    repair_stages = build_repair_stages(settings)
     result = MigrationRunner(
         MigrationPlanStore(root, settings.state_directory),
         timeout=settings.command_timeout_seconds,
@@ -760,12 +806,32 @@ def run(
             help="Re-download OpenRewrite recipe YAML before the first planning cycle",
         ),
     ] = False,
+    repair_backend: Annotated[
+        RepairBackend | None,
+        typer.Option("--repair-backend", help="Repair implementation: internal or pi"),
+    ] = None,
+    coding_agent_model: Annotated[
+        str | None,
+        typer.Option("--coding-agent-model", help="Override the external agent model for this run"),
+    ] = None,
+    coding_agent_provider: Annotated[
+        str | None,
+        typer.Option(
+            "--coding-agent-provider", help="Override the external agent provider for this run"
+        ),
+    ] = None,
+    pi_executable: Annotated[
+        str | None, typer.Option("--pi-executable", help="Installed pi executable name or path")
+    ] = None,
 ) -> None:
     """Run manually, or converge on a named profile through repeated verified migrations."""
 
     settings = Settings()
     if repair_mode is not None:
         settings.repair_mode = repair_mode
+    _configure_repair(
+        settings, repair_backend, coding_agent_model, coding_agent_provider, pi_executable
+    )
 
     if profile_name is not None:
         if not apply:
@@ -832,29 +898,7 @@ def run(
             return report
 
         def migrate_cycle(plan_id: str, checkpoint: VerifiedCheckpoint | None) -> MigrationRun:
-            repair_stages = (
-                (
-                    MigrationRepairStage(
-                        "deterministic",
-                        DeterministicMigrationRepairer(),
-                        settings.max_deterministic_repair_attempts,
-                    ),
-                )
-                if settings.repair_mode is RepairMode.DISABLED
-                else (
-                    MigrationRepairStage(
-                        "deterministic",
-                        DeterministicMigrationRepairer(),
-                        settings.max_deterministic_repair_attempts,
-                    ),
-                    MigrationRepairStage(
-                        "AI",
-                        AiRepairAgent(settings),
-                        settings.max_repair_attempts,
-                        uses_model=True,
-                    ),
-                )
-            )
+            repair_stages = build_repair_stages(settings)
             return MigrationRunner(
                 MigrationPlanStore(root, settings.state_directory),
                 timeout=settings.command_timeout_seconds,

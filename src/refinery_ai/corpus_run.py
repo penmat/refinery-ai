@@ -15,6 +15,8 @@ from typing import Any, TextIO
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field, HttpUrl
 
+from refinery_ai.models import RepairBackend
+
 
 class CorpusProject(BaseModel):
     id: str
@@ -155,6 +157,10 @@ class CorpusRunner:
         profile: str | None = None,
         profiles: list[str] | None = None,
         ai_patching: bool = True,
+        repair_backend: RepairBackend | str = RepairBackend.INTERNAL,
+        coding_agent_model: str | None = None,
+        coding_agent_provider: str | None = None,
+        pi_executable: str = "pi",
         max_cycles: int = 20,
         timeout_seconds: int = 14_400,
         jobs: int = 1,
@@ -171,6 +177,10 @@ class CorpusRunner:
         # Retained for callers and summaries that expect the original single target field.
         self.profile = self.profiles[-1]
         self.ai_patching = ai_patching
+        self.repair_backend = RepairBackend(repair_backend)
+        self.coding_agent_model = coding_agent_model
+        self.coding_agent_provider = coding_agent_provider
+        self.pi_executable = pi_executable
         self.max_cycles = max_cycles
         self.timeout_seconds = timeout_seconds
         self.jobs = jobs
@@ -301,13 +311,23 @@ class CorpusRunner:
                         "--repair-mode",
                         "configured-provider" if self.ai_patching else "disabled",
                     ]
-                    exit_code, error = self._execute(
-                        command, log, timeout=self.timeout_seconds
+                    command.extend(
+                        [
+                            "--repair-backend",
+                            self.repair_backend.value,
+                            "--pi-executable",
+                            self.pi_executable,
+                        ]
                     )
+                    for flag, value in (
+                        ("--coding-agent-model", self.coding_agent_model),
+                        ("--coding-agent-provider", self.coding_agent_provider),
+                    ):
+                        if value is not None:
+                            command.extend([flag, value])
+                    exit_code, error = self._execute(command, log, timeout=self.timeout_seconds)
                     result_revision = self._revision(repository)
-                    profile_cycles, profile_completed = self._profile_state(
-                        repository, profile
-                    )
+                    profile_cycles, profile_completed = self._profile_state(repository, profile)
                     status = (
                         "completed"
                         if exit_code == 0

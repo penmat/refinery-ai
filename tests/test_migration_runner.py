@@ -2,6 +2,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from refinery_ai.migrations.openrewrite import _infer_recipe_artifact
 from refinery_ai.migrations.repair import MigrationRepairStage
 from refinery_ai.migrations.runner import (
@@ -818,6 +820,111 @@ def test_migration_display_name_formats_java_and_camel_case_recipes() -> None:
     assert migration_display_name("org.openrewrite.SpringFoxToSpringDoc") == (
         "Spring Fox → Spring Doc"
     )
-    assert migration_display_name(
-        "refinery.maven.set-spring-boot-version.3.5.16"
-    ) == "Set Spring Boot version to 3.5.16"
+    assert (
+        migration_display_name("refinery.maven.set-spring-boot-version.3.5.16")
+        == "Set Spring Boot version to 3.5.16"
+    )
+
+
+@pytest.mark.parametrize("behavior", ["green", "improve", "reject", "partial_failure"])
+def test_runner_verifies_real_pi_candidates_and_restores_rejected_edits(
+    tmp_path: Path,
+    behavior: str,
+) -> None:
+    from test_pi_repair import executable
+
+    from refinery_ai.agents.pi_repair import PiRepairAgent
+    from refinery_ai.config import Settings
+
+    root = tmp_path / "repository"
+    root.mkdir()
+    initialize_git_repository(root)
+    store = MigrationPlanStore(root)
+    store.root.mkdir(parents=True)
+    step = RecipeRecommendation(
+        recipe="example.Upgrade",
+        reason="upgrade",
+        evidence=["test"],
+        expected_benefit="upgrade",
+        priority="high",
+        confidence=1,
+    )
+    plan = PersistedMigrationPlan(
+        plan_id="pi-integration",
+        snapshot=DiscoverySnapshot(repository=root, build_system=BuildSystem.MAVEN),
+        steps=[step],
+    )
+    (store.root / "pi-integration.json").write_text(plan.model_dump_json())
+    starts = tmp_path / "starts"
+    script = executable(
+        tmp_path,
+        f"""from pathlib import Path
+starts = Path({str(starts)!r})
+previous = starts.read_text() if starts.exists() else ''
+source = Path('migration-source')
+starts.write_text(previous + source.read_text() + '\\n')
+attempt = len(previous.splitlines()) + 1
+behavior = {behavior!r}
+if behavior == 'green' or (attempt == 2 and behavior != 'reject'):
+    value = 'fixed'
+elif behavior == 'improve':
+    value = 'improved'
+else:
+    value = 'worse'
+source.write_text(value)
+Path('agent-new-source').write_text('candidate')
+if behavior == 'partial_failure' and attempt == 1:
+    raise SystemExit(2)
+""",
+    )
+
+    class RecipeRunner:
+        def run(self, snapshot, step, **kwargs):
+            Path(snapshot.repository, "migration-source").write_text("recipe")
+            return VerificationResult(command=["recipe"], exit_code=0, duration_seconds=0)
+
+    builds = 0
+
+    def verifier(repository, command, **kwargs):
+        nonlocal builds
+        builds += 1
+        if builds == 1:
+            return VerificationResult(command=["test"], exit_code=0, duration_seconds=0)
+        content = Path(repository, "migration-source").read_text()
+        failures = {"recipe": 3, "improved": 1, "worse": 5, "fixed": 0}[content]
+        return VerificationResult(
+            command=["test"],
+            exit_code=bool(failures),
+            duration_seconds=0,
+            stdout=f"Tests run: 10, Failures: {failures}, Errors: 0, Skipped: 0",
+        )
+
+    repairer = PiRepairAgent(Settings(_env_file=None, pi_executable=str(script)))
+    result = MigrationRunner(
+        store,
+        runners={ExecutionType.OPENREWRITE: RecipeRunner()},
+        build_verifier=verifier,
+        repair_stages=(MigrationRepairStage("pi", repairer, 2, uses_model=True),),
+    ).run(apply=True)
+    if behavior == "reject":
+        assert result.status is RunStatus.FAILED
+        assert starts.read_text().splitlines() == ["recipe", "recipe"]
+        assert not (root / "migration-source").exists()
+        patches = list((root / ".refinery" / "migration-runs").glob("*/step-*/changes.patch"))
+        assert len(patches) == 1
+        patch = patches[0].read_text()
+        assert "+recipe" in patch
+        assert "worse" not in patch
+        assert "agent-new-source" not in patch
+    else:
+        assert result.status is RunStatus.COMPLETED
+        assert (root / "migration-source").read_text() == "fixed"
+        assert (root / "agent-new-source").read_text() == "candidate"
+        expected = (
+            ["recipe", "improved"]
+            if behavior == "improve"
+            else ["recipe", "recipe"]
+            if behavior == "partial_failure"
+            else ["recipe"]
+        )
+        assert starts.read_text().splitlines() == expected

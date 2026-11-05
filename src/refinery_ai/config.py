@@ -5,7 +5,7 @@ from pathlib import Path
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from refinery_ai.models import RepairMode
+from refinery_ai.models import RepairBackend, RepairMode
 
 
 class Settings(BaseSettings):
@@ -15,6 +15,7 @@ class Settings(BaseSettings):
 
     planner_model: str = "openai:gpt-5.6-luna"
     repair_model: str = "openai:gpt-5.6-luna"
+    repair_backend: RepairBackend = RepairBackend.INTERNAL
     pi_executable: str = "pi"
     coding_agent_model: str | None = None
     coding_agent_provider: str | None = None
@@ -28,9 +29,7 @@ class Settings(BaseSettings):
 
     ollama_base_url: str | None = None
     openai_api_key: SecretStr | None = Field(default=None, validation_alias="OPENAI_API_KEY")
-    langsmith_api_key: SecretStr | None = Field(
-        default=None, validation_alias="LANGSMITH_API_KEY"
-    )
+    langsmith_api_key: SecretStr | None = Field(default=None, validation_alias="LANGSMITH_API_KEY")
     langsmith_tracing: bool = Field(default=False, validation_alias="LANGSMITH_TRACING")
     langsmith_project: str | None = Field(default=None, validation_alias="LANGSMITH_PROJECT")
     langsmith_endpoint: str | None = Field(default=None, validation_alias="LANGSMITH_ENDPOINT")
