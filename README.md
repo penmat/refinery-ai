@@ -8,7 +8,7 @@ Refinery AI is an early-stage, safe-by-default modernization factory for Java ap
 
 Version **0.1.0** is a runnable architectural foundation. Discovery, CodeGraph indexing, catalog-constrained planning, safety gates, OpenRewrite execution, build verification, repair budgets, structured model outputs, and run reports are implemented. Repository investigation uses a read-only Harness FileSystem/RepoContext pilot and a safe assessment Shell profile behind the `RepositoryEnvironment` seam.
 
-AI source editing is intentionally small at this stage. When explicitly enabled for a migration, the repair model receives a build failure and a narrow allowlist of relevant files, returns complete replacement content for the smallest necessary set, and gets a bounded number of attempts. Refinery rejects out-of-scope or unsafe proposals, rolls back unsuccessful edits, and retains a repair only after the project verifies. This is a focused patch mechanism, not yet an integration with general-purpose coding agents.
+AI repair is optional and supports two backends. The default `internal` backend sends the build failure and a narrow allowlist of relevant files to a model, which returns typed file replacements. The `pi` backend runs an installed coding agent in the migration worktree so it can investigate across files and run build commands. Both receive a bounded number of attempts. Internal repair rejects out-of-scope or unsafe proposals. Refinery rolls back unsuccessful edits and retains a repair only after the project verifies. This is a focused patch mechanism, not yet an integration with general-purpose coding agents.
 
 ## Architecture
 
@@ -38,7 +38,7 @@ AI source editing is intentionally small at this stage. When explicitly enabled 
                 └───────────────────┘
 ```
 
-The factory—not an unconstrained model—owns control flow, repository mutation, validation, and limits. LangGraph/LangChain model calls return validated Pydantic structures at bounded reasoning points.
+The factory owns migration control flow, verification, acceptance, and retry limits. The internal backend validates scoped file replacements; the optional pi backend edits the isolated migration worktree directly. LangGraph/LangChain model calls return validated Pydantic structures at bounded reasoning points.
 
 ## What v0.1 does
 
@@ -69,6 +69,72 @@ The factory—not an unconstrained model—owns control flow, repository mutatio
 - Resolves the effective Maven or Gradle runtime graph, normalizes Maven Package URLs, and checks
   OSV by default for dependency-health evidence.
 - Stops at a review gate before applying OpenRewrite or AI-generated source changes.
+
+## Choosing a repair backend
+
+Deterministic repairs run first. Model repair is disabled by default for `migrate`
+and profile `run`; enable it with `--repair-mode configured-provider`.
+`run-corpus` enables model repair by default, and accepts `--no-ai-patching` to disable it.
+The default backend remains `internal`, with its selected-file disclosure scope:
+
+```bash
+uv run refinery migrate /path/to/java-project --apply \
+  --repair-mode configured-provider --repair-backend internal
+```
+
+To use [pi](https://pi.dev), install and configure it separately, including its
+provider credentials and desired model. Confirm `pi --help` and a one-shot prompt
+work before using it through Refinery. Refinery does not install agents or manage
+their credentials. The pi adapter currently requires macOS or Linux (POSIX process
+groups); the internal backend remains available on other platforms.
+
+```bash
+# Inherit pi's configured provider and model.
+uv run refinery migrate /path/to/java-project --apply \
+  --repair-mode configured-provider --repair-backend pi
+
+# Override provider/model for this invocation without changing pi's defaults.
+uv run refinery run --repository /path/to/java-project \
+  --profile spring-boot-3.2-java-17 --apply \
+  --repair-mode configured-provider --repair-backend pi \
+  --coding-agent-provider custom-provider --coding-agent-model custom-model
+
+# Corpus runs support the same backend and agent overrides.
+uv run refinery run-corpus /path/to/corpus.yaml --repair-backend pi
+```
+
+Provider and model values must match pi's configured providers and model IDs.
+Use `--pi-executable /absolute/path/to/pi` if it is not on `PATH`.
+All four agent options are available on `migrate`, profile `run`, and `run-corpus`.
+Equivalent environment settings are `REFINERY_REPAIR_BACKEND`,
+`REFINERY_CODING_AGENT_PROVIDER`, `REFINERY_CODING_AGENT_MODEL`, and
+`REFINERY_PI_EXECUTABLE`. CLI overrides take precedence. The existing
+`REFINERY_REPAIR_MODEL` applies only to internal repair; leaving the external-agent
+model unset preserves pi's default. Corpus runs explicitly pass the selected agent
+configuration to their child profile runs.
+
+For a local model, configure the provider/endpoint in pi and use
+`--repair-mode configured-provider --repair-backend pi`. Refinery's strict `local`
+policy is only supported by internal repair, which can validate a loopback
+endpoint. Refinery cannot establish pi's effective endpoint from a model name, so
+`local` with `pi` is rejected rather than weakening that policy. Planner model
+configuration remains independent of repair backend selection.
+
+Pi receives migration context and build diagnostics on stdin and runs once per
+repair attempt, with no saved session. It inherits its installed configuration and
+credentials and may read the whole project and execute commands. A Git worktree
+isolates candidate changes for verification; it does not sandbox command or network
+access. Pi's project trust behavior is retained; Refinery does not automatically
+approve project-local extensions.
+
+Each attempt uses `REFINERY_COMMAND_TIMEOUT_SECONDS` (default 900) and bounded
+output capture. Nonzero exit, missing executable, timeout, unexpected staging or
+commits, and no source changes are failed attempts, with partial source edits
+reverted. Timeouts/cancellation terminate the agent process group before rollback.
+Refinery independently verifies candidates and reverts ones that do not improve
+verification. It preserves prior recipe changes and accepted repairs, including
+when the agent adds or deletes files. Only green migration checkpoints can be
+published. Selecting pi never silently falls back to internal repair.
 
 ## Requirements
 
