@@ -37,6 +37,7 @@ export interface Run {
   first_seen: string | null;
   last_seen: string | null;
   event_count: number;
+  verified_recipes?: number;
   diagnostics: string[];
 }
 export interface Snapshot {
@@ -106,7 +107,10 @@ export function nodeStatus(state: State, phase: string): string {
     return event.outcome?.includes("failed") ? "needs attention" : "completed";
   return event.lifecycle;
 }
-export function summarize(state: State) {
+export function summarize(
+  state: State,
+  children: { run_id: string; verified_recipes?: number }[] = [],
+) {
   const terminal = [...state.events]
     .reverse()
     .find(
@@ -126,16 +130,20 @@ export function summarize(state: State) {
     tokens: null,
     cost: null,
     elapsed,
-    recipes: new Set(
-      state.events
-        .filter(
-          (e) =>
-            e.phase === "checkpoint_step" &&
-            e.lifecycle === "completed" &&
-            e.step,
-        )
-        .map((e) => e.step),
-    ).size,
+    recipes: children.length
+      ? [
+          ...new Map(children.map((child) => [child.run_id, child])).values(),
+        ].reduce((total, child) => total + (child.verified_recipes ?? 0), 0)
+      : new Set(
+          state.events
+            .filter(
+              (e) =>
+                e.phase === "checkpoint_step" &&
+                e.lifecycle === "completed" &&
+                e.step,
+            )
+            .map((e) => e.step),
+        ).size,
     errors: state.events.filter((e) => e.lifecycle === "failed").length,
     status:
       terminal?.outcome ??

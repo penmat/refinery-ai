@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -24,18 +24,19 @@ async def stream_events(
     catalog: JournalCatalog,
     run_id: str,
     after: int,
+    stop_requested: Callable[[], bool] | None = None,
 ) -> AsyncIterator[str]:
     from refinery_ai.monitor.journals import JournalTail
 
     path, _ = catalog.journal(run_id)
     tail = JournalTail(path, run_id)
     heartbeat = time.monotonic()
-    while not await request.is_disconnected():
+    while not (stop_requested and stop_requested()) and not await request.is_disconnected():
         try:
             batch = await asyncio.to_thread(tail.read_batch)
         except (OSError, ValueError):
             yield (
-                'event: diagnostic\ndata: '
+                "event: diagnostic\ndata: "
                 '{"message":"Journal changed or is invalid; reload this run"}\n\n'
             )
             return
@@ -47,8 +48,7 @@ async def stream_events(
             continue
         if tail.sequence < after:
             yield (
-                'event: diagnostic\ndata: '
-                '{"message":"Cursor exceeds journal; reload this run"}\n\n'
+                'event: diagnostic\ndata: {"message":"Cursor exceeds journal; reload this run"}\n\n'
             )
             return
         if time.monotonic() - heartbeat >= 10:
@@ -57,7 +57,13 @@ async def stream_events(
         await asyncio.sleep(0.25)
 
 
-def create_app(repository: Path, state_directory: Path, *, allowed_host: str) -> FastAPI:
+def create_app(
+    repository: Path,
+    state_directory: Path,
+    *,
+    allowed_host: str,
+    stop_requested: Callable[[], bool] | None = None,
+) -> FastAPI:
     catalog = JournalCatalog(repository, state_directory)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     static = Path(__file__).parent / "static"
@@ -80,7 +86,8 @@ def create_app(repository: Path, state_directory: Path, *, allowed_host: str) ->
 
     @app.get("/api/runs")
     def runs() -> Any:
-        return catalog.list_runs()
+        items = catalog.list_runs()
+        return {"runs": items, "diagnostics": catalog.discovery_diagnostics}
 
     def check_run(run_id: str) -> None:
         try:
@@ -105,7 +112,7 @@ def create_app(repository: Path, state_directory: Path, *, allowed_host: str) ->
         except ValueError as error:
             raise HTTPException(400, "Invalid event cursor") from error
         return StreamingResponse(
-            stream_events(request, catalog, run_id, cursor),
+            stream_events(request, catalog, run_id, cursor, stop_requested),
             media_type="text/event-stream",
             headers={"X-Accel-Buffering": "no"},
         )

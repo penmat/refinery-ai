@@ -59,6 +59,7 @@ class RunSummary(BaseModel):
     first_seen: str | None = None
     last_seen: str | None = None
     event_count: int = 0
+    verified_recipes: int = 0
     diagnostics: list[str] = Field(default_factory=list)
 
 

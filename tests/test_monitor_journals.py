@@ -95,3 +95,73 @@ def test_tail_batch_limit(tmp_path):
     tail = JournalTail(path, "a" * 32)
     assert len(tail.read_batch()) == 256
     assert len(tail.read_batch()) == 44
+
+
+def test_legacy_terminal_without_domain_outcome_is_unknown(tmp_path):
+    path = journal(tmp_path)
+    data = json.loads(path.read_text())
+    phases = ["record_step_failure", "publish_result", "finish_run"]
+    path.write_text(
+        "".join(
+            json.dumps(
+                {
+                    **data,
+                    "sequence": i + 1,
+                    "phase": phase,
+                    "lifecycle": "completed",
+                    "outcome": None,
+                }
+            )
+            + "\n"
+            for i, phase in enumerate(phases)
+        )
+    )
+    assert JournalCatalog(tmp_path, Path(".refinery")).snapshot("a" * 32).run.status == "unknown"
+
+
+def test_replaced_state_root_cannot_expose_external_topology(tmp_path):
+    journal(tmp_path)
+    catalog = JournalCatalog(tmp_path, Path(".refinery"))
+    state_root = tmp_path / ".refinery"
+    state_root.rename(tmp_path / "original")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "migration-events").mkdir()
+    (outside / "migration-events" / ("a" * 32 + ".jsonl")).write_bytes(
+        (tmp_path / "original/migration-events" / ("a" * 32 + ".jsonl")).read_bytes()
+    )
+    state_root.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match=r"root|symlink"):
+        catalog.snapshot("a" * 32)
+
+
+def test_unsafe_event_directory_does_not_hide_healthy_runs(tmp_path):
+    journal(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (tmp_path / ".refinery/profile-events").symlink_to(outside, target_is_directory=True)
+    catalog = JournalCatalog(tmp_path, Path(".refinery"))
+    assert [run.run_id for run in catalog.list_runs()] == ["a" * 32]
+    assert catalog.discovery_diagnostics
+
+
+def test_recipe_summary_deduplicates_recovered_steps(tmp_path):
+    path = journal(tmp_path)
+    data = json.loads(path.read_text())
+    path.write_text(
+        "".join(
+            json.dumps(
+                {
+                    **data,
+                    "sequence": i + 1,
+                    "phase": "checkpoint_step",
+                    "lifecycle": "completed",
+                    "step": step,
+                    "generation": i,
+                }
+            )
+            + "\n"
+            for i, step in enumerate([1, 1, 2])
+        )
+    )
+    assert JournalCatalog(tmp_path, Path(".refinery")).snapshot("a" * 32).run.verified_recipes == 2

@@ -41,6 +41,7 @@ export default function App() {
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [connection, setConnection] = useState("Connecting");
   const [error, setError] = useState<string | null>(null);
+  const [discoveryErrors, setDiscoveryErrors] = useState<string[]>([]);
   const [filter, setFilter] = useState("");
   const [reload, setReload] = useState(0);
   useEffect(() => {
@@ -52,8 +53,9 @@ export default function App() {
       try {
         const data = await listRuns(controller.signal);
         if (controller.signal.aborted) return;
-        setRuns(data);
-        setSelectedRun((id) => id ?? data[0]?.run_id ?? null);
+        setRuns(data.runs);
+        setDiscoveryErrors(data.diagnostics);
+        setSelectedRun((id) => id ?? data.runs[0]?.run_id ?? null);
       } catch (e) {
         if (!controller.signal.aborted) setError(String(e));
       } finally {
@@ -117,7 +119,10 @@ export default function App() {
       source?.close();
     };
   }, [selectedRun, reload]);
-  const summary = summarize(state);
+  const summary = summarize(
+    state,
+    runs.filter((run) => run.parent_run_id === selectedRun),
+  );
   const current = snapshot?.run;
   const children = useMemo(
     () => runs.filter((r) => r.parent_run_id === selectedRun),
@@ -252,6 +257,12 @@ export default function App() {
               <Circle size={10} /> Local workspace
             </div>
           </div>
+          {discoveryErrors.map((text, i) => (
+            <div className="error-banner" key={i}>
+              <AlertCircle size={16} />
+              {text}
+            </div>
+          ))}
           {error && (
             <div className="error-banner">
               <AlertCircle size={16} />
@@ -335,7 +346,11 @@ export default function App() {
                   icon={<Layers3 size={16} />}
                   label="Verified recipes"
                   value={String(summary.recipes)}
-                  note="Unique checkpointed steps"
+                  note={
+                    current?.kind === "profile"
+                      ? "Verified steps across child migrations"
+                      : "Unique checkpointed steps"
+                  }
                 />
                 <Metric
                   icon={<Sparkles size={16} />}

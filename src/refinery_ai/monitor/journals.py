@@ -80,27 +80,86 @@ class JournalTail:
 class JournalCatalog:
     def __init__(self, repository: Path, state_directory: Path) -> None:
         self.state_root = safe_state_root(repository, state_directory)
+        self.root_identity: tuple[int, int] | None = None
+        self.discovery_diagnostics: list[str] = []
+        self._validate_root()
+
+    def _validate_root(self) -> None:
+        if self.state_root.resolve() != self.state_root or self.state_root.is_symlink():
+            raise ValueError("State root or ancestor changed to a symlink")
+        if self.state_root.exists():
+            stat = self.state_root.stat()
+            identity = (stat.st_dev, stat.st_ino)
+            if self.root_identity is not None and identity != self.root_identity:
+                raise ValueError("State root changed; restart the monitor")
+            self.root_identity = identity
+
+    def _owned(self, relative: str) -> Path:
+        self._validate_root()
+        return safe_owned_path(self.state_root, relative)
+
+    def _metadata(self, run_id: str) -> bytes:
+        relative = f"monitor-topologies/{run_id}.json"
+        path = self._owned(relative)
+        if os.name != "posix":
+            return path.read_bytes()
+        # Anchor every component to a checked directory descriptor so a rename
+        # between validation and reading cannot redirect the metadata read.
+        root_fd = os.open(self.state_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            stat = os.fstat(root_fd)
+            if (stat.st_dev, stat.st_ino) != self.root_identity:
+                raise ValueError("State root changed")
+            directory_fd = os.open(
+                "monitor-topologies", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd
+            )
+            try:
+                file_fd = os.open(
+                    f"{run_id}.json", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd
+                )
+                with os.fdopen(file_fd, "rb") as stream:
+                    data = stream.read(MAX_LINE + 1)
+                    if len(data) > MAX_LINE:
+                        raise ValueError("Topology metadata exceeds 1 MiB")
+                    return data
+            finally:
+                os.close(directory_fd)
+        finally:
+            os.close(root_fd)
 
     def journal(self, run_id: str) -> tuple[Path, Literal["profile", "migration"]]:
         validate_run_id(run_id)
+        self._validate_root()
+        errors: list[ValueError] = []
         matches: list[tuple[Path, Literal["profile", "migration"]]] = []
         for kind in ("profile", "migration"):
-            path = safe_owned_path(self.state_root, f"{kind}-events/{run_id}.jsonl")
-            if path.is_file():
-                matches.append((path, kind))
+            try:
+                path = self._owned(f"{kind}-events/{run_id}.jsonl")
+                if path.is_file():
+                    matches.append((path, kind))
+            except ValueError as error:
+                errors.append(error)
+        if not matches and errors:
+            raise ValueError("Run journal or directory is an unsafe symlink") from errors[0]
         if len(matches) != 1:
             raise FileNotFoundError("Run not found or ambiguous")
         return matches[0]
 
     def list_runs(self) -> list[RunSummary]:
         ids: set[str] = set()
+        self.discovery_diagnostics = []
         for kind in ("profile", "migration"):
-            directory = safe_owned_path(self.state_root, f"{kind}-events")
-            if directory.is_dir():
-                ids.update(
-                    p.stem
-                    for p in directory.glob("*.jsonl")
-                    if re.fullmatch(r"[a-f0-9]{32}", p.stem)
+            try:
+                directory = self._owned(f"{kind}-events")
+                if directory.is_dir():
+                    ids.update(
+                        p.stem
+                        for p in directory.glob("*.jsonl")
+                        if re.fullmatch(r"[a-f0-9]{32}", p.stem)
+                    )
+            except (OSError, ValueError):
+                self.discovery_diagnostics.append(
+                    f"Cannot read {kind} journal directory; unsafe or unavailable"
                 )
         results: list[RunSummary] = []
         for run_id in ids:
@@ -130,16 +189,16 @@ class JournalCatalog:
             events.extend(batch)
             if len(batch) < 256 and tail.error is None:
                 break
-        metadata = safe_owned_path(self.state_root, f"monitor-topologies/{run_id}.json")
         topology = current_topology(kind)
-        if metadata.exists():
-            try:
-                candidate = GraphTopology.model_validate_json(metadata.read_bytes())
-                if candidate.kind != kind:
-                    raise ValueError("Topology kind does not match run")
-                topology = candidate
-            except (OSError, ValueError):
-                diagnostics.append("Recorded topology unavailable; showing current definition")
+        try:
+            candidate = GraphTopology.model_validate_json(self._metadata(run_id))
+            if candidate.kind != kind:
+                raise ValueError("Topology kind does not match run")
+            topology = candidate
+        except FileNotFoundError:
+            pass  # Legacy journal without saved topology.
+        except (OSError, ValueError):
+            diagnostics.append("Recorded topology unavailable; showing current definition")
         first = events[0] if events else None
         last = events[-1] if events else None
         terminal = next(
@@ -150,7 +209,7 @@ class JournalCatalog:
             ),
             None,
         )
-        status = terminal.outcome or "completed" if terminal else "unknown"
+        status = (terminal.outcome or "unknown") if terminal else "unknown"
         if terminal is None and last is not None and last.lifecycle in ("failed", "cancelled"):
             status = last.lifecycle
         summary = RunSummary(
@@ -163,6 +222,15 @@ class JournalCatalog:
             last_seen=last.timestamp if last else None,
             event_count=len(events),
             status=status,
+            verified_recipes=len(
+                {
+                    e.step
+                    for e in events
+                    if e.phase == "checkpoint_step"
+                    and e.lifecycle == "completed"
+                    and e.step is not None
+                }
+            ),
             diagnostics=diagnostics,
         )
         return RunSnapshot(

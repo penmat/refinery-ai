@@ -36,7 +36,10 @@ it("ignores an old snapshot after the user switches runs", async () => {
     event_count: 0,
     diagnostics: [],
   });
-  const runs = [run(a, "Profile A"), run(b, "Profile B")];
+  const runs = [
+    { ...run(a, "Profile A"), parent_run_id: b, verified_recipes: 3 },
+    run(b, "Profile B"),
+  ];
   const snapshot = (run: Run): Snapshot => ({
     run,
     events: [],
@@ -59,7 +62,10 @@ it("ignores an old snapshot after the user switches runs", async () => {
     "fetch",
     vi.fn((path: string) =>
       path === "/api/runs"
-        ? Promise.resolve({ ok: true, json: async () => runs })
+        ? Promise.resolve({
+            ok: true,
+            json: async () => ({ runs, diagnostics: [] }),
+          })
         : path.endsWith(a)
           ? old
           : Promise.resolve({ ok: true, json: async () => snapshot(runs[1]) }),
@@ -74,4 +80,5 @@ it("ignores an old snapshot after the user switches runs", async () => {
     expect(screen.queryByRole("heading", { name: "Profile A" })).toBeNull(),
   );
   expect(screen.getByRole("heading", { name: "Profile B" })).toBeTruthy();
+  expect(screen.getByText("3")).toBeTruthy();
 });

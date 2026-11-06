@@ -13,7 +13,7 @@ def test_api_snapshot_and_origin_confinement(tmp_path):
     journal(tmp_path)
     app = create_app(tmp_path, Path(".refinery"), allowed_host="127.0.0.1:8765")
     with TestClient(app, base_url="http://127.0.0.1:8765") as client:
-        assert len(client.get("/api/runs").json()) == 1
+        assert len(client.get("/api/runs").json()["runs"]) == 1
         snap = client.get("/api/runs/" + "a" * 32).json()
         assert snap["cursor"] == 1
         assert client.get("/api/runs/bad").status_code == 400

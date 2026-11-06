@@ -6,6 +6,7 @@ import socket
 import threading
 import webbrowser
 from pathlib import Path
+from types import FrameType
 from typing import Annotated
 
 import typer
@@ -30,9 +31,20 @@ def serve_monitor(
                 f"Cannot start monitor on port {port}; it may be already in use"
             ) from error
         listener.listen(128)
-        application = create_app(repository, state_directory, allowed_host=f"127.0.0.1:{port}")
-        server = uvicorn.Server(uvicorn.Config(application, log_level="warning"))
         stop = threading.Event()
+        application = create_app(
+            repository,
+            state_directory,
+            allowed_host=f"127.0.0.1:{port}",
+            stop_requested=stop.is_set,
+        )
+
+        class MonitorServer(uvicorn.Server):
+            def handle_exit(self, sig: int, frame: FrameType | None) -> None:
+                stop.set()  # Finish SSE iterators before Uvicorn waits for requests.
+                super().handle_exit(sig, frame)
+
+        server = MonitorServer(uvicorn.Config(application, log_level="warning"))
 
         def launch_browser() -> None:
             while not stop.wait(0.05):

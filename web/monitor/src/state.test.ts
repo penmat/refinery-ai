@@ -101,3 +101,15 @@ describe("execution history", () => {
     expect(state.transitions).toEqual(["verify_candidate→finish_run"]);
   });
 });
+
+it("aggregates profile recipe totals from distinct child runs", () => {
+  const parent = applyEvents(emptyState(), [event(1, { phase: "migrate" })]);
+  const child = { run_id: "b".repeat(32), verified_recipes: 3 };
+  expect(
+    summarize(parent, [
+      child,
+      child,
+      { run_id: "c".repeat(32), verified_recipes: 2 },
+    ]).recipes,
+  ).toBe(5);
+});

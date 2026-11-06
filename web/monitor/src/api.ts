@@ -6,6 +6,6 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
   return response.json() as Promise<T>;
 }
 export const listRuns = (signal?: AbortSignal) =>
-  get<Run[]>("/api/runs", signal);
+  get<{ runs: Run[]; diagnostics: string[] }>("/api/runs", signal);
 export const getSnapshot = (id: string, signal?: AbortSignal) =>
   get<Snapshot>(`/api/runs/${encodeURIComponent(id)}`, signal);
