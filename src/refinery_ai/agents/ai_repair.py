@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, SecretStr
 from refinery_ai.build_tools import maven_command_prefix
 from refinery_ai.config import Settings
 from refinery_ai.migrations.deterministic_repair import springdoc_repair_files
+from refinery_ai.migrations.process_safety import ownership_active, run_owned
 from refinery_ai.migrations.repair import repair_result
 from refinery_ai.models import RecipeRecommendation, RepairMode, VerificationResult
 from refinery_ai.telemetry import record_llm_usage
@@ -238,14 +239,17 @@ def _validate_new_maven_coordinates(
             "-Dtransitive=false",
         ]
         try:
-            result = subprocess.run(
-                command,
-                cwd=repository,
-                text=True,
-                capture_output=True,
-                check=False,
-                timeout=120,
-            )
+            if ownership_active():
+                result = run_owned(command, cwd=repository, timeout=120)
+            else:
+                result = subprocess.run(
+                    command,
+                    cwd=repository,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=120,
+                )
         except (OSError, subprocess.TimeoutExpired) as error:
             return f"Could not validate proposed Maven dependency {coordinate}: {error}"
         if result.returncode != 0:

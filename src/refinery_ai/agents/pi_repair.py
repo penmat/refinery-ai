@@ -15,6 +15,7 @@ from pathlib import Path
 
 from refinery_ai.agents.repair_snapshot import RepairSnapshot
 from refinery_ai.config import Settings
+from refinery_ai.migrations.process_safety import spawn_owned
 from refinery_ai.migrations.repair import repair_result
 from refinery_ai.models import RecipeRecommendation, VerificationResult
 
@@ -57,14 +58,7 @@ def _invoke(
     with tempfile.TemporaryFile() as source, selectors.DefaultSelector() as selector:
         source.write(prompt.encode())
         source.seek(0)
-        process = subprocess.Popen(
-            command,
-            cwd=repository,
-            stdin=source,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=True,
-        )
+        process = spawn_owned(command, cwd=repository, stdin=source)
         try:
             assert process.stdout is not None and process.stderr is not None
             selector.register(process.stdout, selectors.EVENT_READ, "stdout")

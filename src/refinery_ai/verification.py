@@ -10,6 +10,7 @@ from pathlib import Path
 
 from refinery_ai.build_tools import build_directory, maven_command_prefix
 from refinery_ai.logging import get_logger, log_command
+from refinery_ai.migrations.process_safety import ownership_active, run_owned
 from refinery_ai.models import BuildSystem, DiscoverySnapshot, VerificationResult
 
 logger = get_logger(__name__)
@@ -75,15 +76,18 @@ def verify(
     started = time.monotonic()
     log_command(logger, command, cwd=repository)
     try:
-        result = subprocess.run(
-            command,
-            cwd=repository,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=timeout,
-            env=environment,
-        )
+        if ownership_active():
+            result = run_owned(command, cwd=repository, timeout=timeout, env=environment)
+        else:
+            result = subprocess.run(
+                command,
+                cwd=repository,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=timeout,
+                env=environment,
+            )
         verification = VerificationResult(
             command=command,
             exit_code=result.returncode,
