@@ -171,7 +171,7 @@ def test_blank_configuration_is_rejected(option: str) -> None:
 
 
 def test_cancellation_stops_process_and_restores_partial_edits(tmp_path: Path, monkeypatch) -> None:
-    import refinery_ai.agents.pi_repair as adapter
+    import refinery_ai.agents.cli_repair as adapter
 
     root = repository(tmp_path)
     target = root / "target"
@@ -277,3 +277,9 @@ def test_sigterm_of_profile_process_stops_pi_and_restores_sources(tmp_path: Path
         if process.poll() is None:
             process.kill()
             process.wait()
+
+
+def test_pi_uses_shared_transactional_cli_adapter() -> None:
+    from refinery_ai.agents.cli_repair import CliRepairAgent
+
+    assert issubclass(PiRepairAgent, CliRepairAgent)
