@@ -5,7 +5,7 @@ from pathlib import Path
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from refinery_ai.models import RepairBackend, RepairMode
+from refinery_ai.models import CodingAgentPermissions, RepairBackend, RepairMode
 
 
 class Settings(BaseSettings):
@@ -17,10 +17,15 @@ class Settings(BaseSettings):
     repair_model: str = "openai:gpt-5.6-luna"
     repair_backend: RepairBackend = RepairBackend.INTERNAL
     pi_executable: str = "pi"
+    opencode_executable: str = "opencode"
+    codex_executable: str = "codex"
+    claude_executable: str = "claude"
+    coding_agent_permissions: CodingAgentPermissions = CodingAgentPermissions.MANAGED
     coding_agent_model: str | None = None
     coding_agent_provider: str | None = None
 
-    @field_validator("pi_executable", "coding_agent_model", "coding_agent_provider")
+    @field_validator("pi_executable", "opencode_executable", "codex_executable",
+                     "claude_executable", "coding_agent_model", "coding_agent_provider")
     @classmethod
     def nonblank_agent_setting(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():

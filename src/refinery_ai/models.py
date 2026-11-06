@@ -107,6 +107,14 @@ class ExecutionType(StrEnum):
 class RepairBackend(StrEnum):
     INTERNAL = "internal"
     PI = "pi"
+    OPENCODE = "opencode"
+    CODEX = "codex"
+    CLAUDE = "claude"
+
+
+class CodingAgentPermissions(StrEnum):
+    MANAGED = "managed"
+    INHERIT = "inherit"
 
 
 class RepairMode(StrEnum):
