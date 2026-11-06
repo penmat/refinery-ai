@@ -36,6 +36,7 @@ from refinery_ai.logging import configure_logging, get_logger
 from refinery_ai.mcp import run_mcp_server
 from refinery_ai.migrations.runner import MigrationRunner
 from refinery_ai.models import (
+    CodingAgentPermissions,
     MigrationRun,
     ModernizationGoal,
     RecipePlan,
@@ -63,14 +64,23 @@ def _configure_repair(
     model: str | None,
     provider: str | None,
     executable: str | None,
+    permissions: CodingAgentPermissions | None,
+    opencode_executable: str | None,
+    codex_executable: str | None,
+    claude_executable: str | None,
 ) -> None:
     try:
         if backend is not None:
             settings.repair_backend = backend
+        if permissions is not None:
+            settings.coding_agent_permissions = permissions
         for field, value in (
             ("coding_agent_model", model),
             ("coding_agent_provider", provider),
             ("pi_executable", executable),
+            ("opencode_executable", opencode_executable),
+            ("codex_executable", codex_executable),
+            ("claude_executable", claude_executable),
         ):
             if value is not None:
                 Settings.nonblank_agent_setting(value)
@@ -159,7 +169,9 @@ def run_corpus(
     ] = 1,
     repair_backend: Annotated[
         RepairBackend | None,
-        typer.Option("--repair-backend", help="Repair implementation: internal or pi"),
+        typer.Option(
+            "--repair-backend", help="Repair backend: internal, pi, opencode, codex, or claude"
+        ),
     ] = None,
     coding_agent_model: Annotated[
         str | None,
@@ -174,13 +186,37 @@ def run_corpus(
     pi_executable: Annotated[
         str | None, typer.Option("--pi-executable", help="Installed pi executable name or path")
     ] = None,
+    opencode_executable: Annotated[
+        str | None, typer.Option("--opencode-executable", help="Installed OpenCode executable")
+    ] = None,
+    codex_executable: Annotated[
+        str | None, typer.Option("--codex-executable", help="Installed Codex executable")
+    ] = None,
+    claude_executable: Annotated[
+        str | None, typer.Option("--claude-executable", help="Installed Claude Code executable")
+    ] = None,
+    coding_agent_permissions: Annotated[
+        CodingAgentPermissions | None,
+        typer.Option(
+            "--coding-agent-permissions",
+            help="Managed unattended permissions or inherit agent settings",
+        ),
+    ] = None,
 ) -> None:
     """Clone and convert every selected project in an evaluation corpus."""
 
     settings = Settings()
     settings.repair_mode = RepairMode.CONFIGURED_PROVIDER if ai_patching else RepairMode.DISABLED
     _configure_repair(
-        settings, repair_backend, coding_agent_model, coding_agent_provider, pi_executable
+        settings,
+        repair_backend,
+        coding_agent_model,
+        coding_agent_provider,
+        pi_executable,
+        coding_agent_permissions,
+        opencode_executable,
+        codex_executable,
+        claude_executable,
     )
     corpus = load_corpus(corpus_file)
     selected_profiles = profile_names or ["spring-boot-3.2-java-17"]
@@ -252,6 +288,10 @@ def run_corpus(
         coding_agent_model=settings.coding_agent_model,
         coding_agent_provider=settings.coding_agent_provider,
         pi_executable=settings.pi_executable,
+        opencode_executable=settings.opencode_executable,
+        codex_executable=settings.codex_executable,
+        claude_executable=settings.claude_executable,
+        coding_agent_permissions=settings.coding_agent_permissions,
         max_cycles=max_cycles,
         timeout_seconds=timeout_seconds,
         jobs=jobs,
@@ -708,7 +748,9 @@ def migrate(
     ] = None,
     repair_backend: Annotated[
         RepairBackend | None,
-        typer.Option("--repair-backend", help="Repair implementation: internal or pi"),
+        typer.Option(
+            "--repair-backend", help="Repair backend: internal, pi, opencode, codex, or claude"
+        ),
     ] = None,
     coding_agent_model: Annotated[
         str | None,
@@ -722,6 +764,22 @@ def migrate(
     ] = None,
     pi_executable: Annotated[
         str | None, typer.Option("--pi-executable", help="Installed pi executable name or path")
+    ] = None,
+    opencode_executable: Annotated[
+        str | None, typer.Option("--opencode-executable", help="Installed OpenCode executable")
+    ] = None,
+    codex_executable: Annotated[
+        str | None, typer.Option("--codex-executable", help="Installed Codex executable")
+    ] = None,
+    claude_executable: Annotated[
+        str | None, typer.Option("--claude-executable", help="Installed Claude Code executable")
+    ] = None,
+    coding_agent_permissions: Annotated[
+        CodingAgentPermissions | None,
+        typer.Option(
+            "--coding-agent-permissions",
+            help="Managed unattended permissions or inherit agent settings",
+        ),
     ] = None,
     resume_run: Annotated[
         str | None,
@@ -738,7 +796,15 @@ def migrate(
     if repair_mode is not None:
         settings.repair_mode = repair_mode
     _configure_repair(
-        settings, repair_backend, coding_agent_model, coding_agent_provider, pi_executable
+        settings,
+        repair_backend,
+        coding_agent_model,
+        coding_agent_provider,
+        pi_executable,
+        coding_agent_permissions,
+        opencode_executable,
+        codex_executable,
+        claude_executable,
     )
     root = repository.expanduser().resolve()
     if resume_run is not None:
@@ -764,6 +830,10 @@ def migrate(
                 "coding_agent_model": policy.coding_agent_model,
                 "coding_agent_provider": policy.coding_agent_provider,
                 "pi_executable": policy.pi_executable,
+                "opencode_executable": policy.opencode_executable,
+                "codex_executable": policy.codex_executable,
+                "claude_executable": policy.claude_executable,
+                "coding_agent_permissions": policy.coding_agent_permissions,
                 "ollama_base_url": policy.ollama_base_url,
                 "max_repair_attempts": policy.max_repair_attempts,
                 "max_deterministic_repair_attempts": policy.max_deterministic_repair_attempts,
@@ -862,7 +932,9 @@ def run(
     ] = False,
     repair_backend: Annotated[
         RepairBackend | None,
-        typer.Option("--repair-backend", help="Repair implementation: internal or pi"),
+        typer.Option(
+            "--repair-backend", help="Repair backend: internal, pi, opencode, codex, or claude"
+        ),
     ] = None,
     coding_agent_model: Annotated[
         str | None,
@@ -877,6 +949,22 @@ def run(
     pi_executable: Annotated[
         str | None, typer.Option("--pi-executable", help="Installed pi executable name or path")
     ] = None,
+    opencode_executable: Annotated[
+        str | None, typer.Option("--opencode-executable", help="Installed OpenCode executable")
+    ] = None,
+    codex_executable: Annotated[
+        str | None, typer.Option("--codex-executable", help="Installed Codex executable")
+    ] = None,
+    claude_executable: Annotated[
+        str | None, typer.Option("--claude-executable", help="Installed Claude Code executable")
+    ] = None,
+    coding_agent_permissions: Annotated[
+        CodingAgentPermissions | None,
+        typer.Option(
+            "--coding-agent-permissions",
+            help="Managed unattended permissions or inherit agent settings",
+        ),
+    ] = None,
 ) -> None:
     """Run manually, or converge on a named profile through repeated verified migrations."""
 
@@ -884,7 +972,15 @@ def run(
     if repair_mode is not None:
         settings.repair_mode = repair_mode
     _configure_repair(
-        settings, repair_backend, coding_agent_model, coding_agent_provider, pi_executable
+        settings,
+        repair_backend,
+        coding_agent_model,
+        coding_agent_provider,
+        pi_executable,
+        coding_agent_permissions,
+        opencode_executable,
+        codex_executable,
+        claude_executable,
     )
 
     if profile_name is not None:

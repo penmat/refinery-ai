@@ -468,11 +468,19 @@ def test_corpus_forwards_explicit_agent_configuration_to_child(
         coding_agent_model="local/model",
         coding_agent_provider="custom",
         pi_executable="/custom/pi",
+        opencode_executable="/custom/opencode",
+        codex_executable="/custom/codex",
+        claude_executable="/custom/claude",
+        coding_agent_permissions="inherit",
         ai_patching=False,
     ).run([corpus.projects[1]])
     command = commands[-1]
     for flag, value in [
         ("--repair-backend", "pi"),
+        ("--opencode-executable", "/custom/opencode"),
+        ("--codex-executable", "/custom/codex"),
+        ("--claude-executable", "/custom/claude"),
+        ("--coding-agent-permissions", "inherit"),
         ("--coding-agent-model", "local/model"),
         ("--coding-agent-provider", "custom"),
         ("--repair-mode", "disabled"),
