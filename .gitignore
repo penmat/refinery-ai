@@ -219,3 +219,7 @@ __marimo__/
 
 # Refinery AI local state
 .refinery/
+
+# Monitor frontend and plan scratch
+node_modules/
+.superpowers/
