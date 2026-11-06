@@ -72,6 +72,13 @@ def test_resume_preserves_verified_recipe_and_restarts_only_interrupted(tmp_path
     assert result.run_id == run_id
     assert (tmp_path / "change").read_text() == "second"
     assert not (tmp_path / "partial").exists()
+    archived = (
+        tmp_path
+        / ".refinery/migration-runs"
+        / run_id
+        / "interrupted/generation-0/step-002/changes.patch"
+    )
+    assert "unverified" in archived.read_text()
     replay = runner.run(resume_run_id=run_id)
     assert replay == result
     assert calls == ["first", "second", "second"]
@@ -195,3 +202,10 @@ def test_unsafe_resume_refuses_without_deleting_owned_work(tmp_path: Path, probl
     assert workspace.exists()
     assert (workspace / "change").read_text() == "second"
     assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tmp_path) == before
+
+
+def test_custom_repair_adapter_without_policy_cannot_resume(tmp_path: Path) -> None:
+    runner, run_id = interrupted_run(tmp_path)
+    runner.repairer = object()
+    with pytest.raises(ValueError, match="explicit policy metadata"):
+        runner.run(resume_run_id=run_id)

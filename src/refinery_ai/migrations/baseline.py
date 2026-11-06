@@ -121,7 +121,10 @@ def verify_baseline(ctx: MigrationExecutionContext, state: MigrationExecutionSta
         state.baseline_verification = VerificationResult(
             command=["refinery", "verified-checkpoint"],
             exit_code=0,
-            stdout=f"Reused verified checkpoint {state.starting_revision} with JDK {state.current_java}",
+            stdout=(
+                f"Reused verified checkpoint {state.starting_revision} "
+                f"with JDK {state.current_java}"
+            ),
             duration_seconds=0,
         )
         ctx.progress(

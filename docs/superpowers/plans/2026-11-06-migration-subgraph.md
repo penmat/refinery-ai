@@ -145,3 +145,11 @@ Shared models in `execution_state.py` are versioned Pydantic values, with no liv
 - [ ] Verify `migrate --help`, ordinary preview, explicit resume error paths, and documentation commands without real model credentials. Inspect final diff, public result contracts, checkpoint/state serialization, and event payloads for secrets and accidental service-object persistence.
 - [ ] Obtain an independent whole-change review focused on ownership, receipt/graph crash windows, publication reconciliation, and observer failure cleanup. Reproduce important findings with failing tests, fix, then rerun affected checks and the full suite. Record deferred minor findings and implementation rulings explicitly.
 - [ ] Commit final documentation/completion record and report exact verification results, platform limitations, and whether any live Maven/pi/model smoke test was run. Preserve the feature branch/worktree for the user's integration choice.
+
+
+## Execution completion
+
+Implemented all seven task areas. See `docs/migration-execution-completion.md` for
+actual verification, review corrections, and deviations from the proposed test list.
+The original checklist above remains a planning record rather than a claim that
+every proposed individual test was implemented verbatim.

@@ -38,7 +38,20 @@ class MigrationLease:
     def __init__(self, repository: Path, state_directory: Path, run_id: str) -> None:
         if re.fullmatch(r"[A-Za-z0-9_-]{1,128}", run_id) is None:
             raise ValueError("Invalid migration ownership identity")
-        self.root = safe_state_root(repository, state_directory)
+        safe_state_root(repository, state_directory)
+        common = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=repository,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        common_root = (
+            (repository / common.stdout.strip()).resolve()
+            if common.returncode == 0
+            else repository.resolve()
+        )
+        self.root = safe_owned_path(common_root, "refinery-ownership")
         self.records = safe_owned_path(self.root, f"processes/{run_id}")
         self.descriptor: int | None = None
         self.token: Token[MigrationLease | None] | None = None
@@ -124,7 +137,8 @@ def run_owned(
     command: list[str],
     *,
     cwd: Path,
-    timeout: int,
+    timeout: int | None,
+    errors: str = "replace",
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     process = spawn_owned(command, cwd=cwd, env=env)
@@ -133,8 +147,8 @@ def run_owned(
         return subprocess.CompletedProcess(
             command,
             process.returncode,
-            stdout.decode(errors="replace"),
-            stderr.decode(errors="replace"),
+            stdout.decode(errors=errors),
+            stderr.decode(errors=errors),
         )
     finally:
         stop_group(process)

@@ -263,7 +263,8 @@ def run_migration_graph(runner: Any, request: MigrationRequest) -> MigrationRun:
         store = None
     if request.expected_profile is not None and plan.profile != request.expected_profile:
         raise ValueError(
-            f"Migration plan uses {plan.profile or 'no profile'}; requested profile is {request.expected_profile}"
+            f"Migration plan uses {plan.profile or 'no profile'}; "
+            f"requested profile is {request.expected_profile}"
         )
     initial = initial_migration_state(plan, request, manifest)
     run_id = initial["data"].run_id

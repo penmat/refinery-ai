@@ -11,7 +11,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from refinery_ai.logging import get_logger, safe_command
-from refinery_ai.migrations.run_store import atomic_json
+from refinery_ai.migrations.process_safety import ownership_active, run_owned
+from refinery_ai.migrations.run_store import atomic_json, safe_owned_path, safe_state_root
 from refinery_ai.models import RecipeRecommendation, VerificationResult
 
 logger = get_logger(__name__)
@@ -42,9 +43,9 @@ class GitWorktreeManager:
         self.repository = repository.expanduser().resolve()
         self.run_id = run_id
         self.plan_id = plan_id
-        state_root = self.repository / state_directory
-        self.worktree_root = state_root / "worktrees" / run_id
-        self.artifact_root = state_root / "migration-runs" / run_id
+        state_root = safe_state_root(self.repository, state_directory)
+        self.worktree_root = safe_owned_path(state_root, f"worktrees/{run_id}")
+        self.artifact_root = safe_owned_path(state_root, f"migration-runs/{run_id}")
 
     def start(self) -> str:
         """Validate the source checkout and persist its immutable starting revision."""
@@ -369,6 +370,8 @@ class GitWorktreeManager:
     ) -> subprocess.CompletedProcess[str]:
         command = ["git", *arguments]
         logger.debug("Running command in %s: %s", cwd, safe_command(command))
+        if ownership_active():
+            return run_owned(command, cwd=cwd, env=env, timeout=None, errors="surrogateescape")
         result = subprocess.run(
             command,
             cwd=cwd,

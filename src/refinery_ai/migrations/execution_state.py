@@ -19,6 +19,7 @@ from refinery_ai.models import (
 
 
 class MigrationPolicy(BaseModel):
+    resumable: bool = True
     repair_mode: str = "disabled"
     repair_backend: str = "internal"
     repair_model: str | None = None

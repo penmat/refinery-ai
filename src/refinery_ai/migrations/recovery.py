@@ -25,6 +25,8 @@ def recover_migration(
         raise ValueError("Safe resume requires POSIX support")
     lease.assert_children_stopped()
     manifest = store.load_manifest()
+    if not manifest.policy.resumable or not policy.resumable:
+        raise ValueError("Custom repair adapters require explicit policy metadata for resume")
     if manifest.policy != policy:
         raise ValueError("Migration repair policy changed; refusing resume")
     original = store.repository / store.state_directory / "plans" / f"{manifest.plan.plan_id}.json"
@@ -140,6 +142,22 @@ def recover_migration(
                     continue
             else:
                 continue
+            # Capture uncommitted and untracked sources before retiring the checkout.
+            diagnostics = archive / (
+                f"step-{index:03d}" if name.startswith("step-") else "baseline"
+            )
+            diagnostics.mkdir(parents=True, exist_ok=True)
+            manager._stage_source_changes(workspace)
+            patch = manager._git(workspace, "diff", "--cached", "--binary", point.revision)
+            (diagnostics / "changes.patch").write_text(patch, errors="surrogateescape")
+            import shutil
+
+            for report_name in ("surefire-reports", "failsafe-reports"):
+                reports = workspace / "target" / report_name
+                if reports.is_dir():
+                    shutil.copytree(reports, diagnostics / report_name, dirs_exist_ok=True)
+            with (diagnostics / "changes.patch").open("rb") as retained:
+                os.fsync(retained.fileno())
             manager._git(store.repository, "worktree", "remove", "--force", str(workspace))
     for artifacts in list(store.root.glob("step-*")):
         index = int(artifacts.name.split("-")[1])
@@ -150,9 +168,19 @@ def recover_migration(
             raise ValueError("Terminal recipe failure cannot be resumed")
         store.path(str(artifacts.relative_to(store.root)))
         archive.mkdir(parents=True, exist_ok=True)
-        artifacts.rename(archive / artifacts.name)
+        destination = archive / artifacts.name
+        if destination.exists():
+            import shutil
+
+            shutil.copytree(artifacts, destination, dirs_exist_ok=True)
+            shutil.rmtree(artifacts)
+        else:
+            artifacts.rename(destination)
     if point.baseline is None and store.path("baseline").exists():
         archive.mkdir(parents=True, exist_ok=True)
-        store.path("baseline").rename(archive / "baseline")
+        import shutil
+
+        shutil.copytree(store.path("baseline"), archive / "baseline", dirs_exist_ok=True)
+        shutil.rmtree(store.path("baseline"))
     store.save_generation(point.generation)
     return point

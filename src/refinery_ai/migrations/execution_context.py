@@ -38,6 +38,7 @@ class MigrationExecutionContext:
 
     def policy(self) -> MigrationPolicy:
         return self.runner.policy or MigrationPolicy(
+            resumable=not bool(self.stages),
             stages=[(stage.name, stage.max_attempts, stage.uses_model) for stage in self.stages],
             timeout=self.runner.timeout,
             output_limit=self.runner.output_limit,

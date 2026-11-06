@@ -493,6 +493,31 @@ uv run refinery run \
 
 Without `--apply`, `run` is non-mutating and behaves like `plan`.
 
+## Migration execution events and resume
+
+Migration phases now run as explicit LangGraph nodes, including baseline builds,
+recipe execution, verification, repair attempts, acceptance/rollback, checkpoints,
+and publication. Apply runs write typed events to
+`.refinery/migration-events/<run-id>.jsonl`; the run ID also names its
+`.refinery/migration-runs/<run-id>/` artifacts.
+
+Resume an interrupted apply run from its last verified recipe:
+
+```bash
+uv run refinery migrate /path/to/java-project --resume-run <run-id>
+```
+
+Completed recipes are retained; only the interrupted recipe restarts in a fresh
+worktree. Resume implies apply and preserves the original plan and publication
+intent. Conflicting explicit settings, dirty/moved source, inconsistent receipts,
+active workers/child processes, and explicit terminal failures are refused. Safe
+resume currently requires macOS/Linux. Legacy runs and previews are not resumable.
+Profile recovery reuses the migration bound to its persisted plan.
+
+See [Migration execution and recovery](docs/migration-execution.md) for graph
+structure, event subscriptions/replay, process ownership, and recovery guarantees.
+This supplies the reporting foundation; a live viewer is not included yet.
+
 ## Configuration
 
 Settings use the `REFINERY_` prefix and may be placed in `.env`. See `.env.example`.

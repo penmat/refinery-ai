@@ -30,7 +30,8 @@ def prepare_step(ctx: MigrationExecutionContext, state: MigrationExecutionState)
     state.failure_reason = state.failure_message = ""
     if step.execution_type not in ctx.runner.runners:
         ctx.progress(
-            f"Migration {state.index}/{len(state.plan.steps)} has an unsupported type: {label(state)}"
+            f"Migration {state.index}/{len(state.plan.steps)} "
+            f"has an unsupported type: {label(state)}"
         )
         state.failure_message = f"Unsupported migration type: {label(state)}"
         return
@@ -79,7 +80,8 @@ def verify_candidate(ctx: MigrationExecutionContext, state: MigrationExecutionSt
     command = ctx.runner.build_command(snapshot)
     if command is None:
         ctx.progress(
-            f"Migration {state.index}/{len(state.plan.steps)} cannot be verified: unknown build system"
+            f"Migration {state.index}/{len(state.plan.steps)} "
+            "cannot be verified: unknown build system"
         )
         state.failure_reason = "Unknown build system"
         state.failure_message = f"Cannot verify migration for unknown build system: {step.recipe}"
