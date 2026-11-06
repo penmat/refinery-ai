@@ -34,6 +34,8 @@ from refinery_ai.jdks import JdkResolver, project_runtime_java, selected_jdk
 from refinery_ai.llm import run_tool_loop
 from refinery_ai.logging import configure_logging, get_logger
 from refinery_ai.mcp import run_mcp_server
+from refinery_ai.migrations.execution_state import MigrationPolicy
+from refinery_ai.migrations.run_store import MigrationRunStore
 from refinery_ai.migrations.runner import MigrationRunner
 from refinery_ai.models import (
     CodingAgentPermissions,
@@ -68,6 +70,8 @@ def _configure_repair(
     opencode_executable: str | None,
     codex_executable: str | None,
     claude_executable: str | None,
+    *,
+    validate: bool = True,
 ) -> None:
     try:
         if backend is not None:
@@ -85,9 +89,39 @@ def _configure_repair(
             if value is not None:
                 Settings.nonblank_agent_setting(value)
                 setattr(settings, field, value)
-        validate_repair_policy(settings)
+        if validate:
+            validate_repair_policy(settings)
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
+
+
+def _inherit_repair_policy(settings: Settings, policy: MigrationPolicy) -> None:
+    """Merge recorded values before validating dependent agent settings."""
+    explicit = settings.model_fields_set.copy()
+    values = {
+        "repair_mode": RepairMode(policy.repair_mode),
+        "repair_backend": RepairBackend(policy.repair_backend),
+        "repair_model": policy.repair_model,
+        "coding_agent_model": policy.coding_agent_model,
+        "coding_agent_provider": policy.coding_agent_provider,
+        "pi_executable": policy.pi_executable,
+        "opencode_executable": policy.opencode_executable,
+        "codex_executable": policy.codex_executable,
+        "claude_executable": policy.claude_executable,
+        "coding_agent_permissions": policy.coding_agent_permissions,
+        "ollama_base_url": policy.ollama_base_url,
+        "max_repair_attempts": policy.max_repair_attempts,
+        "max_deterministic_repair_attempts": policy.max_deterministic_repair_attempts,
+        "command_timeout_seconds": policy.timeout,
+        "max_output_characters": policy.output_limit,
+    }
+    for field, value in values.items():
+        if value is None and field == "repair_model":
+            continue
+        if field in explicit and getattr(settings, field) != value:
+            raise ValueError(f"Configured {field} conflicts with recorded policy")
+        setattr(settings, field, value)
+    validate_repair_policy(settings)
 
 
 @app.command("run-corpus")
@@ -291,7 +325,11 @@ def run_corpus(
         opencode_executable=settings.opencode_executable,
         codex_executable=settings.codex_executable,
         claude_executable=settings.claude_executable,
-        coding_agent_permissions=settings.coding_agent_permissions,
+        coding_agent_permissions=(
+            settings.coding_agent_permissions
+            if "coding_agent_permissions" in settings.model_fields_set
+            else None
+        ),
         max_cycles=max_cycles,
         timeout_seconds=timeout_seconds,
         jobs=jobs,
@@ -805,11 +843,10 @@ def migrate(
         opencode_executable,
         codex_executable,
         claude_executable,
+        validate=resume_run is None,
     )
     root = repository.expanduser().resolve()
     if resume_run is not None:
-        from refinery_ai.migrations.run_store import MigrationRunStore
-
         try:
             manifest = MigrationRunStore(root, settings.state_directory, resume_run).load_manifest()
             if plan_id is not None and plan_id != manifest.plan.plan_id:
@@ -821,31 +858,7 @@ def migrate(
                 and apply_result != manifest.publish
             ):
                 raise ValueError("Publication option conflicts with recorded intent")
-            explicit = settings.model_fields_set.copy()
-            policy = manifest.policy
-            values = {
-                "repair_mode": RepairMode(policy.repair_mode),
-                "repair_backend": RepairBackend(policy.repair_backend),
-                "repair_model": policy.repair_model,
-                "coding_agent_model": policy.coding_agent_model,
-                "coding_agent_provider": policy.coding_agent_provider,
-                "pi_executable": policy.pi_executable,
-                "opencode_executable": policy.opencode_executable,
-                "codex_executable": policy.codex_executable,
-                "claude_executable": policy.claude_executable,
-                "coding_agent_permissions": policy.coding_agent_permissions,
-                "ollama_base_url": policy.ollama_base_url,
-                "max_repair_attempts": policy.max_repair_attempts,
-                "max_deterministic_repair_attempts": policy.max_deterministic_repair_attempts,
-                "command_timeout_seconds": policy.timeout,
-                "max_output_characters": policy.output_limit,
-            }
-            for field, value in values.items():
-                if value is None and field == "repair_model":
-                    continue
-                if field in explicit and getattr(settings, field) != value:
-                    raise ValueError(f"Configured {field} conflicts with recorded policy")
-                setattr(settings, field, value)
+            _inherit_repair_policy(settings, manifest.policy)
             apply = True
             apply_result = manifest.publish
             plan_id = manifest.plan.plan_id
@@ -1048,15 +1061,25 @@ def run(
             return report
 
         def migrate_cycle(plan_id: str, checkpoint: VerifiedCheckpoint | None) -> MigrationRun:
-            repair_stages = build_repair_stages(settings)
+            cycle_settings = settings.model_copy(deep=True)
+            bound_id = MigrationRunStore.find_bound_run(root, settings.state_directory, plan_id)
+            if bound_id is not None:
+                manifest = MigrationRunStore(
+                    root, settings.state_directory, bound_id
+                ).load_manifest()
+                try:
+                    _inherit_repair_policy(cycle_settings, manifest.policy)
+                except ValueError as error:
+                    raise typer.BadParameter(str(error)) from error
+            repair_stages = build_repair_stages(cycle_settings)
             return MigrationRunner(
                 MigrationPlanStore(root, settings.state_directory),
-                timeout=settings.command_timeout_seconds,
-                output_limit=settings.max_output_characters,
+                timeout=cycle_settings.command_timeout_seconds,
+                output_limit=cycle_settings.max_output_characters,
                 progress=typer.echo,
                 repair_stages=repair_stages,
                 jdk_resolver=jdk_resolver,
-                policy=migration_policy(settings),
+                policy=migration_policy(cycle_settings),
             ).run(
                 plan_id,
                 apply=True,

@@ -23,7 +23,7 @@ inherit so a resume does not gain new permissions.
 
 ## Validation
 
-- Full suite: 474 passed, 1 skipped in 104.87 seconds.
+- Final full suite after review fixes: 484 passed, 1 skipped in 105.55 seconds.
 - Mypy: 113 source files passed.
 - Changed Python files pass Ruff lint/format; whitespace diff check passes.
 - CLI help checked for migrate, run, and run-corpus. Installed Codex/Claude also
@@ -42,3 +42,38 @@ permissions and agent versions are not snapshotted by Refinery.
 Repository-wide style checks retain the pre-existing E501 in
 `deterministic_repair.py:1478` and 34 pre-existing files needing formatting;
 unrelated code was left unchanged.
+
+## Independent review and corrections
+
+Four important findings were reproduced and fixed:
+
+- Pin child `PWD` as well as cwd to the candidate worktree. A stale caller `PWD`
+  could cause OpenCode to edit outside the transaction.
+- Force OpenCode `--standalone` in both permission modes, keeping its ordinary
+  server work within the owned invocation instead of a shared background service.
+  The flag is defined in its current official command schema:
+  https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/cli/src/commands/commands.ts.
+- Reconcile each bound profile child's policy before constructing adapters; older
+  runs retain inherit permissions. Corpus omission also stays omitted in child
+  commands, so new defaults do not become explicit resume conflicts.
+- Validate explicit resume settings after recorded defaults are inherited. Repeating
+  a matching provider while omitting the recorded model now succeeds.
+
+No minor review findings were deferred.
+
+Review exclusions were evaluated as follows:
+
+- No live authenticated/model/Maven testing: explicitly excluded; external integration
+  behavior still needs an operator smoke test.
+- Obsolete CLI compatibility: unsupported flags fail explicitly; older installations
+  may need an upgrade.
+- External configuration/credentials: remain owned by the operator; externally changed
+  defaults cannot be reconstructed by resume.
+- Legacy goal-only run: preserve the existing path, as this feature targets migrate,
+  profile run and corpus; these backends require one of those supported paths.
+- Deliberately detached arbitrary daemons: remain outside process-group containment;
+  those processes can outlive cleanup. Ordinary OpenCode server work is addressed
+  through mandatory standalone execution.
+
+Final changed-file checks: 13 Python files pass Ruff lint/format; mypy passes
+all 113 source files; CLI help and `git diff --check` pass.

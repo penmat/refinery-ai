@@ -59,7 +59,12 @@ def _invoke(
     with tempfile.TemporaryFile() as source, selectors.DefaultSelector() as selector:
         source.write(prompt.encode())
         source.seek(0)
-        process = spawn_owned(command, cwd=repository, stdin=source)
+        process = spawn_owned(
+            command,
+            cwd=repository,
+            stdin=source,
+            env={**os.environ, "PWD": str(repository.resolve())},
+        )
         try:
             assert process.stdout is not None and process.stderr is not None
             selector.register(process.stdout, selectors.EVENT_READ, "stdout")

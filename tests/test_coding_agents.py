@@ -240,3 +240,34 @@ def test_timeout_stops_descendants_before_rollback(tmp_path, backend):
     time.sleep(1.5)
     assert not (root / "late").exists()
     assert (root / "source").read_bytes() == b"original\x00"
+
+
+@pytest.mark.parametrize("backend", ["opencode", "codex", "claude"])
+def test_agent_pwd_matches_worktree_and_preserves_environment(tmp_path, monkeypatch, backend):
+    root = tmp_path / "worktree"
+    source = tmp_path / "caller"
+    root.mkdir()
+    source.mkdir()
+    repository(root)
+    (source / "source").write_text("do not change")
+    monkeypatch.setenv("PWD", str(source))
+    monkeypatch.setenv("REFINERY_TEST_AGENT_ENV", "preserved")
+    script = executable(
+        tmp_path,
+        "import os\n" + "from pathlib import Path\n"
+        "os.chdir(os.environ.get('PWD',os.getcwd()))\n"
+        "Path('source').write_text(os.environ['REFINERY_TEST_AGENT_ENV'])\n",
+    )
+    agent = make_agent(backend, script)
+    result = agent.repair(root, STEP, FAILURE)
+    assert result.green, result.stderr
+    assert (root / "source").read_text() == "preserved"
+    assert (source / "source").read_text() == "do not change"
+    agent.rollback_last()
+    assert (root / "source").read_bytes() == b"original\x00"
+
+
+@pytest.mark.parametrize("permissions", ["managed", "inherit"])
+def test_opencode_uses_owned_standalone_server(tmp_path, permissions):
+    agent = make_agent("opencode", tmp_path / "unused", coding_agent_permissions=permissions)
+    assert "--standalone" in agent.command()

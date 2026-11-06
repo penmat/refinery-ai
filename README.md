@@ -110,6 +110,8 @@ uv run refinery run-corpus /path/to/corpus.yaml --repair-backend codex \
 ```
 
 All agent options are available on `migrate`, profile `run`, and `run-corpus`.
+The legacy goal-only `run` path keeps its existing behavior; use a profile or
+`migrate` for these repair backends.
 Use `--pi-executable`, `--opencode-executable`, `--codex-executable`, or
 `--claude-executable` for an installed binary outside `PATH`. Equivalent environment
 settings are `REFINERY_REPAIR_BACKEND`, `REFINERY_CODING_AGENT_MODEL`,
@@ -142,7 +144,9 @@ those builds as needed. These flags require agent versions supporting them;
 unsupported flags fail explicitly instead of falling back to broader permissions.
 
 External agents receive migration context and build diagnostics on stdin and
-start a fresh session per attempt. Pi, Codex, and Claude disable session persistence;
+start a fresh session per attempt. OpenCode always uses `--standalone` for a
+private server owned by the repair process, in both permission modes. All adapters
+set `PWD` to the candidate worktree as well as setting the working directory. Pi, Codex, and Claude disable session persistence;
 OpenCode may retain its normal local session history, but Refinery never resumes it.
 Agents may read the whole project and execute commands. Git worktrees isolate
 candidate changes for verification; they do not sandbox arbitrary commands or

@@ -486,3 +486,17 @@ def test_corpus_forwards_explicit_agent_configuration_to_child(
         ("--repair-mode", "disabled"),
     ]:
         assert command[command.index(flag) + 1] == value
+
+
+def test_corpus_omitted_permissions_do_not_become_explicit_in_child(tmp_path, monkeypatch):
+    corpus = load_corpus(_corpus(tmp_path / "corpus.yaml"))
+    commands = []
+    monkeypatch.setattr(
+        CorpusRunner,
+        "_execute",
+        staticmethod(lambda command, log, **kwargs: (commands.append(command) or 0, None)),
+    )
+    monkeypatch.setattr(CorpusRunner, "_revision", staticmethod(lambda repository: "abc"))
+    monkeypatch.setattr(CorpusRunner, "_profile_state", lambda *args: (1, True))
+    CorpusRunner(corpus, tmp_path / "out", profile="test").run([corpus.projects[1]])
+    assert "--coding-agent-permissions" not in commands[-1]

@@ -52,7 +52,10 @@ No agent is invoked with a blanket sandbox or permission bypass flag.
 
 ## Invocation and verification
 
-Each repair starts a fresh process in the current isolated migration worktree.
+Each repair starts a fresh process in the current isolated migration worktree,
+with `PWD` set to its resolved path as well as the subprocess working directory.
+OpenCode always passes `--standalone` to use a private owned server; this is a
+lifecycle flag and remains present when permissions are inherited.
 Feed the prompt through stdin to avoid argument limits and exposing source or
 failure details in process arguments. OpenCode non-TTY stdin handling is confirmed
 by the upstream CLI code excerpt and maintainer discussion in issue 16283:

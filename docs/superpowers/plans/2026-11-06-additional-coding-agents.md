@@ -1,6 +1,6 @@
 # Additional Coding Agents Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Add OpenCode, Codex CLI, and Claude Code repair backends, with managed permissions by default and an inherit option.
 
@@ -33,10 +33,10 @@
 
 **Interfaces:** Consume `RepairSnapshot.capture(Path)` and existing guarded `spawn_owned`. Produce shared `CliRepairAgent(settings: Settings)` implementing `repair(Path, RecipeRecommendation, VerificationResult) -> VerificationResult`, `accept_last() -> None`, and `rollback_last() -> None`; subclasses supply `command() -> list[str]` and a backend label.
 
-- [ ] Add characterization tests asserting both accept and rollback after pi candidates, original exact pi arguments, and no permission flags in either mode (pi has no distinct permission flag). Existing Git mutation, nonzero exit, timeout, output limit, and cancellation tests must keep their behavior.
-- [ ] Run `PYTHONPATH=src .venv/bin/pytest tests/test_pi_repair.py tests/test_migration_runner.py --no-cov -q`; confirm baseline coverage and add a failing shared-interface test before extraction.
-- [ ] Move prompt construction, bounded subprocess I/O, termination cleanup, snapshot acceptance/rollback, and candidate checks into `cli_repair.py`. Generalize diagnostics using the selected backend label. Keep `PiRepairAgent` import and constructor compatibility; inspect tests for imports/monkeypatches of moved private helpers before changing them.
-- [ ] Run the same focused tests; expect PASS. Commit `refactor: share transactional coding agent repair execution`.
+- [x] Add characterization tests asserting both accept and rollback after pi candidates, original exact pi arguments, and no permission flags in either mode (pi has no distinct permission flag). Existing Git mutation, nonzero exit, timeout, output limit, and cancellation tests must keep their behavior.
+- [x] Run `PYTHONPATH=src .venv/bin/pytest tests/test_pi_repair.py tests/test_migration_runner.py --no-cov -q`; confirm baseline coverage and add a failing shared-interface test before extraction.
+- [x] Move prompt construction, bounded subprocess I/O, termination cleanup, snapshot acceptance/rollback, and candidate checks into `cli_repair.py`. Generalize diagnostics using the selected backend label. Keep `PiRepairAgent` import and constructor compatibility; inspect tests for imports/monkeypatches of moved private helpers before changing them.
+- [x] Run the same focused tests; expect PASS. Commit `refactor: share transactional coding agent repair execution`.
 
 ### Task 2: Add three command adapters and permission/model configuration
 
@@ -44,13 +44,13 @@
 
 **Interfaces:** Produce `CodingAgentPermissions(StrEnum)` (`managed`, `inherit`); new `RepairBackend` values `opencode`, `codex`, `claude`; settings `opencode_executable="opencode"`, `codex_executable="codex"`, `claude_executable="claude"`, `coding_agent_permissions=MANAGED`. Produce `OpenCodeRepairAgent`, `CodexRepairAgent`, `ClaudeRepairAgent`, each extending Task 1's shared interface.
 
-- [ ] Add parametrized executable-stub tests for backend selection, exact command arguments, working directory, stdin prompt, optional model, managed/inherit flags, source acceptance/rollback, nonzero exit, unchanged source, Git index/HEAD mutation, missing executable, timeout, bounded output, and child cleanup. Add settings tests for environment values, invalid permission values, and blank executable/model/provider.
-- [ ] Assert managed commands: OpenCode `run --auto`; Codex global `--ask-for-approval never` followed by `exec --ephemeral --sandbox workspace-write -`; Claude `--print --no-session-persistence --permission-mode dontAsk --allowedTools Read,Edit,Write,Bash,Glob,Grep`. Inherit omits only permission/approval/sandbox overrides. Optional `--model` is passed as its own argument.
-- [ ] Assert OpenCode provider+model combines to `provider/model`, model-only native identifiers remain intact, and conflicting qualified provider/model or provider-without-model is rejected. Pi retains its existing two flags. Codex/Claude reject a non-null `coding_agent_provider` before source changes; their native provider settings are inherited.
-- [ ] Run `PYTHONPATH=src .venv/bin/pytest tests/test_coding_agents.py tests/test_repair_backend.py --no-cov -q`; expect RED for missing adapters/settings.
-- [ ] Inspect official OpenCode CLI implementation for piped stdin handling. Use it directly if supported; otherwise add a shared prompt-input hook for a private temporary attachment with cleanup on all exits and a static instruction argument. Record the resolved command/input contract in the spec before shipping.
-- [ ] Implement adapters, nonblank validation, and backend factory selection. `validate_repair_policy(Settings) -> None` rejects strict-local for every external backend and unsupported explicit provider combinations. `build_repair_stages(Settings)` constructs only the selected enabled model adapter; disabled mode never launches/locates an executable.
-- [ ] Run new tests plus pi tests; expect PASS. Commit `feat: add opencode codex and claude repair adapters`.
+- [x] Add parametrized executable-stub tests for backend selection, exact command arguments, working directory, stdin prompt, optional model, managed/inherit flags, source acceptance/rollback, nonzero exit, unchanged source, Git index/HEAD mutation, missing executable, timeout, bounded output, and child cleanup. Add settings tests for environment values, invalid permission values, and blank executable/model/provider.
+- [x] Assert managed commands: OpenCode `run --auto`; Codex global `--ask-for-approval never` followed by `exec --ephemeral --sandbox workspace-write -`; Claude `--print --no-session-persistence --permission-mode dontAsk --allowedTools Read,Edit,Write,Bash,Glob,Grep`. Inherit omits only permission/approval/sandbox overrides. Optional `--model` is passed as its own argument.
+- [x] Assert OpenCode provider+model combines to `provider/model`, model-only native identifiers remain intact, and conflicting qualified provider/model or provider-without-model is rejected. Pi retains its existing two flags. Codex/Claude reject a non-null `coding_agent_provider` before source changes; their native provider settings are inherited.
+- [x] Run `PYTHONPATH=src .venv/bin/pytest tests/test_coding_agents.py tests/test_repair_backend.py --no-cov -q`; expect RED for missing adapters/settings.
+- [x] Inspect official OpenCode CLI implementation for piped stdin handling. Use it directly if supported; otherwise add a shared prompt-input hook for a private temporary attachment with cleanup on all exits and a static instruction argument. Record the resolved command/input contract in the spec before shipping.
+- [x] Implement adapters, nonblank validation, and backend factory selection. `validate_repair_policy(Settings) -> None` rejects strict-local for every external backend and unsupported explicit provider combinations. `build_repair_stages(Settings)` constructs only the selected enabled model adapter; disabled mode never launches/locates an executable.
+- [x] Run new tests plus pi tests; expect PASS. Commit `feat: add opencode codex and claude repair adapters`.
 
 ### Task 3: Wire CLI, corpus transport, and version-compatible resume policy
 
@@ -58,11 +58,11 @@
 
 **Interfaces:** `migration_policy(Settings) -> MigrationPolicy` includes permission enum and new executable paths. `MigrationPolicy.coding_agent_permissions` defaults inherit when absent in persisted JSON; Settings still defaults managed. Add new executable/permission options to `_configure_repair` and all three public commands (`migrate`, `run`, `run-corpus`). Extend `CorpusRunner` constructor/settings serialization with the same values.
 
-- [ ] Add failing tests for all commands' model/backend/executable/permission flags and environment precedence; corpus child command forwarding; invalid combinations rejected before repository artifacts; no subprocess generation when AI patching is disabled.
-- [ ] Add old-manifest tests removing the new permission/executable keys, verifying loaded policy inherit and resumed settings inherit. A fresh policy must record managed. Explicit CLI/environment conflicts must fail; omitted defaults must inherit the manifest. Preserve public result schemas.
-- [ ] Run `PYTHONPATH=src .venv/bin/pytest tests/test_repair_backend.py tests/test_corpus_run.py tests/test_migration_resume_cli.py tests/test_migration_run_store.py --no-cov -q`; expect RED.
-- [ ] Implement options and environment transport without shell strings. Add all recorded fields to resume settings reconciliation; preserve explicit field-source detection and run/profile behavior. Existing pi executable flag remains accepted.
-- [ ] Run focused tests plus `tests/test_profile_run.py`; expect PASS. Commit `feat: expose coding agent permissions and preserve resume policy`.
+- [x] Add failing tests for all commands' model/backend/executable/permission flags and environment precedence; corpus child command forwarding; invalid combinations rejected before repository artifacts; no subprocess generation when AI patching is disabled.
+- [x] Add old-manifest tests removing the new permission/executable keys, verifying loaded policy inherit and resumed settings inherit. A fresh policy must record managed. Explicit CLI/environment conflicts must fail; omitted defaults must inherit the manifest. Preserve public result schemas.
+- [x] Run `PYTHONPATH=src .venv/bin/pytest tests/test_repair_backend.py tests/test_corpus_run.py tests/test_migration_resume_cli.py tests/test_migration_run_store.py --no-cov -q`; expect RED.
+- [x] Implement options and environment transport without shell strings. Add all recorded fields to resume settings reconciliation; preserve explicit field-source detection and run/profile behavior. Existing pi executable flag remains accepted.
+- [x] Run focused tests plus `tests/test_profile_run.py`; expect PASS. Commit `feat: expose coding agent permissions and preserve resume policy`.
 
 ### Task 4: Document, review, and verify complete integration
 
@@ -70,10 +70,10 @@
 
 **Interfaces:** User documentation shows backend selection, preinstalled/configured rule, model formats, executable options, managed versus inherit, agent-specific restrictions, and old-manifest semantics.
 
-- [ ] Document examples for `--repair-backend opencode|codex|claude` with configured-provider repair, and `--coding-agent-permissions inherit`. Explain managed permissions are agent-specific and Codex workspace-write may restrict dependency downloads; pi's behavior is unchanged.
-- [ ] Run full `PYTHONPATH=src OPENAI_API_KEY=test-only-placeholder .venv/bin/pytest -q`, `.venv/bin/mypy`, changed-file Ruff lint/format, and `git diff --check`. Check help for migrate/run/run-corpus. Reproduce pre-existing global style failures separately; do not format unrelated files.
-- [ ] Obtain one independent whole-branch review per executing-plans, focusing on transactional cleanup, permission opt-out, provider mapping, and old-run resume compatibility. Reproduce important findings with failing tests, fix, and rerun affected/full checks.
-- [ ] Record exact verification, resolved OpenCode input behavior, decisions, and lack of live model smoke tests. Commit documentation and review fixes; preserve feature worktree for integration choice.
+- [x] Document examples for `--repair-backend opencode|codex|claude` with configured-provider repair, and `--coding-agent-permissions inherit`. Explain managed permissions are agent-specific and Codex workspace-write may restrict dependency downloads; pi's behavior is unchanged.
+- [x] Run full `PYTHONPATH=src OPENAI_API_KEY=test-only-placeholder .venv/bin/pytest -q`, `.venv/bin/mypy`, changed-file Ruff lint/format, and `git diff --check`. Check help for migrate/run/run-corpus. Reproduce pre-existing global style failures separately; do not format unrelated files.
+- [x] Obtain one independent whole-branch review per executing-plans, focusing on transactional cleanup, permission opt-out, provider mapping, and old-run resume compatibility. Reproduce important findings with failing tests, fix, and rerun affected/full checks.
+- [x] Record exact verification, resolved OpenCode input behavior, decisions, and lack of live model smoke tests. Commit documentation and review fixes; preserve feature worktree for integration choice.
 
 ## Execution method
 
@@ -81,3 +81,9 @@ Preserve the native/direct implementation method used earlier in this chat: the
 primary agent implements tasks sequentially, followed by one independent final
 review. Create an isolated managed worktree at execution time. Existing environment
 may use the main checkout's virtualenv with `PYTHONPATH=src` from that worktree.
+
+## Completion
+
+All four task areas are implemented and independently reviewed. See
+`docs/additional-coding-agents-completion.md` for actual validation, review fixes,
+implementation decisions and external integration limits. No live model calls.

@@ -20,7 +20,7 @@ class OpenCodeRepairAgent(CliRepairAgent):
     label = "opencode"
 
     def command(self) -> list[str]:
-        command = [self.settings.opencode_executable, "run"]
+        command = [self.settings.opencode_executable, "run", "--standalone"]
         if self.settings.coding_agent_permissions is CodingAgentPermissions.MANAGED:
             command.append("--auto")
         model = opencode_model(

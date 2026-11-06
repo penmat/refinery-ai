@@ -164,7 +164,7 @@ class CorpusRunner:
         opencode_executable: str = "opencode",
         codex_executable: str = "codex",
         claude_executable: str = "claude",
-        coding_agent_permissions: CodingAgentPermissions | str = CodingAgentPermissions.MANAGED,
+        coding_agent_permissions: CodingAgentPermissions | str | None = None,
         max_cycles: int = 20,
         timeout_seconds: int = 14_400,
         jobs: int = 1,
@@ -188,7 +188,11 @@ class CorpusRunner:
         self.opencode_executable = opencode_executable
         self.codex_executable = codex_executable
         self.claude_executable = claude_executable
-        self.coding_agent_permissions = CodingAgentPermissions(coding_agent_permissions)
+        self.coding_agent_permissions = (
+            CodingAgentPermissions(coding_agent_permissions)
+            if coding_agent_permissions is not None
+            else None
+        )
         self.max_cycles = max_cycles
         self.timeout_seconds = timeout_seconds
         self.jobs = jobs
@@ -331,7 +335,12 @@ class CorpusRunner:
                         ("--opencode-executable", self.opencode_executable),
                         ("--codex-executable", self.codex_executable),
                         ("--claude-executable", self.claude_executable),
-                        ("--coding-agent-permissions", self.coding_agent_permissions.value),
+                        (
+                            "--coding-agent-permissions",
+                            self.coding_agent_permissions.value
+                            if self.coding_agent_permissions
+                            else None,
+                        ),
                         ("--coding-agent-model", self.coding_agent_model),
                         ("--coding-agent-provider", self.coding_agent_provider),
                     ):
