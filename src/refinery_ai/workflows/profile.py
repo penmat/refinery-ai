@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
-from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict
+import time
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
+from uuid import uuid4
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -12,6 +16,8 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from refinery_ai.models import MigrationRun, RecipePlan, RunReport, RunStatus
+from refinery_ai.monitor.recording import InvocationContext, ProfileReporter, parent_invocation
+from refinery_ai.monitor.topology import graph_topology, save_topology
 from refinery_ai.profile_run import (
     ProfileRunResult,
     ProfileRunState,
@@ -25,6 +31,7 @@ if TYPE_CHECKING:
 
 
 class ProfileGraphState(TypedDict):
+    monitor_run_id: NotRequired[str]
     schema_version: int
     stored_state: ProfileRunState
     cycle: int
@@ -37,13 +44,15 @@ class ProfileGraphState(TypedDict):
 
 
 def build_profile_graph(
-    runner: ProfileRunner,
+    runner: ProfileRunner | None,
     *,
     checkpointer: BaseCheckpointSaver[str] | None = None,
+    reporter: ProfileReporter | None = None,
 ) -> CompiledStateGraph[ProfileGraphState, None, ProfileGraphState, ProfileGraphState]:
     """Build the deterministic profile loop as explicit LangGraph nodes."""
 
     def analyze(state: ProfileGraphState) -> dict[str, object]:
+        assert runner is not None
         stored_state = state["stored_state"].model_copy(deep=True)
         cycle = state["cycle"] + 1
         dependency_fingerprint = dependency_inputs_fingerprint(runner.repository)
@@ -72,6 +81,7 @@ def build_profile_graph(
         return {"stored_state": stored_state, "cycle": cycle}
 
     def plan(state: ProfileGraphState) -> dict[str, object]:
+        assert runner is not None
         cycle = state["cycle"]
         runner.progress(f"Cycle {cycle}: planning for {runner.profile.name} ...")
         report = runner.plan()
@@ -114,6 +124,7 @@ def build_profile_graph(
         return "finished" if "result" in state else "migrate"
 
     def migrate(state: ProfileGraphState) -> dict[str, object]:
+        assert runner is not None
         recipes = state["recipes"]
         report = state["report"]
         cycle = state["cycle"]
@@ -152,10 +163,38 @@ def build_profile_graph(
     def after_migrate(state: ProfileGraphState) -> Literal["analyze", "finished"]:
         return "finished" if "result" in state else "analyze"
 
+    def observed(name: str, operation: Callable[[ProfileGraphState], dict[str, object]]) -> Any:
+        def invoke(state: ProfileGraphState) -> dict[str, object]:
+            if reporter is None:
+                return operation(state)
+            execution_id = uuid4().hex
+            started = time.monotonic()
+            reporter.emit(name, "started", execution_id)
+            try:
+                with parent_invocation(InvocationContext(reporter.run_id, execution_id)):
+                    update = operation(state)
+                reporter.emit(
+                    name, "completed", execution_id, duration_seconds=time.monotonic() - started
+                )
+                return update
+            except BaseException as error:
+                with contextlib.suppress(Exception):
+                    reporter.emit(
+                        name,
+                        "cancelled"
+                        if isinstance(error, (KeyboardInterrupt, SystemExit))
+                        else "failed",
+                        execution_id,
+                        duration_seconds=time.monotonic() - started,
+                    )
+                raise
+
+        return invoke
+
     graph = StateGraph(ProfileGraphState)
-    graph.add_node("analyze", analyze)
-    graph.add_node("plan", plan)
-    graph.add_node("migrate", migrate)
+    graph.add_node("analyze", observed("analyze", analyze))
+    graph.add_node("plan", observed("plan", plan))
+    graph.add_node("migrate", observed("migrate", migrate))
     graph.add_edge(START, "analyze")
     graph.add_edge("analyze", "plan")
     graph.add_conditional_edges("plan", after_plan, {"migrate": "migrate", "finished": END})
@@ -187,11 +226,35 @@ def run_profile_graph(runner: ProfileRunner) -> ProfileRunResult:
             graph_input = None
         else:
             graph_input = {
+                "monitor_run_id": uuid4().hex,
                 "schema_version": 1,
                 "stored_state": runner.store.load(),
                 "cycle": 0,
                 "previous_recipes": None,
                 "verified_checkpoint": None,
             }
-        result = graph.invoke(graph_input, config=config)
+        monitor_id = (
+            snapshot.values.get("monitor_run_id")
+            if graph_input is None
+            else graph_input["monitor_run_id"]
+        ) or uuid4().hex
+        if graph_input is None and not snapshot.values.get("monitor_run_id"):
+            graph.update_state(config, {"monitor_run_id": monitor_id})
+        state_root = runner.store.path.parents[1]
+        reporter = ProfileReporter(state_root, monitor_id, runner.profile.name)
+        graph = build_profile_graph(runner, checkpointer=checkpointer, reporter=reporter)
+        try:
+            save_topology(state_root, monitor_id, graph_topology(graph, "profile"))
+            pending = {e.execution_id: e for e in reporter.history if e.lifecycle == "started"}
+            for event in reporter.history:
+                if event.lifecycle != "started":
+                    pending.pop(event.execution_id, None)
+            for event in pending.values():
+                reporter.emit(event.phase, "interrupted", event.execution_id)
+            result = graph.invoke(graph_input, config=config)
+            reporter.emit(
+                "run", "completed", uuid4().hex, outcome=str(result["result"].status.value)
+            )
+        finally:
+            reporter.close()
     return ProfileRunResult.model_validate(result["result"])
