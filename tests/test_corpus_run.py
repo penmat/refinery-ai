@@ -468,13 +468,35 @@ def test_corpus_forwards_explicit_agent_configuration_to_child(
         coding_agent_model="local/model",
         coding_agent_provider="custom",
         pi_executable="/custom/pi",
+        opencode_executable="/custom/opencode",
+        codex_executable="/custom/codex",
+        claude_executable="/custom/claude",
+        coding_agent_permissions="inherit",
         ai_patching=False,
     ).run([corpus.projects[1]])
     command = commands[-1]
     for flag, value in [
         ("--repair-backend", "pi"),
+        ("--opencode-executable", "/custom/opencode"),
+        ("--codex-executable", "/custom/codex"),
+        ("--claude-executable", "/custom/claude"),
+        ("--coding-agent-permissions", "inherit"),
         ("--coding-agent-model", "local/model"),
         ("--coding-agent-provider", "custom"),
         ("--repair-mode", "disabled"),
     ]:
         assert command[command.index(flag) + 1] == value
+
+
+def test_corpus_omitted_permissions_do_not_become_explicit_in_child(tmp_path, monkeypatch):
+    corpus = load_corpus(_corpus(tmp_path / "corpus.yaml"))
+    commands = []
+    monkeypatch.setattr(
+        CorpusRunner,
+        "_execute",
+        staticmethod(lambda command, log, **kwargs: (commands.append(command) or 0, None)),
+    )
+    monkeypatch.setattr(CorpusRunner, "_revision", staticmethod(lambda repository: "abc"))
+    monkeypatch.setattr(CorpusRunner, "_profile_state", lambda *args: (1, True))
+    CorpusRunner(corpus, tmp_path / "out", profile="test").run([corpus.projects[1]])
+    assert "--coding-agent-permissions" not in commands[-1]

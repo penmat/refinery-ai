@@ -52,12 +52,15 @@ No agent is invoked with a blanket sandbox or permission bypass flag.
 
 ## Invocation and verification
 
-Each repair starts a fresh process in the current isolated migration worktree.
+Each repair starts a fresh process in the current isolated migration worktree,
+with `PWD` set to its resolved path as well as the subprocess working directory.
+OpenCode always passes `--standalone` to use a private owned server; this is a
+lifecycle flag and remains present when permissions are inherited.
 Feed the prompt through stdin to avoid argument limits and exposing source or
-failure details in process arguments. Verify OpenCode stdin support against its
-published CLI implementation; if unavailable use a temporary prompt attachment
-with deterministic cleanup, not shell interpolation. No user prompt is treated
-as command syntax.
+failure details in process arguments. OpenCode non-TTY stdin handling is confirmed
+by the upstream CLI code excerpt and maintainer discussion in issue 16283:
+https://github.com/anomalyco/opencode/issues/16283. Use the same file-backed stdin
+launcher for all agents; no user prompt is treated as command syntax.
 
 Exit success is only a candidate. Require actual source changes, reject Git
 HEAD/index changes, and preserve transactional accept/rollback behavior. Refinery

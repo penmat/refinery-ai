@@ -10,6 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, computed_field
 
 from refinery_ai.models import (
+    CodingAgentPermissions,
     MigrationRun,
     PersistedMigrationPlan,
     RecipeRecommendation,
@@ -26,6 +27,10 @@ class MigrationPolicy(BaseModel):
     coding_agent_model: str | None = None
     coding_agent_provider: str | None = None
     pi_executable: str = "pi"
+    opencode_executable: str = "opencode"
+    codex_executable: str = "codex"
+    claude_executable: str = "claude"
+    coding_agent_permissions: CodingAgentPermissions = CodingAgentPermissions.INHERIT
     ollama_base_url: str | None = None
     max_repair_attempts: int = 3
     max_deterministic_repair_attempts: int = 4
