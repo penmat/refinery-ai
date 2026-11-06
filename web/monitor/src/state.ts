@@ -119,6 +119,14 @@ export function summarize(
         e.lifecycle === "completed",
     );
   const first = state.events[0];
+  const last = state.events.at(-1);
+  const recordedSpan =
+    first && last
+      ? Math.max(
+          0,
+          (Date.parse(last.timestamp) - Date.parse(first.timestamp)) / 1000,
+        )
+      : null;
   const elapsed =
     terminal && first
       ? Math.max(
@@ -130,6 +138,7 @@ export function summarize(
     tokens: null,
     cost: null,
     elapsed,
+    recordedSpan,
     recipes: children.length
       ? [
           ...new Map(children.map((child) => [child.run_id, child])).values(),

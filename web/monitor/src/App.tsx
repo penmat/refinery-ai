@@ -334,11 +334,13 @@ export default function App() {
               <div className="metrics">
                 <Metric
                   icon={<Clock3 size={16} />}
-                  label="Wall time"
-                  value={duration(summary.elapsed)}
+                  label={
+                    summary.elapsed === null ? "Recorded time" : "Wall time"
+                  }
+                  value={duration(summary.elapsed ?? summary.recordedSpan)}
                   note={
                     summary.elapsed === null
-                      ? "No terminal event recorded"
+                      ? "First to latest recorded event"
                       : "Start to recorded completion"
                   }
                 />

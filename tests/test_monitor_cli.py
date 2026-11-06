@@ -21,6 +21,21 @@ def test_command_options_and_defaults(tmp_path, monkeypatch):
     assert received[0][2:] == (8888, False)
 
 
+def test_monitor_does_not_configure_telemetry(monkeypatch):
+    from refinery_ai import cli
+    from refinery_ai.monitor import cli as monitor_cli
+
+    monkeypatch.setenv("REFINERY_OTEL_ENABLED", "true")
+    monkeypatch.setattr(monitor_cli, "serve_monitor", lambda *args: None)
+
+    def unexpected_export(settings):
+        pytest.fail("The local monitor must not initialize telemetry")
+
+    monkeypatch.setattr(cli, "configure_telemetry", unexpected_export)
+    result = CliRunner().invoke(app, ["monitor", "--no-browser"])
+    assert result.exit_code == 0, result.exception
+
+
 def test_invalid_port_and_repository_are_cli_errors(tmp_path):
     for args in [["--port", "0"], ["--port", "65536"], ["--repository", str(tmp_path / "missing")]]:
         result = CliRunner().invoke(app, ["monitor", *args])

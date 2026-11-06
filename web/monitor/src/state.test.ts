@@ -65,6 +65,11 @@ describe("execution history", () => {
     expect(summarize(state).elapsed).toBeNull();
     expect(nodeStatus(state, "verify_candidate")).toBe("unconfirmed");
   });
+  it("shows the recorded span before a run finishes", () => {
+    const state = applyEvents(emptyState(), [event(1), event(3)]);
+    expect(summarize(state).elapsed).toBeNull();
+    expect(summarize(state).recordedSpan).toBe(2);
+  });
   it("rejects events from another run and never mixes child usage", () => {
     const state = applyEvents(emptyState(), [
       event(1),

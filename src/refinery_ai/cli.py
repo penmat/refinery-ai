@@ -345,10 +345,12 @@ def run_corpus(
 
 
 @app.callback()
-def configure_cli_logging() -> None:
+def configure_cli_logging(ctx: typer.Context) -> None:
     """Enable progress logging for commands and inspection tools."""
 
     configure_logging()
+    if ctx.invoked_subcommand == "monitor":
+        return
     settings = Settings()
     configure_langsmith(settings)
     configure_telemetry(settings)
