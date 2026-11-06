@@ -99,7 +99,8 @@ def build_migration_graph(
                         before,
                         execution_id,
                         duration=time.monotonic() - started,
-                        outcome=value.outcome,
+                        outcome=value.outcome
+                        or (result.status.value if isinstance(result, MigrationRun) else None),
                         checkpoint=value.current_revision,
                         stage=stage,
                     )
@@ -335,6 +336,10 @@ def run_migration_graph(runner: Any, request: MigrationRequest) -> MigrationRun:
         }
         error = None
         try:
+            if store is not None:
+                from refinery_ai.monitor.topology import graph_topology, save_topology
+
+                save_topology(store.state_root, run_id, graph_topology(graph, "migration"))
             result = graph.invoke(
                 initial, config=config, **({"durability": "sync"} if store is not None else {})
             )

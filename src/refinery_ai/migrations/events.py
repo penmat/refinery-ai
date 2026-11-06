@@ -38,6 +38,8 @@ class MigrationEvent(BaseModel):
     duration_seconds: float | None = None
     outcome: str | None = None
     checkpoint: str | None = None
+    parent_run_id: str | None = None
+    parent_execution_id: str | None = None
 
 
 def read_migration_events(path: Path) -> list[MigrationEvent]:
@@ -103,7 +105,12 @@ class MigrationReporter:
             if 0 < state.index <= len(state.plan.steps)
             else None
         )
+        from refinery_ai.monitor.recording import current_invocation
+
+        parent = current_invocation.get()
         event = MigrationEvent(
+            parent_run_id=parent.run_id if parent else None,
+            parent_execution_id=parent.execution_id if parent else None,
             run_id=state.run_id,
             plan_id=state.plan.plan_id,
             repository=str(state.plan.snapshot.repository),
