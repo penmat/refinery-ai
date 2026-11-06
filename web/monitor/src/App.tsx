@@ -356,9 +356,13 @@ export default function App() {
                 />
                 <Metric
                   icon={<Sparkles size={16} />}
-                  label="Tokens"
-                  value="Unavailable"
-                  note="Usage is not recorded locally"
+                  label="Recorded tokens"
+                  value={summary.tokens?.toLocaleString() ?? "Unavailable"}
+                  note={
+                    summary.tokens === null
+                      ? "No token usage recorded"
+                      : `${summary.inputTokens?.toLocaleString() ?? "—"} input · ${summary.outputTokens?.toLocaleString() ?? "—"} output`
+                  }
                 />
                 <Metric
                   icon={<Coins size={16} />}
@@ -566,7 +570,7 @@ export default function App() {
                         </span>
                         <span className="event-phase">
                           <i
-                            className={`legend-dot ${event.lifecycle === "completed" ? "complete" : event.lifecycle === "started" ? "pending" : "failure"}`}
+                            className={`legend-dot ${event.lifecycle === "completed" ? "complete" : event.lifecycle === "started" ? "pending" : event.lifecycle === "usage" ? "" : "failure"}`}
                           />
                           {label(event.phase)}
                           {event.repair_attempt ? (

@@ -16,7 +16,12 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from refinery_ai.models import MigrationRun, RecipePlan, RunReport, RunStatus
-from refinery_ai.monitor.recording import InvocationContext, ProfileReporter, parent_invocation
+from refinery_ai.monitor.recording import (
+    InvocationContext,
+    ProfileReporter,
+    capture_usage,
+    parent_invocation,
+)
 from refinery_ai.monitor.topology import graph_topology, save_topology
 from refinery_ai.profile_run import (
     ProfileRunResult,
@@ -171,7 +176,18 @@ def build_profile_graph(
             started = time.monotonic()
             reporter.emit(name, "started", execution_id)
             try:
-                with parent_invocation(InvocationContext(reporter.run_id, execution_id)):
+                with (
+                    parent_invocation(InvocationContext(reporter.run_id, execution_id)),
+                    capture_usage(
+                        lambda input_tokens, output_tokens: reporter.emit(
+                            name,
+                            "usage",
+                            execution_id,
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens,
+                        )
+                    ),
+                ):
                     update = operation(state)
                 reporter.emit(
                     name, "completed", execution_id, duration_seconds=time.monotonic() - started
@@ -247,7 +263,7 @@ def run_profile_graph(runner: ProfileRunner) -> ProfileRunResult:
             save_topology(state_root, monitor_id, graph_topology(graph, "profile"))
             pending = {e.execution_id: e for e in reporter.history if e.lifecycle == "started"}
             for event in reporter.history:
-                if event.lifecycle != "started":
+                if event.lifecycle not in ("started", "usage"):
                     pending.pop(event.execution_id, None)
             for event in pending.values():
                 reporter.emit(event.phase, "interrupted", event.execution_id)

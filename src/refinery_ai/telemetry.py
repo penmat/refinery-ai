@@ -180,7 +180,7 @@ def observe_llm(
 def record_llm_usage(usage: Any, *, model: str | None = None) -> None:
     """Record token and request usage using the active Refinery workflow dimensions."""
 
-    if _token_counter is None or _request_counter is None or usage is None:
+    if usage is None:
         return
 
     def value(name: str, fallback: str | None = None) -> int:
@@ -189,6 +189,27 @@ def record_llm_usage(usage: Any, *, model: str | None = None) -> None:
         else:
             raw = getattr(usage, name, getattr(usage, fallback, 0) if fallback else 0)
         return int(raw or 0)
+
+    def reported(name: str, fallback: str) -> int | None:
+        raw = (
+            usage.get(name, usage.get(fallback))
+            if isinstance(usage, Mapping)
+            else getattr(usage, name, getattr(usage, fallback, None))
+        )
+        return int(raw) if raw is not None else None
+
+    requests = (
+        usage.get("requests") if isinstance(usage, Mapping) else getattr(usage, "requests", None)
+    )
+    if requests != 0:
+        from refinery_ai.monitor.recording import journal_usage
+
+        journal_usage(
+            reported("input_tokens", "prompt_tokens"),
+            reported("output_tokens", "completion_tokens"),
+        )
+    if _token_counter is None or _request_counter is None:
+        return
 
     attributes: dict[str, str | int] = dict(_observation.get() or {})
     if model:

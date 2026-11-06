@@ -118,3 +118,19 @@ it("aggregates profile recipe totals from distinct child runs", () => {
     ]).recipes,
   ).toBe(5);
 });
+
+it("totals local and child tokens without altering visits or counting replays", () => {
+  const usage = event(2, {
+    lifecycle: "usage",
+    input_tokens: 13,
+    output_tokens: 5,
+  });
+  const state = applyEvents(emptyState(), [event(1), usage, usage]);
+  const child = { run_id: "b".repeat(32), input_tokens: 7, output_tokens: 2 };
+  expect(summarize(state, [child, child])).toMatchObject({
+    tokens: 27,
+    inputTokens: 20,
+    outputTokens: 7,
+  });
+  expect(nodeStatus(state, "verify_candidate")).toBe("unconfirmed");
+});

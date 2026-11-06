@@ -6,9 +6,12 @@ export interface MonitorEvent {
   event_id: string;
   execution_id: string;
   phase: string;
-  lifecycle: "started" | "completed" | "failed" | "cancelled" | "interrupted";
+  lifecycle:
+    "started" | "completed" | "failed" | "cancelled" | "interrupted" | "usage";
   generation: number;
   outcome?: string | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
   duration_seconds?: number | null;
   step?: number | null;
   recipe?: string | null;
@@ -38,6 +41,8 @@ export interface Run {
   last_seen: string | null;
   event_count: number;
   verified_recipes?: number;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
   diagnostics: string[];
 }
 export interface Snapshot {
@@ -90,6 +95,7 @@ export function applyEvents(state: State, events: MonitorEvent[]): State {
     next.runId = event.run_id;
     next.cursor = event.sequence;
     next.events.push(event);
+    if (event.lifecycle === "usage") continue;
     next.visits[event.execution_id] = {
       ...next.visits[event.execution_id],
       ...event,
@@ -109,7 +115,10 @@ export function nodeStatus(state: State, phase: string): string {
 }
 export function summarize(
   state: State,
-  children: { run_id: string; verified_recipes?: number }[] = [],
+  children: Pick<
+    Run,
+    "run_id" | "verified_recipes" | "input_tokens" | "output_tokens"
+  >[] = [],
 ) {
   const terminal = [...state.events]
     .reverse()
@@ -134,15 +143,33 @@ export function summarize(
           (Date.parse(terminal.timestamp) - Date.parse(first.timestamp)) / 1000,
         )
       : null;
+  const uniqueChildren = [
+    ...new Map(children.map((child) => [child.run_id, child])).values(),
+  ];
+  const usage = [...state.events, ...uniqueChildren];
+  const total = (key: "input_tokens" | "output_tokens") => {
+    const counts = usage
+      .map((item) => item[key])
+      .filter((count) => count != null);
+    return counts.length ? counts.reduce((sum, count) => sum + count, 0) : null;
+  };
+  const inputTokens = total("input_tokens");
+  const outputTokens = total("output_tokens");
   return {
-    tokens: null,
+    inputTokens,
+    outputTokens,
+    tokens:
+      inputTokens === null && outputTokens === null
+        ? null
+        : (inputTokens ?? 0) + (outputTokens ?? 0),
     cost: null,
     elapsed,
     recordedSpan,
     recipes: children.length
-      ? [
-          ...new Map(children.map((child) => [child.run_id, child])).values(),
-        ].reduce((total, child) => total + (child.verified_recipes ?? 0), 0)
+      ? uniqueChildren.reduce(
+          (total, child) => total + (child.verified_recipes ?? 0),
+          0,
+        )
       : new Set(
           state.events
             .filter(

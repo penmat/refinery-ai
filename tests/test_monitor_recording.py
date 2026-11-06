@@ -126,3 +126,31 @@ def test_actual_profile_invocation_correlates_child_events(tmp_path):
     assert any(
         e["execution_id"] == child.parent_execution_id and e["phase"] == "migrate" for e in parent
     )
+
+
+def test_profile_persists_tokens_without_telemetry_export(tmp_path, monkeypatch):
+    from refinery_ai.monitor.journals import JournalCatalog
+    from refinery_ai.telemetry import record_llm_usage
+
+    monkeypatch.setattr("refinery_ai.telemetry._token_counter", None)
+    monkeypatch.setattr("refinery_ai.telemetry._request_counter", None)
+
+    def plan():
+        record_llm_usage({"prompt_tokens": 13, "completion_tokens": 5})
+        record_llm_usage({"input_tokens": 0, "output_tokens": 0, "requests": 0})
+        return report(tmp_path, "plan", [])
+
+    ProfileRunner(
+        tmp_path,
+        load_profile("spring-boot-3.2-java-17"),
+        analyze=lambda _: True,
+        plan=plan,
+        migrate=lambda *_: MigrationRun(plan_id="plan", status=RunStatus.COMPLETED),
+    ).run()
+    catalog = JournalCatalog(tmp_path, Path(".refinery"))
+    run = catalog.list_runs()[0]
+    events = catalog.snapshot(run.run_id).events
+    assert [(e.input_tokens, e.output_tokens) for e in events if e.lifecycle == "usage"] == [
+        (13, 5)
+    ]
+    assert (run.input_tokens, run.output_tokens) == (13, 5)

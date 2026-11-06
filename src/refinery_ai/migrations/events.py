@@ -28,7 +28,7 @@ class MigrationEvent(BaseModel):
     event_id: str
     execution_id: str
     phase: str
-    lifecycle: Literal["started", "completed", "failed", "cancelled", "interrupted"]
+    lifecycle: Literal["started", "completed", "failed", "cancelled", "interrupted", "usage"]
     generation: int
     step: int | None = None
     recipe: str | None = None
@@ -37,6 +37,8 @@ class MigrationEvent(BaseModel):
     java: int | None = None
     duration_seconds: float | None = None
     outcome: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
     checkpoint: str | None = None
     parent_run_id: str | None = None
     parent_execution_id: str | None = None
@@ -91,12 +93,14 @@ class MigrationReporter:
     def emit(
         self,
         phase: str,
-        lifecycle: Literal["started", "completed", "failed", "cancelled", "interrupted"],
+        lifecycle: Literal["started", "completed", "failed", "cancelled", "interrupted", "usage"],
         state: MigrationExecutionState,
         execution_id: str,
         *,
         duration: float | None = None,
         outcome: str | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
         checkpoint: str | None = None,
         stage: str | None = None,
     ) -> MigrationEvent:
@@ -129,6 +133,8 @@ class MigrationReporter:
             java=state.current_java,
             duration_seconds=duration,
             outcome=outcome,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             checkpoint=checkpoint,
         )
         if self.output is not None:

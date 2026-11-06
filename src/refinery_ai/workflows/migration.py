@@ -24,6 +24,7 @@ from refinery_ai.migrations.execution_state import (
 from refinery_ai.migrations.process_safety import MigrationLease
 from refinery_ai.migrations.run_store import MigrationRunStore
 from refinery_ai.models import MigrationRun, PersistedMigrationPlan
+from refinery_ai.monitor.recording import capture_usage
 
 
 class MigrationGraphState(TypedDict, total=False):
@@ -91,7 +92,21 @@ def build_migration_graph(
                 reporter.emit(name, "started", before, execution_id, stage=stage)
             try:
                 value.outcome = None
-                result = operation(context, value)
+                if reporter is None:
+                    result = operation(context, value)
+                else:
+                    with capture_usage(
+                        lambda input_tokens, output_tokens: reporter.emit(
+                            name,
+                            "usage",
+                            before,
+                            execution_id,
+                            stage=stage,
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens,
+                        )
+                    ):
+                        result = operation(context, value)
                 if reporter is not None:
                     reporter.emit(
                         name,
@@ -308,7 +323,7 @@ def run_migration_graph(runner: Any, request: MigrationRequest) -> MigrationRun:
                 if event.lifecycle == "started"
             }
             for event in ctx.reporter.history:
-                if event.lifecycle != "started":
+                if event.lifecycle not in ("started", "usage"):
                     pending.pop(event.execution_id, None)
             for event in pending.values():
                 old = initial["data"].model_copy(

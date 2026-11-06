@@ -212,7 +212,11 @@ class JournalCatalog:
         status = (terminal.outcome or "unknown") if terminal else "unknown"
         if terminal is None and last is not None and last.lifecycle in ("failed", "cancelled"):
             status = last.lifecycle
+        inputs = [e.input_tokens for e in events if e.input_tokens is not None]
+        outputs = [e.output_tokens for e in events if e.output_tokens is not None]
         summary = RunSummary(
+            input_tokens=sum(inputs) if inputs else None,
+            output_tokens=sum(outputs) if outputs else None,
             run_id=run_id,
             kind=kind,
             profile=first.profile if first else None,

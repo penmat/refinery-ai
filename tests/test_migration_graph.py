@@ -31,11 +31,14 @@ def test_real_parent_stream_exposes_nested_migration_events(tmp_path: Path) -> N
 
     from refinery_ai.migrations.runner import MigrationRunner
     from refinery_ai.models import ExecutionType, VerificationResult
+    from refinery_ai.monitor.journals import JournalCatalog
+    from refinery_ai.telemetry import record_llm_usage
 
     store = setup_run(tmp_path)
 
     class Recipes:
         def run(self, snapshot, step, **kwargs):
+            record_llm_usage({"input_tokens": 8, "output_tokens": 3})
             return VerificationResult(command=["recipe"], exit_code=0, duration_seconds=0)
 
     runner = MigrationRunner(
@@ -55,6 +58,10 @@ def test_real_parent_stream_exposes_nested_migration_events(tmp_path: Path) -> N
         event.get("phase") == "execute_recipe" and event.get("lifecycle") == "completed"
         for event in custom
     )
+
+    run = JournalCatalog(tmp_path, Path(".refinery")).list_runs()[0]
+    assert (run.input_tokens, run.output_tokens) == (16, 6)
+    assert any(event.get("lifecycle") == "usage" for event in custom)
 
 
 def test_long_preview_has_no_durable_side_effects(tmp_path: Path) -> None:

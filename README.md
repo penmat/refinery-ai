@@ -777,8 +777,11 @@ checkpoints and activity. Child migrations link back to their parent profile.
 Older journals without parent identity remain standalone. New runs save their
 graph definition; older runs explicitly show the current definition as a fallback.
 Open operations have **unconfirmed** liveness unless a completion is recorded.
-Elapsed wall time is shown for recorded terminal runs. Token usage and estimated
-cost are currently **Unavailable**; OTLP counters are not a local usage history.
+The timing card shows the span covered by recorded events until the run finishes.
+Input and output token counts appear as supported model calls report usage, including
+usage recorded by child migrations. No telemetry collector is required. Older
+journals and backends that do not report usage show **Unavailable**. Estimated cost
+is not recorded.
 History lives with the repository and is removed if its state directory is deleted.
 
 Frontend development: `cd web/monitor`, `npm ci`, `npm test -- --run`,

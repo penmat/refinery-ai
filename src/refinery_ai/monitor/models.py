@@ -33,9 +33,11 @@ class MonitorEvent(BaseModel):
     event_id: str
     execution_id: str
     phase: str
-    lifecycle: Literal["started", "completed", "failed", "cancelled", "interrupted"]
+    lifecycle: Literal["started", "completed", "failed", "cancelled", "interrupted", "usage"]
     generation: int = 0
     outcome: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
     duration_seconds: float | None = None
     parent_run_id: str | None = None
     parent_execution_id: str | None = None
@@ -60,6 +62,8 @@ class RunSummary(BaseModel):
     last_seen: str | None = None
     event_count: int = 0
     verified_recipes: int = 0
+    input_tokens: int | None = None
+    output_tokens: int | None = None
     diagnostics: list[str] = Field(default_factory=list)
 
 

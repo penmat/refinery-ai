@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Lock
 from typing import Literal
 from uuid import uuid4
 
@@ -36,6 +37,32 @@ def parent_invocation(value: InvocationContext) -> Iterator[None]:
         current_invocation.reset(token)
 
 
+_usage_sink: ContextVar[Callable[[int | None, int | None], object] | None] = ContextVar(
+    "monitor_usage_sink", default=None
+)
+
+
+@contextmanager
+def capture_usage(sink: Callable[[int | None, int | None], object]) -> Iterator[None]:
+    lock = Lock()
+
+    def write(input_tokens: int | None, output_tokens: int | None) -> None:
+        with lock:
+            sink(input_tokens, output_tokens)
+
+    token = _usage_sink.set(write)
+    try:
+        yield
+    finally:
+        _usage_sink.reset(token)
+
+
+def journal_usage(input_tokens: int | None, output_tokens: int | None) -> None:
+    sink = _usage_sink.get()
+    if sink is not None and (input_tokens is not None or output_tokens is not None):
+        sink(input_tokens, output_tokens)
+
+
 class ProfileReporter:
     def __init__(self, state_root: Path, run_id: str, profile: str) -> None:
         self.run_id = run_id
@@ -54,10 +81,12 @@ class ProfileReporter:
     def emit(
         self,
         phase: str,
-        lifecycle: Literal["started", "completed", "failed", "cancelled", "interrupted"],
+        lifecycle: Literal["started", "completed", "failed", "cancelled", "interrupted", "usage"],
         execution_id: str,
         *,
         outcome: str | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
         duration_seconds: float | None = None,
         child_run_id: str | None = None,
     ) -> MonitorEvent:
@@ -72,6 +101,8 @@ class ProfileReporter:
             generation=self.generation,
             profile=self.profile,
             outcome=outcome,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             duration_seconds=duration_seconds,
         )
         self.output.write(event.model_dump_json() + "\n")
