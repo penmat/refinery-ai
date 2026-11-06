@@ -142,10 +142,7 @@ class AiRepairAgent:
         }
         safety_error = _validate_repair_safety(
             self._last_replacements,
-            {
-                repository / replacement.path: replacement.content
-                for replacement in proposal.files
-            },
+            {repository / replacement.path: replacement.content for replacement in proposal.files},
         )
         if safety_error:
             self._last_replacements.clear()
@@ -155,10 +152,7 @@ class AiRepairAgent:
         dependency_error = _validate_new_maven_coordinates(
             repository,
             self._last_replacements,
-            {
-                repository / replacement.path: replacement.content
-                for replacement in proposal.files
-            },
+            {repository / replacement.path: replacement.content for replacement in proposal.files},
         )
         if dependency_error:
             self.rollback_last()
@@ -261,9 +255,7 @@ def _validate_new_maven_coordinates(
     return None
 
 
-def _validate_repair_safety(
-    originals: dict[Path, str], proposals: dict[Path, str]
-) -> str | None:
+def _validate_repair_safety(originals: dict[Path, str], proposals: dict[Path, str]) -> str | None:
     """Reject build hooks that mutate checked-in source during verification."""
 
     for path, proposed in proposals.items():
@@ -333,9 +325,7 @@ def _repair_file_context(
     if len(content) <= limit or relative.suffix.lower() not in {".yaml", ".yml"}:
         return content[:limit]
     diagnostic = f"{failure.stdout}\n{failure.stderr}"
-    schema_names = sorted(
-        set(re.findall(r"([A-Z][A-Za-z0-9]+)RestControllerTests", diagnostic))
-    )
+    schema_names = sorted(set(re.findall(r"([A-Z][A-Za-z0-9]+)RestControllerTests", diagnostic)))
     has_relevant_schema = any(
         re.search(rf"(?m)^    {re.escape(schema)}:\s*$", content) is not None
         for schema in schema_names

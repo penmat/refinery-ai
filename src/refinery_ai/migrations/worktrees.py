@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from refinery_ai.logging import get_logger, safe_command
+from refinery_ai.migrations.run_store import atomic_json
 from refinery_ai.models import RecipeRecommendation, VerificationResult
 
 logger = get_logger(__name__)
@@ -37,6 +38,7 @@ class GitWorktreeManager:
         run_id: str,
         plan_id: str,
     ) -> None:
+        self.generation = 0
         self.repository = repository.expanduser().resolve()
         self.run_id = run_id
         self.plan_id = plan_id
@@ -64,7 +66,9 @@ class GitWorktreeManager:
 
     def create_step(self, index: int, base_revision: str) -> StepWorkspace:
         stem = f"step-{index:03d}"
-        path = self.worktree_root / stem
+        path = self.worktree_root / (
+            stem + (f"-attempt-{self.generation}" if self.generation else "")
+        )
         artifacts = self.artifact_root / stem
         artifacts.mkdir(parents=True, exist_ok=False)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -74,7 +78,9 @@ class GitWorktreeManager:
     def create_baseline(self, base_revision: str) -> StepWorkspace:
         """Create a disposable checkout so baseline tests cannot dirty the source checkout."""
 
-        path = self.worktree_root / "baseline"
+        path = self.worktree_root / (
+            "baseline" + (f"-attempt-{self.generation}" if self.generation else "")
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
         self._git(self.repository, "worktree", "add", "--detach", str(path), base_revision)
         return StepWorkspace(
@@ -157,9 +163,7 @@ class GitWorktreeManager:
             f"refs/refinery/{self.run_id}/step-{index:03d}",
             revision,
         )
-        (workspace.artifact_directory / "changes.patch").write_text(
-            patch, errors="surrogateescape"
-        )
+        (workspace.artifact_directory / "changes.patch").write_text(patch, errors="surrogateescape")
         self._write_step_metadata(
             workspace,
             index,
@@ -184,9 +188,7 @@ class GitWorktreeManager:
 
         self._stage_source_changes(workspace.path)
         patch = self._git(workspace.path, "diff", "--cached", "--binary", workspace.base_revision)
-        (workspace.artifact_directory / "changes.patch").write_text(
-            patch, errors="surrogateescape"
-        )
+        (workspace.artifact_directory / "changes.patch").write_text(patch, errors="surrogateescape")
         self._write_step_metadata(
             workspace,
             index,
@@ -205,9 +207,7 @@ class GitWorktreeManager:
             "",
             "The failing worktree was removed after these diagnostics were captured.",
         ]
-        (workspace.artifact_directory / "failure-summary.md").write_text(
-            "\n".join(summary) + "\n"
-        )
+        (workspace.artifact_directory / "failure-summary.md").write_text("\n".join(summary) + "\n")
         for report_name in ("surefire-reports", "failsafe-reports"):
             reports = workspace.path / "target" / report_name
             if reports.is_dir():
@@ -300,9 +300,13 @@ class GitWorktreeManager:
         for entry in entries:
             status = entry[:2]
             path = entry[3:]
-            if status == "??" and path.startswith(
-                (".refinery/", ".codegraph/", "graphify-out/")
-            ):
+            if status == "??" and self.worktree_root.is_relative_to(self.repository):
+                state_relative = (
+                    self.worktree_root.parents[1].relative_to(self.repository).as_posix()
+                )
+                if path == state_relative or path.startswith(state_relative + "/"):
+                    continue
+            if status == "??" and path.startswith((".refinery/", ".codegraph/", "graphify-out/")):
                 continue
             dirty.append(path)
         if dirty:
@@ -325,16 +329,14 @@ class GitWorktreeManager:
         }
         staged = self._git(workspace, "diff", "--cached", "--name-only")
         generated = [
-            path
-            for path in staged.splitlines()
-            if generated_parts.intersection(Path(path).parts)
+            path for path in staged.splitlines() if generated_parts.intersection(Path(path).parts)
         ]
         if generated:
             self._git(workspace, "reset", "-q", "--", *generated)
 
     @staticmethod
     def _write_json(path: Path, payload: object) -> None:
-        path.write_text(json.dumps(payload, indent=2) + "\n")
+        atomic_json(path, payload)
 
     @staticmethod
     def _write_verification(path: Path, result: VerificationResult) -> None:

@@ -1,4 +1,5 @@
 """Bootstrap an owned command, recording its group before it can mutate sources."""
+
 import json
 import os
 import sys
@@ -10,9 +11,9 @@ def main() -> None:
     descriptor = int(sys.argv[2])
     if descriptor >= 0:
         os.set_inheritable(descriptor, True)
-    temporary = record.with_suffix('.tmp')
-    with temporary.open('w') as output:
-        json.dump({'group': os.getpgrp(), 'pid': os.getpid()}, output)
+    temporary = record.with_suffix(".tmp")
+    with temporary.open("w") as output:
+        json.dump({"group": os.getpgrp(), "pid": os.getpid()}, output)
         output.flush()
         os.fsync(output.fileno())
     temporary.replace(record)
@@ -24,5 +25,5 @@ def main() -> None:
     os.execvpe(sys.argv[3], sys.argv[3:], os.environ)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

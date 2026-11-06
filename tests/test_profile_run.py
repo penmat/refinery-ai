@@ -276,3 +276,65 @@ def test_profile_runner_recovers_when_retained_sonar_evidence_is_missing(
     ).run()
 
     assert analyses == [False]
+
+
+@pytest.mark.parametrize("boundary", ["during_recipe", "after_child"])
+def test_profile_resumes_bound_migration_without_repeating_verified_recipes(
+    tmp_path: Path, boundary: str
+) -> None:
+    from test_migration_recovery import setup_run
+
+    from refinery_ai.migrations.runner import MigrationRunner
+    from refinery_ai.models import ExecutionType, VerificationResult
+
+    store = setup_run(tmp_path)
+    pinned = store.load().model_copy(update={"profile": "spring-boot-3.2-java-17"})
+    (store.root / "plan1.json").write_text(pinned.model_dump_json())
+    recipes = []
+    stop = True
+
+    class Recipes:
+        def run(self, snapshot, step, **kwargs):
+            nonlocal stop
+            recipes.append(step.recipe)
+            (snapshot.repository / "change").write_text(step.recipe)
+            if boundary == "during_recipe" and step.recipe == "second" and stop:
+                stop = False
+                raise KeyboardInterrupt
+            return VerificationResult(command=["recipe"], exit_code=0, duration_seconds=0)
+
+    migration = MigrationRunner(
+        store,
+        runners={ExecutionType.OPENREWRITE: Recipes()},
+        build_verifier=lambda *a, **kw: VerificationResult(
+            command=["test"], exit_code=0, duration_seconds=0
+        ),
+    )
+    child_results = []
+
+    def migrate(plan_id, checkpoint):
+        nonlocal stop
+        result = migration.run(plan_id, apply=True, resume_bound_run=True)
+        child_results.append(result)
+        if boundary == "after_child" and stop:
+            stop = False
+            raise KeyboardInterrupt
+        return result
+
+    reports = iter([report(tmp_path, "plan1", ["first", "second"]), report(tmp_path, "done", [])])
+    runner = ProfileRunner(
+        tmp_path,
+        load_profile("spring-boot-3.2-java-17"),
+        analyze=lambda sonar: False,
+        plan=lambda: next(reports),
+        migrate=migrate,
+    )
+    with pytest.raises(KeyboardInterrupt):
+        runner.run()
+    result = runner.run()
+    assert result.status is RunStatus.COMPLETED
+    assert recipes == (
+        ["first", "second", "second"] if boundary == "during_recipe" else ["first", "second"]
+    )
+    if boundary == "after_child":
+        assert child_results[0] == child_results[1]

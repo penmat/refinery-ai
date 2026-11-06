@@ -2,21 +2,15 @@
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Callable
-from pathlib import Path
-from uuid import uuid4
 
 from refinery_ai.jdks import (
     JdkResolver,
-    baseline_java_candidates,
-    project_runtime_java,
-    recipe_target_java,
 )
-from refinery_ai.migrations.execution_state import MigrationPolicy
 from refinery_ai.migrations.contracts import MigrationTypeRunner
-from refinery_ai.migrations.deterministic_repair import springdoc_repair_applicable
+from refinery_ai.migrations.events import MigrationEvent
+from refinery_ai.migrations.execution_state import MigrationPolicy
 from refinery_ai.migrations.maven_property import (
     SET_SPRING_BOOT_VERSION_PREFIX,
     MavenPropertyMigrationRunner,
@@ -25,7 +19,6 @@ from refinery_ai.migrations.openrewrite import OpenRewriteMigrationRunner
 from refinery_ai.migrations.repair import (
     MigrationRepairer,
     MigrationRepairStage,
-    TransactionalMigrationRepairer,
 )
 from refinery_ai.migrations.spring_properties import (
     DEFER_DATASOURCE_INITIALIZATION_RECIPE,
@@ -40,12 +33,9 @@ from refinery_ai.models import (
     DiscoverySnapshot,
     ExecutionType,
     MigrationRun,
-    RunStatus,
-    StepResult,
     VerificationResult,
 )
 from refinery_ai.planning_artifacts import MigrationPlanStore
-from refinery_ai.telemetry import observe_llm
 from refinery_ai.verification import verification_command, verify
 
 
@@ -121,7 +111,7 @@ class MigrationRunner:
         repair_stages: tuple[MigrationRepairStage, ...] | None = None,
         jdk_resolver: JdkResolver | None = None,
         policy: MigrationPolicy | None = None,
-        event_observer: Callable | None = None,
+        event_observer: Callable[[MigrationEvent], None] | None = None,
     ) -> None:
         self.event_observer = event_observer
         self.policy = policy
@@ -153,15 +143,25 @@ class MigrationRunner:
         expected_profile: str | None = None,
         trusted_baseline_revision: str | None = None,
         trusted_baseline_java: int | None = None,
+        resume_run_id: str | None = None,
+        resume_bound_run: bool = False,
     ) -> MigrationRun:
         from refinery_ai.migrations.execution_state import MigrationRequest
         from refinery_ai.workflows.migration import run_migration_graph
 
-        return run_migration_graph(self, MigrationRequest(
-            plan_id=plan_id, apply=apply, publish=publish, expected_profile=expected_profile,
-            trusted_baseline_revision=trusted_baseline_revision,
-            trusted_baseline_java=trusted_baseline_java,
-        ))
+        return run_migration_graph(
+            self,
+            MigrationRequest(
+                plan_id=plan_id,
+                apply=apply,
+                publish=publish,
+                expected_profile=expected_profile,
+                trusted_baseline_revision=trusted_baseline_revision,
+                trusted_baseline_java=trusted_baseline_java,
+                resume_run_id=resume_run_id,
+                resume_bound_run=resume_bound_run,
+            ),
+        )
 
     def _jdk_environment(self, major: int | None) -> dict[str, str] | None:
         if self.jdk_resolver is None:

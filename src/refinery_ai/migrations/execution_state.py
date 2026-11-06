@@ -1,4 +1,5 @@
 """Versioned values shared by migration execution, persistence and recovery."""
+
 from __future__ import annotations
 
 import hashlib
@@ -8,16 +9,25 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field
 
-from refinery_ai.models import MigrationRun, PersistedMigrationPlan, RecipeRecommendation, StepResult, VerificationResult
+from refinery_ai.models import (
+    MigrationRun,
+    PersistedMigrationPlan,
+    RecipeRecommendation,
+    StepResult,
+    VerificationResult,
+)
 
 
 class MigrationPolicy(BaseModel):
-    repair_mode: str = 'disabled'
-    repair_backend: str = 'internal'
+    repair_mode: str = "disabled"
+    repair_backend: str = "internal"
     repair_model: str | None = None
     coding_agent_model: str | None = None
     coding_agent_provider: str | None = None
-    pi_executable: str = 'pi'
+    pi_executable: str = "pi"
+    ollama_base_url: str | None = None
+    max_repair_attempts: int = 3
+    max_deterministic_repair_attempts: int = 4
     stages: list[tuple[str, int, bool]] = Field(default_factory=list)
     timeout: int = 900
     output_limit: int = 20_000
@@ -44,10 +54,12 @@ class RunManifest(BaseModel):
     policy: MigrationPolicy
     publish: bool
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def plan_digest(self) -> str:
-        return hashlib.sha256(json.dumps(self.plan.model_dump(mode='json'), sort_keys=True).encode()).hexdigest()
+        return hashlib.sha256(
+            json.dumps(self.plan.model_dump(mode="json"), sort_keys=True).encode()
+        ).hexdigest()
 
 
 class BaselineReceipt(BaseModel):
@@ -68,7 +80,7 @@ class StepReceipt(BaseModel):
     checkpoint: str
     generation: int
     java: int | None
-    status: Literal['completed'] = 'completed'
+    status: Literal["completed"] = "completed"
     execution: VerificationResult
     verification: VerificationResult
     workspace: Path
@@ -99,6 +111,7 @@ class WorkspaceState(BaseModel):
 
 
 class MigrationExecutionState(BaseModel):
+    schema_version: Literal[1] = 1
     plan: PersistedMigrationPlan
     run_id: str
     apply: bool
@@ -112,7 +125,7 @@ class MigrationExecutionState(BaseModel):
     baseline_verification: VerificationResult | None = None
     baseline_artifacts: Path | None = None
     results: list[StepResult] = Field(default_factory=list)
-    status: str = 'completed'
+    status: str = "completed"
     workspace: WorkspaceState | None = None
     execution: VerificationResult | None = None
     build: VerificationResult | None = None
@@ -122,5 +135,5 @@ class MigrationExecutionState(BaseModel):
     attempt: int = 0
     pending: bool = False
     outcome: str | None = None
-    failure_reason: str = ''
-    failure_message: str = ''
+    failure_reason: str = ""
+    failure_message: str = ""

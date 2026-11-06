@@ -10,7 +10,11 @@ from typing import Annotated, Literal
 
 import typer
 
-from refinery_ai.agents.repair_backend import build_repair_stages, validate_repair_policy
+from refinery_ai.agents.repair_backend import (
+    build_repair_stages,
+    migration_policy,
+    validate_repair_policy,
+)
 from refinery_ai.assessment.comparison import compare
 from refinery_ai.assessment.dependency_artifacts import write_dependency_artifact
 from refinery_ai.assessment.engine import AssessmentEngine
@@ -667,6 +671,7 @@ def plan(
 
 @app.command()
 def migrate(
+    ctx: typer.Context,
     repository: Annotated[
         Path, typer.Argument(exists=True, file_okay=False, help="Java repository to migrate")
     ] = Path("."),
@@ -718,6 +723,12 @@ def migrate(
     pi_executable: Annotated[
         str | None, typer.Option("--pi-executable", help="Installed pi executable name or path")
     ] = None,
+    resume_run: Annotated[
+        str | None,
+        typer.Option(
+            "--resume-run", help="Resume an interrupted apply run from its last verified recipe"
+        ),
+    ] = None,
 ) -> None:
     """Execute a persisted planner handoff through type-specific migration runners."""
 
@@ -730,6 +741,47 @@ def migrate(
         settings, repair_backend, coding_agent_model, coding_agent_provider, pi_executable
     )
     root = repository.expanduser().resolve()
+    if resume_run is not None:
+        from refinery_ai.migrations.run_store import MigrationRunStore
+
+        try:
+            manifest = MigrationRunStore(root, settings.state_directory, resume_run).load_manifest()
+            if plan_id is not None and plan_id != manifest.plan.plan_id:
+                raise ValueError("Resume plan conflicts with pinned plan")
+            if profile_name is not None and profile_name != manifest.plan.profile:
+                raise ValueError("Resume profile conflicts with pinned profile")
+            if (
+                getattr(ctx.get_parameter_source("apply_result"), "name", None) == "COMMANDLINE"
+                and apply_result != manifest.publish
+            ):
+                raise ValueError("Publication option conflicts with recorded intent")
+            explicit = settings.model_fields_set.copy()
+            policy = manifest.policy
+            values = {
+                "repair_mode": RepairMode(policy.repair_mode),
+                "repair_backend": RepairBackend(policy.repair_backend),
+                "repair_model": policy.repair_model,
+                "coding_agent_model": policy.coding_agent_model,
+                "coding_agent_provider": policy.coding_agent_provider,
+                "pi_executable": policy.pi_executable,
+                "ollama_base_url": policy.ollama_base_url,
+                "max_repair_attempts": policy.max_repair_attempts,
+                "max_deterministic_repair_attempts": policy.max_deterministic_repair_attempts,
+                "command_timeout_seconds": policy.timeout,
+                "max_output_characters": policy.output_limit,
+            }
+            for field, value in values.items():
+                if value is None and field == "repair_model":
+                    continue
+                if field in explicit and getattr(settings, field) != value:
+                    raise ValueError(f"Configured {field} conflicts with recorded policy")
+                setattr(settings, field, value)
+            apply = True
+            apply_result = manifest.publish
+            plan_id = manifest.plan.plan_id
+        except (ValueError, OSError) as error:
+            raise typer.BadParameter(str(error)) from error
+
     log_path = (
         root
         / settings.state_directory
@@ -745,11 +797,13 @@ def migrate(
         progress=None if json_output else typer.echo,
         repair_stages=repair_stages,
         jdk_resolver=JdkResolver(),
+        policy=migration_policy(settings),
     ).run(
         plan_id,
         apply=apply,
         publish=apply_result,
         expected_profile=profile_name,
+        resume_run_id=resume_run,
     )
     get_logger(__name__).debug(
         "Migration result:\n%s", json.dumps(result.model_dump(mode="json"), indent=2)
@@ -906,6 +960,7 @@ def run(
                 progress=typer.echo,
                 repair_stages=repair_stages,
                 jdk_resolver=jdk_resolver,
+                policy=migration_policy(settings),
             ).run(
                 plan_id,
                 apply=True,
@@ -913,6 +968,7 @@ def run(
                 expected_profile=profile.name,
                 trusted_baseline_revision=checkpoint.revision if checkpoint else None,
                 trusted_baseline_java=checkpoint.java if checkpoint else None,
+                resume_bound_run=True,
             )
 
         result = ProfileRunner(
