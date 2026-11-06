@@ -44,6 +44,7 @@ from refinery_ai.models import (
     RunReport,
     RunStatus,
 )
+from refinery_ai.monitor.cli import monitor
 from refinery_ai.planning_artifacts import MigrationPlanStore
 from refinery_ai.profile_run import ProfileRunner, VerifiedCheckpoint
 from refinery_ai.profiles import load_profile
@@ -53,6 +54,7 @@ from refinery_ai.telemetry import configure_langsmith, configure_telemetry
 from refinery_ai.tools import RepositoryEvidenceTools
 
 app = typer.Typer(help="Safe, auditable Java modernization.", no_args_is_help=True)
+app.command("monitor")(monitor)
 assessment_app = typer.Typer(help="Inspect and compare saved assessments.", no_args_is_help=True)
 app.add_typer(assessment_app, name="assessment")
 

@@ -726,3 +726,35 @@ pi through the same repair contracts, worktree verification, and checkpoint boun
 ## License
 
 Apache-2.0
+
+
+### Monitor workflow runs
+
+```sh
+refinery monitor
+refinery monitor --repository /path/to/project --port 8765 --no-browser
+```
+
+The command serves a read-only dashboard at `http://127.0.0.1:8765` and opens your
+browser unless `--no-browser` is supplied. It reads the repository's configured
+state directory (normally `.refinery`) and discovers new profile and migration
+runs automatically. No LangSmith account, model credentials, Node installation,
+or external dashboard service is required. Stop the monitor with Ctrl-C; workers
+continue independently.
+
+Select a saved run to inspect its graph, individual node visits, recipe
+checkpoints and activity. Child migrations link back to their parent profile.
+Older journals without parent identity remain standalone. New runs save their
+graph definition; older runs explicitly show the current definition as a fallback.
+Open operations have **unconfirmed** liveness unless a completion is recorded.
+Elapsed wall time is shown for recorded terminal runs. Token usage and estimated
+cost are currently **Unavailable**; OTLP counters are not a local usage history.
+History lives with the repository and is removed if its state directory is deleted.
+
+Frontend development: `cd web/monitor`, `npm ci`, `npm test -- --run`,
+`npm run build`. The build writes compiled assets into
+`src/refinery_ai/monitor/static`; commit these assets with source changes so wheels
+and source distributions can serve the dashboard without building JavaScript.
+For UI iteration run `npm run dev` alongside the monitor server. The Vite proxy
+uses port 8765; access the UI through Vite on loopback and keep the production
+server's same-origin protections enabled.

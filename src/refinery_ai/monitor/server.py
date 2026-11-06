@@ -34,7 +34,10 @@ async def stream_events(
         try:
             batch = await asyncio.to_thread(tail.read_batch)
         except (OSError, ValueError):
-            yield 'event: diagnostic\ndata: {"message":"Journal changed or is invalid; reload this run"}\n\n'
+            yield (
+                'event: diagnostic\ndata: '
+                '{"message":"Journal changed or is invalid; reload this run"}\n\n'
+            )
             return
         for event in batch:
             if event.sequence > after:
@@ -43,7 +46,10 @@ async def stream_events(
             await asyncio.sleep(0)
             continue
         if tail.sequence < after:
-            yield 'event: diagnostic\ndata: {"message":"Cursor exceeds journal; reload this run"}\n\n'
+            yield (
+                'event: diagnostic\ndata: '
+                '{"message":"Cursor exceeds journal; reload this run"}\n\n'
+            )
             return
         if time.monotonic() - heartbeat >= 10:
             yield ": heartbeat\n\n"
