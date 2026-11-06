@@ -90,3 +90,37 @@ class RecoveryPoint(BaseModel):
     java: int | None = None
     generation: int = 1
     result: MigrationRun | None = None
+
+
+class WorkspaceState(BaseModel):
+    path: Path
+    artifact_directory: Path
+    base_revision: str
+
+
+class MigrationExecutionState(BaseModel):
+    plan: PersistedMigrationPlan
+    run_id: str
+    apply: bool
+    publish: bool
+    generation: int = 0
+    index: int = 1
+    current_java: int | None = None
+    starting_revision: str | None = None
+    current_revision: str | None = None
+    published_revision: str | None = None
+    baseline_verification: VerificationResult | None = None
+    baseline_artifacts: Path | None = None
+    results: list[StepResult] = Field(default_factory=list)
+    status: str = 'completed'
+    workspace: WorkspaceState | None = None
+    execution: VerificationResult | None = None
+    build: VerificationResult | None = None
+    candidate: VerificationResult | None = None
+    repairs: list[VerificationResult] = Field(default_factory=list)
+    stage_index: int = 0
+    attempt: int = 0
+    pending: bool = False
+    outcome: str | None = None
+    failure_reason: str = ''
+    failure_message: str = ''
