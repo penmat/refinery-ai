@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from refinery_ai.agents.ai_repair import AiRepairAgent
+from refinery_ai.agents.cli_repair import CliRepairAgent
 from refinery_ai.agents.coding_agents import (
     ClaudeRepairAgent,
     CodexRepairAgent,
@@ -29,11 +32,11 @@ def validate_repair_policy(settings: Settings) -> None:
         )
     if settings.repair_mode is RepairMode.DISABLED:
         return
-    if settings.repair_backend in (RepairBackend.CODEX, RepairBackend.CLAUDE):
-        if settings.coding_agent_provider is not None:
-            raise ValueError(
-                "Configure the provider in the selected agent; omit coding-agent-provider"
-            )
+    if (
+        settings.repair_backend in (RepairBackend.CODEX, RepairBackend.CLAUDE)
+        and settings.coding_agent_provider is not None
+    ):
+        raise ValueError("Configure the provider in the selected agent; omit coding-agent-provider")
     if settings.repair_backend is RepairBackend.OPENCODE:
         opencode_model(settings.coding_agent_provider, settings.coding_agent_model)
 
@@ -51,12 +54,13 @@ def build_repair_stages(settings: Settings) -> tuple[MigrationRepairStage, ...]:
     if settings.repair_mode is RepairMode.DISABLED:
         return stages
     if settings.repair_backend is not RepairBackend.INTERNAL:
-        adapter = {
+        adapters: dict[RepairBackend, Callable[[Settings], CliRepairAgent]] = {
             RepairBackend.PI: PiRepairAgent,
             RepairBackend.OPENCODE: OpenCodeRepairAgent,
             RepairBackend.CODEX: CodexRepairAgent,
             RepairBackend.CLAUDE: ClaudeRepairAgent,
-        }[settings.repair_backend]
+        }
+        adapter = adapters[settings.repair_backend]
         model_stage = MigrationRepairStage(
             settings.repair_backend.value,
             adapter(settings),

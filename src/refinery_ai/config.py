@@ -24,8 +24,14 @@ class Settings(BaseSettings):
     coding_agent_model: str | None = None
     coding_agent_provider: str | None = None
 
-    @field_validator("pi_executable", "opencode_executable", "codex_executable",
-                     "claude_executable", "coding_agent_model", "coding_agent_provider")
+    @field_validator(
+        "pi_executable",
+        "opencode_executable",
+        "codex_executable",
+        "claude_executable",
+        "coding_agent_model",
+        "coding_agent_provider",
+    )
     @classmethod
     def nonblank_agent_setting(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():

@@ -134,3 +134,20 @@ supported crash windows rather than claiming exactly-once external execution.
 
 Library callers injecting repair adapters must supply explicit `MigrationPolicy` metadata
 to enable resume. Ordinary execution remains available without that metadata.
+
+## Coding-agent invocation policy
+
+Repair backends include `internal`, `pi`, `opencode`, `codex`, and `claude`.
+New apply runs record `coding_agent_permissions=managed`, the executable paths,
+and model/provider overrides in their manifest. Use
+`--coding-agent-permissions inherit` to leave permission decisions to the installed
+agent; CLI, environment, and corpus children all support this setting.
+
+Resuming a manifest created before permission settings existed uses `inherit`,
+matching its historical behavior. Omitted options inherit the recorded policy;
+explicit conflicting permission or executable settings are rejected. Externally
+configured defaults, credentials, and agent versions remain the operator's
+responsibility; a recorded invocation is not a snapshot of external configuration.
+
+Each interrupted recipe starts fresh model calls; no coding-agent session is
+continued. See the README for each backend's managed flags and model syntax.

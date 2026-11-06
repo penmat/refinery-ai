@@ -116,7 +116,9 @@ class CliRepairAgent(ABC):
         self, repository: Path, step: RecipeRecommendation, failure: VerificationResult
     ) -> VerificationResult:
         if self._snapshot is not None:
-            return repair_result(1, f"Previous {self.label} repair must be accepted or rolled back first")
+            return repair_result(
+                1, f"Previous {self.label} repair must be accepted or rolled back first"
+            )
         command = self.command()
         prompt = (
             "Repair the failed Java migration in this repository. Inspect any relevant files "

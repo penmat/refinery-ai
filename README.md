@@ -8,7 +8,7 @@ Refinery AI is an early-stage, safe-by-default modernization factory for Java ap
 
 Version **0.1.0** is a runnable architectural foundation. Discovery, CodeGraph indexing, catalog-constrained planning, safety gates, OpenRewrite execution, build verification, repair budgets, structured model outputs, and run reports are implemented. Repository investigation uses a read-only Harness FileSystem/RepoContext pilot and a safe assessment Shell profile behind the `RepositoryEnvironment` seam.
 
-AI repair is optional and supports two backends. The default `internal` backend sends the build failure and a narrow allowlist of relevant files to a model, which returns typed file replacements. The `pi` backend runs an installed coding agent in the migration worktree so it can investigate across files and run build commands. Both receive a bounded number of attempts. Internal repair rejects out-of-scope or unsafe proposals. Refinery verifies candidates, rolls back non-improving edits, and checkpoints only green migrations.
+AI repair is optional and supports five backends. The default `internal` backend sends the build failure and a narrow allowlist of relevant files to a model, which returns typed file replacements. The `pi`, `opencode`, `codex`, and `claude` backends run an installed coding agent in the migration worktree so it can investigate across files and run build commands. All receive a bounded number of attempts. Internal repair rejects out-of-scope or unsafe proposals. Refinery verifies candidates, rolls back non-improving edits, and checkpoints only green migrations.
 
 ## Architecture
 
@@ -38,7 +38,7 @@ AI repair is optional and supports two backends. The default `internal` backend 
                 └───────────────────┘
 ```
 
-The factory owns migration control flow, verification, acceptance, and retry limits. The internal backend validates scoped file replacements; the optional pi backend edits the isolated migration worktree directly. LangGraph/LangChain model calls return validated Pydantic structures at bounded reasoning points.
+The factory owns migration control flow, verification, acceptance, and retry limits. The internal backend validates scoped file replacements; the external coding-agent backends edit the isolated migration worktree directly. LangGraph/LangChain model calls return validated Pydantic structures at bounded reasoning points.
 
 ## What v0.1 does
 
@@ -82,50 +82,76 @@ uv run refinery migrate /path/to/java-project --apply \
   --repair-mode configured-provider --repair-backend internal
 ```
 
-To use [pi](https://pi.dev), install and configure it separately, including its
-provider credentials and desired model. Confirm `pi --help` and a one-shot prompt
-work before using it through Refinery. Refinery does not install agents or manage
-their credentials. The pi adapter currently requires macOS or Linux (POSIX process
-groups); the internal backend remains available on other platforms.
+External agents must already be installed, authenticated, and configured. Confirm
+that a one-shot invocation works outside Refinery first. Refinery does not install
+agents or manage credentials. External adapters require macOS or Linux (POSIX
+process groups).
 
 ```bash
-# Inherit pi's configured provider and model.
+# Select any installed agent; inherit its configured model.
 uv run refinery migrate /path/to/java-project --apply \
   --repair-mode configured-provider --repair-backend pi
+uv run refinery migrate /path/to/java-project --apply \
+  --repair-mode configured-provider --repair-backend opencode
+uv run refinery migrate /path/to/java-project --apply \
+  --repair-mode configured-provider --repair-backend codex
+uv run refinery migrate /path/to/java-project --apply \
+  --repair-mode configured-provider --repair-backend claude
 
-# Override provider/model for this invocation without changing pi's defaults.
+# Override the model using the selected agent's model identifier.
 uv run refinery run --repository /path/to/java-project \
   --profile spring-boot-3.2-java-17 --apply \
-  --repair-mode configured-provider --repair-backend pi \
+  --repair-mode configured-provider --repair-backend opencode \
   --coding-agent-provider custom-provider --coding-agent-model custom-model
 
-# Corpus runs support the same backend and agent overrides.
-uv run refinery run-corpus /path/to/corpus.yaml --repair-backend pi
+# Use the agent's configured permissions instead of Refinery's managed flags.
+uv run refinery run-corpus /path/to/corpus.yaml --repair-backend codex \
+  --coding-agent-permissions inherit
 ```
 
-Provider and model values must match pi's configured providers and model IDs.
-Use `--pi-executable /absolute/path/to/pi` if it is not on `PATH`.
-All four agent options are available on `migrate`, profile `run`, and `run-corpus`.
-Equivalent environment settings are `REFINERY_REPAIR_BACKEND`,
-`REFINERY_CODING_AGENT_PROVIDER`, `REFINERY_CODING_AGENT_MODEL`, and
-`REFINERY_PI_EXECUTABLE`. CLI overrides take precedence. The existing
-`REFINERY_REPAIR_MODEL` applies only to internal repair; leaving the external-agent
-model unset preserves pi's default. Corpus runs explicitly pass the selected agent
-configuration to their child profile runs.
+All agent options are available on `migrate`, profile `run`, and `run-corpus`.
+Use `--pi-executable`, `--opencode-executable`, `--codex-executable`, or
+`--claude-executable` for an installed binary outside `PATH`. Equivalent environment
+settings are `REFINERY_REPAIR_BACKEND`, `REFINERY_CODING_AGENT_MODEL`,
+`REFINERY_CODING_AGENT_PROVIDER`, `REFINERY_CODING_AGENT_PERMISSIONS`, and
+`REFINERY_<AGENT>_EXECUTABLE` (for example `REFINERY_CODEX_EXECUTABLE`). CLI overrides
+take precedence. Corpus runs explicitly forward these settings to child profile
+runs. `REFINERY_REPAIR_MODEL` applies only to internal repair.
 
-For a local model, configure the provider/endpoint in pi and use
-`--repair-mode configured-provider --repair-backend pi`. Refinery's strict `local`
-policy is only supported by internal repair, which can validate a loopback
-endpoint. Refinery cannot establish pi's effective endpoint from a model name, so
-`local` with `pi` is rejected rather than weakening that policy. Planner model
-configuration remains independent of repair backend selection.
+Model IDs must match the selected agent. Leaving `--coding-agent-model` unset
+preserves its configured default. Pi accepts separate provider/model overrides;
+OpenCode accepts `provider/model` or combines the separate overrides into that
+format. Codex and Claude accept a model override and inherit provider configuration
+from their own installation; `--coding-agent-provider` is rejected for those agents.
 
-Pi receives migration context and build diagnostics on stdin and runs once per
-repair attempt, with no saved session. It inherits its installed configuration and
-credentials and may read the whole project and execute commands. A Git worktree
-isolates candidate changes for verification; it does not sandbox command or network
-access. Pi's project trust behavior is retained; Refinery does not automatically
-approve project-local extensions.
+`--coding-agent-permissions managed` is the default for new runs:
+
+| Backend | Refinery's managed permissions |
+| --- | --- |
+| `pi` | Existing non-interactive behavior; no separate permission override |
+| `opencode` | `--auto`, retaining explicit configured denials |
+| `codex` | `--ask-for-approval never` and `--sandbox workspace-write` |
+| `claude` | `--permission-mode dontAsk` and allowed `Read,Edit,Write,Bash,Glob,Grep` tools |
+
+`inherit` omits these permission/approval/sandbox flags while keeping one-shot
+execution and model overrides. It does not provide an interactive approval bridge.
+Permission denials remain failed attempts. Refinery does not use blanket sandbox
+or permission bypass flags. Codex's workspace sandbox can restrict dependency
+downloads and writes outside the project; configure the agent/environment for
+those builds as needed. These flags require agent versions supporting them;
+unsupported flags fail explicitly instead of falling back to broader permissions.
+
+External agents receive migration context and build diagnostics on stdin and
+start a fresh session per attempt. Pi, Codex, and Claude disable session persistence;
+OpenCode may retain its normal local session history, but Refinery never resumes it.
+Agents may read the whole project and execute commands. Git worktrees isolate
+candidate changes for verification; they do not sandbox arbitrary commands or
+network access. Existing agent/project trust rules remain effective.
+
+For local models, configure a supported local provider in the agent and use
+`--repair-mode configured-provider`. Refinery cannot establish an external agent's
+effective endpoint, so strict `--repair-mode local` remains available only for
+internal repair. Planner model configuration remains independent.
 
 Each attempt uses `REFINERY_COMMAND_TIMEOUT_SECONDS` (default 900) and bounded
 output capture. Nonzero exit, missing executable, timeout, unexpected staging or
@@ -134,7 +160,7 @@ reverted. Timeouts/cancellation terminate the agent process group before rollbac
 Refinery independently verifies candidates and reverts ones that do not improve
 verification. It preserves prior recipe changes and accepted repairs, including
 when the agent adds or deletes files. Only green migration checkpoints can be
-published. Selecting pi never silently falls back to internal repair.
+published. Selecting an external agent never silently falls back to internal repair.
 
 ## Requirements
 

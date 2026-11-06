@@ -23,7 +23,9 @@ class OpenCodeRepairAgent(CliRepairAgent):
         command = [self.settings.opencode_executable, "run"]
         if self.settings.coding_agent_permissions is CodingAgentPermissions.MANAGED:
             command.append("--auto")
-        model = opencode_model(self.settings.coding_agent_provider, self.settings.coding_agent_model)
+        model = opencode_model(
+            self.settings.coding_agent_provider, self.settings.coding_agent_model
+        )
         if model is not None:
             command.extend(["--model", model])
         return command
@@ -34,7 +36,9 @@ class CodexRepairAgent(CliRepairAgent):
 
     def command(self) -> list[str]:
         if self.settings.coding_agent_provider is not None:
-            raise ValueError("Codex provider must be configured in Codex; omit coding-agent-provider")
+            raise ValueError(
+                "Codex provider must be configured in Codex; omit coding-agent-provider"
+            )
         command = [self.settings.codex_executable]
         managed = self.settings.coding_agent_permissions is CodingAgentPermissions.MANAGED
         if managed:
@@ -52,11 +56,14 @@ class ClaudeRepairAgent(CliRepairAgent):
 
     def command(self) -> list[str]:
         if self.settings.coding_agent_provider is not None:
-            raise ValueError("Claude provider must be configured in Claude; omit coding-agent-provider")
+            raise ValueError(
+                "Claude provider must be configured in Claude; omit coding-agent-provider"
+            )
         command = [self.settings.claude_executable, "--print", "--no-session-persistence"]
         if self.settings.coding_agent_permissions is CodingAgentPermissions.MANAGED:
-            command.extend(["--permission-mode", "dontAsk", "--allowedTools",
-                            "Read,Edit,Write,Bash,Glob,Grep"])
+            command.extend(
+                ["--permission-mode", "dontAsk", "--allowedTools", "Read,Edit,Write,Bash,Glob,Grep"]
+            )
         if self.settings.coding_agent_model is not None:
             command.extend(["--model", self.settings.coding_agent_model])
         return command

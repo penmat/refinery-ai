@@ -174,3 +174,17 @@ def test_corpus_cli_passes_agent_configuration(tmp_path, monkeypatch):
     assert captured[0]["coding_agent_permissions"] == "inherit"
     assert captured[0]["codex_executable"] == "/custom/codex"
     assert captured[0]["repair_backend"] == "codex"
+
+
+@pytest.mark.parametrize("backend", ["opencode", "codex", "claude"])
+@pytest.mark.parametrize("command", ["migrate", "run"])
+def test_external_local_rejected_before_artifacts(tmp_path, command, backend):
+    args = (
+        [command, str(tmp_path)]
+        if command == "migrate"
+        else [command, "--repository", str(tmp_path)]
+    )
+    result = CliRunner().invoke(app, [*args, "--repair-backend", backend, "--repair-mode", "local"])
+    assert result.exit_code == 2
+    assert "local" in result.output
+    assert not (tmp_path / ".refinery").exists()
