@@ -34,7 +34,7 @@ from refinery_ai.jdks import JdkResolver, project_runtime_java, selected_jdk
 from refinery_ai.llm import run_tool_loop
 from refinery_ai.logging import configure_logging, get_logger
 from refinery_ai.mcp import run_mcp_server
-from refinery_ai.migrations.execution_state import MigrationPolicy
+from refinery_ai.migrations.execution_state import MigrationPolicy, MigrationRequest
 from refinery_ai.migrations.run_store import MigrationRunStore
 from refinery_ai.migrations.runner import MigrationRunner
 from refinery_ai.models import (
@@ -1064,7 +1064,9 @@ def run(
             refresh_catalog_pending = False
             return report
 
-        def migrate_cycle(plan_id: str, checkpoint: VerifiedCheckpoint | None) -> MigrationRun:
+        def migration_runner(request: MigrationRequest) -> MigrationRunner:
+            plan_id = request.plan_id
+            assert plan_id is not None
             cycle_settings = settings.model_copy(deep=True)
             bound_id = MigrationRunStore.find_bound_run(root, settings.state_directory, plan_id)
             if bound_id is not None:
@@ -1084,7 +1086,10 @@ def run(
                 repair_stages=repair_stages,
                 jdk_resolver=jdk_resolver,
                 policy=migration_policy(cycle_settings),
-            ).run(
+            )
+
+        def migrate_cycle(plan_id: str, checkpoint: VerifiedCheckpoint | None) -> MigrationRun:
+            return migration_runner(MigrationRequest(plan_id=plan_id)).run(
                 plan_id,
                 apply=True,
                 publish=True,
@@ -1100,6 +1105,7 @@ def run(
             analyze=analyze_cycle,
             plan=plan_cycle,
             migrate=migrate_cycle,
+            migration_runner=migration_runner,
             progress=typer.echo,
             max_cycles=max_cycles,
             state_directory=settings.state_directory,

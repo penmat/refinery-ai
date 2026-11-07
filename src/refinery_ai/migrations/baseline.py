@@ -64,6 +64,7 @@ def prepare_run(ctx: MigrationExecutionContext, state: MigrationExecutionState) 
                 starting_revision=state.starting_revision,
                 policy=ctx.policy(),
                 publish=state.publish,
+                profile_checkpoint=ctx.profile_checkpoint,
             )
         )
         ctx.store.save_generation(0)

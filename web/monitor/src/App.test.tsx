@@ -82,3 +82,71 @@ it("ignores an old snapshot after the user switches runs", async () => {
   expect(screen.getByRole("heading", { name: "Profile B" })).toBeTruthy();
   expect(screen.getByText("3")).toBeTruthy();
 });
+
+it("lists the ordered migrations when the plan visit is opened", async () => {
+  const run: Run = {
+    run_id: "a".repeat(32),
+    profile: "Profile",
+    kind: "profile",
+    parent_run_id: null,
+    parent_execution_id: null,
+    status: "unknown",
+    first_seen: null,
+    last_seen: null,
+    event_count: 1,
+    diagnostics: [],
+  };
+  const snapshot: Snapshot = {
+    run,
+    cursor: 1,
+    diagnostics: [],
+    topology: {
+      kind: "profile",
+      version: "1",
+      historical: true,
+      nodes: [],
+      edges: [],
+    },
+    events: [
+      {
+        schema_version: 1,
+        run_id: run.run_id,
+        sequence: 1,
+        event_id: "plan",
+        execution_id: "planned",
+        phase: "plan",
+        lifecycle: "completed",
+        generation: 0,
+        timestamp: "2026-11-06T11:00:00Z",
+        migrations: [
+          {
+            recipe: "org.example.SpringFoxToSpringDoc",
+            name: "Spring Fox → Spring Doc",
+          },
+          { recipe: "org.example.UpgradeToJava17", name: "Upgrade to Java 17" },
+        ],
+      },
+    ],
+  };
+  vi.stubGlobal("EventSource", Stream);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((path: string) =>
+      Promise.resolve({
+        ok: true,
+        json: async () =>
+          path === "/api/runs" ? { runs: [run], diagnostics: [] } : snapshot,
+      }),
+    ),
+  );
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /plan completed/ }),
+  );
+  expect(screen.getByText("2 migrations planned")).toBeTruthy();
+  const items = screen.getAllByRole("listitem");
+  expect(items.map((item) => item.textContent)).toEqual([
+    "Spring Fox → Spring Docorg.example.SpringFoxToSpringDoc",
+    "Upgrade to Java 17org.example.UpgradeToJava17",
+  ]);
+});

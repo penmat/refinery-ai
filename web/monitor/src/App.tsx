@@ -409,6 +409,7 @@ export default function App() {
                       selected={selectedNode}
                       onSelect={setSelectedNode}
                       childrenByNode={childrenByNode}
+                      migrationRuns={children}
                     />
                   </div>
                   <div className="graph-footer">
@@ -478,6 +479,35 @@ export default function App() {
                           {visit.lifecycle === "started" && (
                             <p className="detail-note">
                               A start was recorded. Worker liveness is unknown.
+                            </p>
+                          )}
+                          {visit.migrations != null && (
+                            <div className="plan-migrations">
+                              <h4>
+                                {visit.migrations.length} migrations planned
+                              </h4>
+                              <ol>
+                                {visit.migrations.map((migration, index) => (
+                                  <li key={`${index}-${migration.recipe}`}>
+                                    <strong>{migration.name}</strong>
+                                    <code>{migration.recipe}</code>
+                                  </li>
+                                ))}
+                              </ol>
+                            </div>
+                          )}
+                          {visit.migration_name && (
+                            <p className="migration-progress">
+                              {visit.step != null && (
+                                <span>
+                                  Migration {visit.step}
+                                  {visit.total_steps != null
+                                    ? `/${visit.total_steps}`
+                                    : ""}{" "}
+                                  ·{" "}
+                                </span>
+                              )}
+                              {visit.migration_name}
                             </p>
                           )}
                           <dl>

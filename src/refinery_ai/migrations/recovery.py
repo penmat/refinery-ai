@@ -19,7 +19,12 @@ from refinery_ai.models import PersistedMigrationPlan, RunStatus
 
 
 def recover_migration(
-    store: MigrationRunStore, policy: MigrationPolicy, *, lease: MigrationLease
+    store: MigrationRunStore,
+    policy: MigrationPolicy,
+    *,
+    lease: MigrationLease,
+    profile_checkpoint: bool = False,
+    saved: MigrationExecutionState | None = None,
 ) -> RecoveryPoint:
     if os.name != "posix":
         raise ValueError("Safe resume requires POSIX support")
@@ -89,23 +94,29 @@ def recover_migration(
         point.revision = revision
         point.java = receipt.java
         point.next_step += 1
-    if not store.checkpoints.exists():
-        raise ValueError("Migration checkpoint store is missing")
-    if store.checkpoints.exists():
+    if saved is not None and (saved.run_id != store.run_id or saved.generation != generation):
+        saved = None
+    evidence = [saved] if saved is not None else []
+    if manifest.profile_checkpoint:
+        if not profile_checkpoint:
+            raise ValueError("Resume this migration through its profile run")
+    else:
+        if not store.checkpoints.exists():
+            raise ValueError("Migration checkpoint store is missing")
         with SqliteSaver.from_conn_string(str(store.checkpoints)) as saver:
             checkpoint = saver.get_tuple(
                 {"configurable": {"thread_id": f"{store.run_id}:{generation}"}}
             )
         if checkpoint is not None:
-            saved = checkpoint.checkpoint.get("channel_values", {}).get("data")
-            if saved is not None:
-                saved = MigrationExecutionState.model_validate(saved)
-                if saved.status == "failed":
-                    raise ValueError("Terminal migration failure cannot be resumed")
-                if len(
-                    [result for result in saved.results if result.status is RunStatus.COMPLETED]
-                ) > len(point.results):
-                    raise ValueError("A previously verified recipe receipt is missing")
+            data = checkpoint.checkpoint.get("channel_values", {}).get("data")
+            if data is not None:
+                evidence.append(MigrationExecutionState.model_validate(data))
+    for checkpoint_state in evidence:
+        if checkpoint_state.status == "failed":
+            raise ValueError("Terminal migration failure cannot be resumed")
+        completed = sum(result.status is RunStatus.COMPLETED for result in checkpoint_state.results)
+        if completed > len(point.results):
+            raise ValueError("A previously verified recipe receipt is missing")
     stored = store.load_result()
     runtime = json.loads(store.path("run.json").read_text())
     if (stored is not None and stored.status is RunStatus.FAILED) or runtime.get(

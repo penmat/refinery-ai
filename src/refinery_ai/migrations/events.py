@@ -8,13 +8,14 @@ import os
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
 from langgraph.config import get_stream_writer
 from pydantic import BaseModel
 
 from refinery_ai.migrations.execution_state import MigrationExecutionState
+from refinery_ai.monitor.models import PlannedMigration
 
 
 class MigrationEvent(BaseModel):
@@ -32,6 +33,9 @@ class MigrationEvent(BaseModel):
     generation: int
     step: int | None = None
     recipe: str | None = None
+    migration_name: str | None = None
+    total_steps: int | None = None
+    migrations: list[PlannedMigration] | None = None
     repair_stage: str | None = None
     repair_attempt: int | None = None
     java: int | None = None
@@ -62,13 +66,20 @@ def read_migration_events(path: Path) -> list[MigrationEvent]:
     return events
 
 
+if TYPE_CHECKING:
+    from refinery_ai.monitor.recording import InvocationContext
+
+
 class MigrationReporter:
     def __init__(
         self,
         path: Path | None,
         observer: Callable[[MigrationEvent], None] | None,
         stream_writer: Callable[[Any], None] | None = None,
+        *,
+        parent: InvocationContext | None = None,
     ) -> None:
+        self.parent = parent
         self.stream_writer = stream_writer
         self.observer = observer
         self.history = read_migration_events(path) if path is not None else []
@@ -109,9 +120,11 @@ class MigrationReporter:
             if 0 < state.index <= len(state.plan.steps)
             else None
         )
+        from refinery_ai.migrations.runner import migration_display_name
+        from refinery_ai.monitor.migration_details import describe_migrations
         from refinery_ai.monitor.recording import current_invocation
 
-        parent = current_invocation.get()
+        parent = self.parent or current_invocation.get()
         event = MigrationEvent(
             parent_run_id=parent.run_id if parent else None,
             parent_execution_id=parent.execution_id if parent else None,
@@ -128,6 +141,13 @@ class MigrationReporter:
             generation=state.generation,
             step=state.index if recipe is not None else None,
             recipe=recipe,
+            migration_name=migration_display_name(recipe) if recipe else None,
+            total_steps=len(state.plan.steps),
+            migrations=(
+                describe_migrations(step.recipe for step in state.plan.steps)
+                if phase in ("prepare_run", "recover_run")
+                else None
+            ),
             repair_stage=stage,
             repair_attempt=state.attempt or None,
             java=state.current_java,

@@ -59,6 +59,7 @@ class RunManifest(BaseModel):
     starting_revision: str
     policy: MigrationPolicy
     publish: bool
+    profile_checkpoint: bool = False
 
     @computed_field  # type: ignore[prop-decorator]
     @property

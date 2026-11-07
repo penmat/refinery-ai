@@ -6,11 +6,16 @@ import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
 from refinery_ai.models import MigrationRun, RunReport, RunStatus
 from refinery_ai.profiles import ModernizationProfile
+
+if TYPE_CHECKING:
+    from refinery_ai.migrations.execution_state import MigrationRequest
+    from refinery_ai.migrations.runner import MigrationRunner
 
 
 class ProfileRunState(BaseModel):
@@ -98,6 +103,7 @@ class ProfileRunner:
         analyze: Callable[[bool], bool],
         plan: Callable[[], RunReport],
         migrate: Callable[[str, VerifiedCheckpoint | None], MigrationRun],
+        migration_runner: Callable[[MigrationRequest], MigrationRunner] | None = None,
         progress: Callable[[str], None] | None = None,
         max_cycles: int = 20,
         state_directory: Path = Path(".refinery"),
@@ -107,6 +113,7 @@ class ProfileRunner:
         self.analyze = analyze
         self.plan = plan
         self.migrate = migrate
+        self.migration_runner = migration_runner
         self.progress = progress or (lambda message: None)
         self.max_cycles = max_cycles
         self.store = ProfileRunStore(self.repository, profile.name, state_directory)

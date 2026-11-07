@@ -1,3 +1,8 @@
+export interface PlannedMigration {
+  recipe: string;
+  name: string;
+}
+
 export interface MonitorEvent {
   schema_version: 1;
   run_id: string;
@@ -15,6 +20,9 @@ export interface MonitorEvent {
   duration_seconds?: number | null;
   step?: number | null;
   recipe?: string | null;
+  migration_name?: string | null;
+  total_steps?: number | null;
+  migrations?: PlannedMigration[] | null;
   repair_stage?: string | null;
   repair_attempt?: number | null;
   java?: number | null;
@@ -41,6 +49,9 @@ export interface Run {
   last_seen: string | null;
   event_count: number;
   verified_recipes?: number;
+  migration_name?: string | null;
+  step?: number | null;
+  total_steps?: number | null;
   input_tokens?: number | null;
   output_tokens?: number | null;
   diagnostics: string[];
@@ -195,3 +206,51 @@ export const duration = (seconds: number | null | undefined) =>
       ? `${seconds.toFixed(1)}s`
       : `${Math.floor(seconds / 60)}m ${Math.floor(seconds % 60)}s`;
 export const shortId = (id: string) => id.slice(0, 8);
+
+export function nodeMigrationContext(
+  state: State,
+  phase: string,
+  children: Partial<Run>[] = [],
+): { caption: string | null; name: string | null } {
+  const visit = Object.values(state.visits)
+    .filter((event) => event.phase === phase)
+    .sort((a, b) => b.sequence - a.sequence)[0];
+  if (phase === "plan" && visit?.migrations != null) {
+    const count = visit.migrations.length;
+    return {
+      caption:
+        count === 0
+          ? "No migrations planned"
+          : `${count} migration${count === 1 ? "" : "s"} planned`,
+      name: null,
+    };
+  }
+  const child =
+    phase === "migrate"
+      ? children
+          .filter(
+            (run) => visit && run.parent_execution_id === visit.execution_id,
+          )
+          .sort((a, b) =>
+            (b.last_seen ?? "").localeCompare(a.last_seen ?? ""),
+          )[0]
+      : undefined;
+  const progress = child?.migration_name ? child : visit;
+  if (progress?.migration_name) {
+    return {
+      caption:
+        progress.step != null
+          ? `Migration ${progress.step}${progress.total_steps != null ? `/${progress.total_steps}` : ""}`
+          : "Migration",
+      name: progress.migration_name,
+    };
+  }
+  if (phase === "migrate" && visit?.migrations != null) {
+    const count = visit.migrations.length;
+    return {
+      caption: `${count} migration${count === 1 ? "" : "s"}${visit.lifecycle === "started" ? " to run" : ""}`,
+      name: null,
+    };
+  }
+  return { caption: null, name: null };
+}

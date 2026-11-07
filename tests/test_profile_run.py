@@ -338,3 +338,87 @@ def test_profile_resumes_bound_migration_without_repeating_verified_recipes(
     )
     if boundary == "after_child":
         assert child_results[0] == child_results[1]
+
+
+@pytest.mark.parametrize("fault", ["recipe", "result"])
+def test_native_migration_resumes_from_verified_recipe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    from test_migration_recovery import setup_run
+
+    from refinery_ai.migrations import step_execution
+    from refinery_ai.migrations.runner import MigrationRunner
+    from refinery_ai.models import ExecutionType, VerificationResult
+    from refinery_ai.monitor.journals import JournalCatalog
+
+    store = setup_run(tmp_path)
+    plan = store.load().model_copy(update={"profile": "spring-boot-3.2-java-17"})
+    (store.root / "plan1.json").write_text(plan.model_dump_json())
+    second = plan.model_copy(
+        update={
+            "plan_id": "plan2",
+            "steps": [plan.steps[0].model_copy(update={"recipe": "third"})],
+        }
+    )
+    (store.root / "plan2.json").write_text(second.model_dump_json())
+    calls = []
+    plans = iter(
+        [
+            report(tmp_path, "plan1", ["first", "second"]),
+            report(tmp_path, "plan2", ["third"]),
+            report(tmp_path, "done", []),
+        ]
+    )
+
+    class Recipes:
+        def run(self, snapshot, step, **kwargs):
+            calls.append(step.recipe)
+            (snapshot.repository / "change").write_text(step.recipe)
+            if fault == "recipe" and calls == ["first", "second"]:
+                raise RuntimeError("interrupted recipe")
+            return VerificationResult(command=["recipe"], exit_code=0, duration_seconds=0)
+
+    def legacy(*args):
+        pytest.fail("Profile should enter the compiled child")
+
+    runner = ProfileRunner(
+        tmp_path,
+        load_profile("spring-boot-3.2-java-17"),
+        analyze=lambda _: True,
+        plan=lambda: next(plans),
+        migrate=legacy,
+        migration_runner=lambda _: MigrationRunner(
+            store,
+            runners={ExecutionType.OPENREWRITE: Recipes()},
+            build_verifier=lambda *args, **kwargs: VerificationResult(
+                command=["test"], exit_code=0, duration_seconds=0
+            ),
+        ),
+    )
+
+    if fault == "result":
+        finish_run = step_execution.finish_run
+
+        def interrupted_finish(ctx, state):
+            result = finish_run(ctx, state)
+            if result.plan_id == "plan1":
+                raise RuntimeError("interrupted result")
+            return result
+
+        monkeypatch.setattr(step_execution, "finish_run", interrupted_finish)
+
+    with pytest.raises(RuntimeError, match=f"interrupted {fault}"):
+        runner.run()
+    assert runner.run().status is RunStatus.COMPLETED
+    assert calls == (
+        ["first", "second", "second", "third"]
+        if fault == "recipe"
+        else ["first", "second", "third"]
+    )
+    assert (tmp_path / "change").read_text() == "third"
+    runs = JournalCatalog(tmp_path, Path(".refinery")).list_runs()
+    profile_run = next(run for run in runs if run.kind == "profile")
+    migrations = [run for run in runs if run.kind == "migration"]
+    assert len(migrations) == 2
+    assert all(run.parent_run_id == profile_run.run_id for run in migrations)
+    assert len({run.parent_execution_id for run in migrations}) == 2

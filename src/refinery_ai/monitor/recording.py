@@ -14,7 +14,7 @@ from typing import Literal
 from uuid import uuid4
 
 from refinery_ai.migrations.run_store import safe_owned_path
-from refinery_ai.monitor.models import MonitorEvent
+from refinery_ai.monitor.models import MonitorEvent, PlannedMigration
 
 
 @dataclass(frozen=True)
@@ -74,6 +74,14 @@ class ProfileReporter:
             data = data[: data.rfind(b"\n") + 1]
             path.write_bytes(data)
         self.history = [MonitorEvent.model_validate_json(line) for line in data.splitlines()]
+        self.planned_migrations = next(
+            (
+                event.migrations
+                for event in reversed(self.history)
+                if event.phase == "plan" and event.migrations is not None
+            ),
+            None,
+        )
         self.sequence = len(self.history)
         self.generation = max((e.generation for e in self.history), default=-1) + 1
         self.output = path.open("a")
@@ -89,8 +97,12 @@ class ProfileReporter:
         output_tokens: int | None = None,
         duration_seconds: float | None = None,
         child_run_id: str | None = None,
+        migrations: list[PlannedMigration] | None = None,
     ) -> MonitorEvent:
+        if phase == "migrate" and migrations is None:
+            migrations = self.planned_migrations
         event = MonitorEvent(
+            migrations=migrations,
             run_id=self.run_id,
             sequence=self.sequence + 1,
             timestamp=datetime.now(UTC).isoformat(),
@@ -109,6 +121,8 @@ class ProfileReporter:
         self.output.flush()
         os.fsync(self.output.fileno())
         self.sequence += 1
+        if phase == "plan" and lifecycle == "completed" and migrations is not None:
+            self.planned_migrations = migrations
         return event
 
     def close(self) -> None:

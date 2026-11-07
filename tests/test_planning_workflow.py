@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 from typing import TypedDict
 
@@ -73,7 +74,9 @@ def test_planning_graph_does_not_inherit_parent_sqlite_checkpointer(tmp_path: Pa
 
     def plan_node(state: ParentState) -> dict[str, bool]:
         del state
-        run_planning_graph(planner, request())
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            run_planning_graph(planner, request())
         return {"planned": True}
 
     builder = StateGraph(ParentState)
@@ -85,6 +88,7 @@ def test_planning_graph_does_not_inherit_parent_sqlite_checkpointer(tmp_path: Pa
         result = graph.invoke(
             {"planned": False},
             config={"configurable": {"thread_id": "nested-planning"}},
+            durability="sync",
         )
 
     assert result["planned"] is True

@@ -214,7 +214,22 @@ class JournalCatalog:
             status = last.lifecycle
         inputs = [e.input_tokens for e in events if e.input_tokens is not None]
         outputs = [e.output_tokens for e in events if e.output_tokens is not None]
+        current_step = next(
+            (
+                e
+                for e in reversed(events)
+                if e.migration_name
+                and e.step is not None
+                and e.phase not in ("prepare_run", "recover_run", "verify_baseline")
+            ),
+            None,
+        )
         summary = RunSummary(
+            migration_name=current_step.migration_name if current_step else None,
+            step=current_step.step if current_step else None,
+            total_steps=next(
+                (e.total_steps for e in reversed(events) if e.total_steps is not None), None
+            ),
             input_tokens=sum(inputs) if inputs else None,
             output_tokens=sum(outputs) if outputs else None,
             run_id=run_id,

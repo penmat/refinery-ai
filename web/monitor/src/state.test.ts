@@ -4,6 +4,7 @@ import {
   emptyState,
   summarize,
   nodeStatus,
+  nodeMigrationContext,
   type MonitorEvent,
 } from "./state";
 const event = (
@@ -133,4 +134,67 @@ it("totals local and child tokens without altering visits or counting replays", 
     outputTokens: 7,
   });
   expect(nodeStatus(state, "verify_candidate")).toBe("unconfirmed");
+});
+
+it("shows planned names and the active child migration without mixing parent visits", () => {
+  const planned = [
+    {
+      recipe: "org.example.SpringFoxToSpringDoc",
+      name: "Spring Fox → Spring Doc",
+    },
+    { recipe: "org.example.UpgradeToJava17", name: "Upgrade to Java 17" },
+  ];
+  const state = applyEvents(emptyState(), [
+    event(1, {
+      phase: "plan",
+      execution_id: "plan",
+      lifecycle: "completed",
+      migrations: planned,
+    }),
+    event(2, {
+      phase: "migrate",
+      execution_id: "current",
+      migrations: planned,
+    }),
+  ]);
+  expect(nodeMigrationContext(state, "plan")).toEqual({
+    caption: "2 migrations planned",
+    name: null,
+  });
+  expect(
+    nodeMigrationContext(state, "migrate", [
+      {
+        parent_execution_id: "old",
+        migration_name: "Old migration",
+        step: 4,
+        total_steps: 4,
+      },
+      {
+        parent_execution_id: "current",
+        migration_name: "Spring Fox → Spring Doc",
+        step: 1,
+        total_steps: 2,
+      },
+    ]),
+  ).toEqual({ caption: "Migration 1/2", name: "Spring Fox → Spring Doc" });
+  expect(state.visits.plan.migrations).toEqual(planned);
+});
+
+it("shows recipe names on execution nodes and tolerates legacy records", () => {
+  const state = applyEvents(emptyState(), [
+    event(1, {
+      phase: "execute_recipe",
+      migration_name: "Spring Fox → Spring Doc",
+      step: 1,
+      total_steps: 4,
+    }),
+  ]);
+  expect(nodeMigrationContext(state, "execute_recipe")).toEqual({
+    caption: "Migration 1/4",
+    name: "Spring Fox → Spring Doc",
+  });
+  expect(nodeMigrationContext(emptyState(), "plan")).toEqual({
+    caption: null,
+    name: null,
+  });
 });

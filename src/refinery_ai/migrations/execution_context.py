@@ -25,6 +25,7 @@ class MigrationExecutionContext:
         self.runner = runner
         self.request = request
         self.store = store
+        self.profile_checkpoint = False
         self.worktrees: GitWorktreeManager | None = None
         self.reporter: MigrationReporter | None = None
         self.pending: TransactionalMigrationRepairer | None = None

@@ -6,6 +6,7 @@ import contextlib
 import hashlib
 import time
 from collections.abc import Callable
+from sys import exc_info
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 from uuid import uuid4
 
@@ -14,8 +15,11 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import StateSnapshot
 
+from refinery_ai.migrations.execution_state import MigrationExecutionState, MigrationRequest
 from refinery_ai.models import MigrationRun, RecipePlan, RunReport, RunStatus
+from refinery_ai.monitor.migration_details import describe_migrations
 from refinery_ai.monitor.recording import (
     InvocationContext,
     ProfileReporter,
@@ -30,6 +34,7 @@ from refinery_ai.profile_run import (
     dependency_inputs_fingerprint,
 )
 from refinery_ai.profiles import EvidenceMode
+from refinery_ai.workflows.migration import NestedMigration, build_migration_graph
 
 if TYPE_CHECKING:
     from refinery_ai.profile_run import ProfileRunner
@@ -45,6 +50,9 @@ class ProfileGraphState(TypedDict):
     report: NotRequired[RunReport]
     recipes: NotRequired[tuple[str, ...]]
     migration: NotRequired[MigrationRun]
+    migration_request: NotRequired[MigrationRequest]
+    migration_result: NotRequired[MigrationRun]
+    interrupted_migration: NotRequired[MigrationExecutionState | None]
     result: NotRequired[ProfileRunResult]
 
 
@@ -53,8 +61,13 @@ def build_profile_graph(
     *,
     checkpointer: BaseCheckpointSaver[str] | None = None,
     reporter: ProfileReporter | None = None,
+    nested: NestedMigration | None = None,
+    legacy: bool = False,
 ) -> CompiledStateGraph[ProfileGraphState, None, ProfileGraphState, ProfileGraphState]:
-    """Build the deterministic profile loop as explicit LangGraph nodes."""
+    """Build the profile topology. Use run_profile_graph to manage native child resources."""
+
+    if nested is None and not legacy and (runner is None or runner.migration_runner):
+        nested = NestedMigration(None, reporter)
 
     def analyze(state: ProfileGraphState) -> dict[str, object]:
         assert runner is not None
@@ -123,6 +136,19 @@ def build_profile_graph(
             update["result"] = runner._stalled(
                 state["stored_state"], cycle, "the planner repeated the same migration plan"
             )
+        if nested is not None and "result" not in update:
+            checkpoint = state["verified_checkpoint"]
+            runner.progress(f"Cycle {cycle}: running {len(recipes)} migration(s) ...")
+            update["interrupted_migration"] = None
+            update["migration_request"] = MigrationRequest(
+                plan_id=report.run_id,
+                apply=True,
+                publish=True,
+                expected_profile=runner.profile.name,
+                trusted_baseline_revision=checkpoint.revision if checkpoint else None,
+                trusted_baseline_java=checkpoint.java if checkpoint else None,
+                resume_bound_run=True,
+            )
         return update
 
     def after_plan(state: ProfileGraphState) -> Literal["migrate", "finished"]:
@@ -135,9 +161,16 @@ def build_profile_graph(
         cycle = state["cycle"]
         runner.progress(f"Cycle {cycle}: running {len(recipes)} migration(s) ...")
         migration = runner.migrate(report.run_id, state["verified_checkpoint"])
+        return apply_migration_result(state, migration)
+
+    def apply_migration_result(
+        state: ProfileGraphState, migration: MigrationRun
+    ) -> dict[str, object]:
+        assert runner is not None
+        cycle = state["cycle"]
         update: dict[str, object] = {
             "migration": migration,
-            "previous_recipes": recipes,
+            "previous_recipes": state["recipes"],
         }
         if migration.status is not RunStatus.COMPLETED:
             update["result"] = ProfileRunResult(
@@ -189,8 +222,20 @@ def build_profile_graph(
                     ),
                 ):
                     update = operation(state)
+                report = update.get("report")
+                migrations = (
+                    describe_migrations(item.recipe for item in report.plan.recommendations)
+                    if name == "plan"
+                    and isinstance(report, RunReport)
+                    and isinstance(report.plan, RecipePlan)
+                    else None
+                )
                 reporter.emit(
-                    name, "completed", execution_id, duration_seconds=time.monotonic() - started
+                    name,
+                    "completed",
+                    execution_id,
+                    duration_seconds=time.monotonic() - started,
+                    migrations=migrations,
                 )
                 return update
             except BaseException as error:
@@ -210,11 +255,24 @@ def build_profile_graph(
     graph = StateGraph(ProfileGraphState)
     graph.add_node("analyze", observed("analyze", analyze))
     graph.add_node("plan", observed("plan", plan))
-    graph.add_node("migrate", observed("migrate", migrate))
+    if nested is None:
+        graph.add_node("migrate", observed("migrate", migrate))
+        migration_exit = "migrate"
+    else:
+        graph.add_node("migrate", build_migration_graph(None, nested=nested))
+
+        def accept_migration(state: ProfileGraphState) -> dict[str, object]:
+            return apply_migration_result(state, state["migration_result"])
+
+        migration_exit = "accept_migration"
+        graph.add_node(migration_exit, observed(migration_exit, accept_migration))
+        graph.add_edge("migrate", migration_exit)
     graph.add_edge(START, "analyze")
     graph.add_edge("analyze", "plan")
     graph.add_conditional_edges("plan", after_plan, {"migrate": "migrate", "finished": END})
-    graph.add_conditional_edges("migrate", after_migrate, {"analyze": "analyze", "finished": END})
+    graph.add_conditional_edges(
+        migration_exit, after_migrate, {"analyze": "analyze", "finished": END}
+    )
     return graph.compile(checkpointer=checkpointer)
 
 
@@ -243,7 +301,7 @@ def run_profile_graph(runner: ProfileRunner) -> ProfileRunResult:
         else:
             graph_input = {
                 "monitor_run_id": uuid4().hex,
-                "schema_version": 1,
+                "schema_version": 2 if runner.migration_runner else 1,
                 "stored_state": runner.store.load(),
                 "cycle": 0,
                 "previous_recipes": None,
@@ -258,7 +316,15 @@ def run_profile_graph(runner: ProfileRunner) -> ProfileRunResult:
             graph.update_state(config, {"monitor_run_id": monitor_id})
         state_root = runner.store.path.parents[1]
         reporter = ProfileReporter(state_root, monitor_id, runner.profile.name)
-        graph = build_profile_graph(runner, checkpointer=checkpointer, reporter=reporter)
+        legacy = graph_input is None and snapshot.values.get("schema_version", 1) == 1
+        nested = (
+            NestedMigration(runner.migration_runner, reporter)
+            if runner.migration_runner and not legacy
+            else None
+        )
+        graph = build_profile_graph(
+            runner, checkpointer=checkpointer, reporter=reporter, nested=nested, legacy=legacy
+        )
         try:
             save_topology(state_root, monitor_id, graph_topology(graph, "profile"))
             pending = {e.execution_id: e for e in reporter.history if e.lifecycle == "started"}
@@ -267,10 +333,30 @@ def run_profile_graph(runner: ProfileRunner) -> ProfileRunResult:
                     pending.pop(event.execution_id, None)
             for event in pending.values():
                 reporter.emit(event.phase, "interrupted", event.execution_id)
-            result = graph.invoke(graph_input, config=config)
+            if nested is not None:
+                # LangGraph passes this budget to the migration subgraph as well.
+                config["recursion_limit"] = max(10_000, runner.max_cycles * 4 + 5)
+                if graph_input is None and "migrate" in snapshot.next:
+                    # Schedule a fresh child task. The migration reconciles Git receipts
+                    # under its lease before continuing from a verified recipe boundary.
+                    expanded = graph.get_state(config, subgraphs=True)
+                    nested.saved = snapshot.values.get("interrupted_migration")
+                    for task in expanded.tasks:
+                        if task.name == "migrate" and isinstance(task.state, StateSnapshot):
+                            nested.saved = task.state.values.get("data") or nested.saved
+                    graph.update_state(
+                        config,
+                        {"interrupted_migration": nested.saved},
+                        as_node="plan",
+                    )
+            result = graph.invoke(graph_input, config=config, durability="sync")
             reporter.emit(
                 "run", "completed", uuid4().hex, outcome=str(result["result"].status.value)
             )
         finally:
-            reporter.close()
+            try:
+                if nested is not None:
+                    nested.close(*exc_info())
+            finally:
+                reporter.close()
     return ProfileRunResult.model_validate(result["result"])

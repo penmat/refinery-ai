@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import NotRequired, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -41,5 +42,15 @@ def build_planning_graph(
 def run_planning_graph(planner: Planner, request: PlanningRequest) -> RecipePlan:
     """Run one planning request through LangGraph and return its validated plan."""
 
-    result = build_planning_graph(planner).invoke({"request": request})
+    # The parent may use synchronous durability, but this graph has no checkpointer.
+    # LangGraph warns about the override even though omitting it inherits "sync"
+    # and crashes when the checkpoint-free child runs inside a durable parent.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"^`durability` has no effect when no checkpointer is present\.$",
+            category=UserWarning,
+            module=r"^langgraph\.pregel\.main$",
+        )
+        result = build_planning_graph(planner).invoke({"request": request}, durability="exit")
     return RecipePlan.model_validate(result["plan"])

@@ -83,3 +83,69 @@ def test_long_preview_has_no_durable_side_effects(tmp_path: Path) -> None:
     assert len(result.steps) == 40
     assert not (tmp_path / ".refinery/migration-checkpoints.sqlite").exists()
     assert not (tmp_path / ".refinery/migration-events").exists()
+
+
+def test_compiled_child_resumes_with_fresh_state_on_next_parent_visit(tmp_path: Path) -> None:
+    from typing import TypedDict
+
+    from langgraph.checkpoint.sqlite import SqliteSaver
+    from langgraph.graph import END, START, StateGraph
+    from langgraph.types import Command, interrupt
+
+    class ChildState(TypedDict, total=False):
+        cycle: int
+        visits: int
+        migration_result: int
+
+    class ParentState(TypedDict, total=False):
+        cycle: int
+        migration_result: int
+
+    def build(saver):
+        child = StateGraph(ChildState)
+        child.add_node("prepare", lambda state: {"visits": state.get("visits", 0) + 1})
+
+        def finish(state: ChildState) -> dict[str, int]:
+            if state["cycle"] == 1:
+                interrupt("resume migration")
+            return {"migration_result": state["visits"]}
+
+        child.add_node("finish", finish)
+        child.add_edge(START, "prepare")
+        child.add_edge("prepare", "finish")
+        child.add_edge("finish", END)
+        parent = StateGraph(ParentState)
+        parent.add_node("migrate", child.compile())
+
+        def advance(state: ParentState) -> dict[str, int]:
+            assert state["migration_result"] == 1
+            return {"cycle": state["cycle"] + 1}
+
+        parent.add_node("advance", advance)
+        parent.add_edge(START, "migrate")
+        parent.add_conditional_edges(
+            "migrate", lambda state: state["cycle"] == 1, {True: "advance", False: END}
+        )
+        parent.add_edge("advance", "migrate")
+        return parent.compile(checkpointer=saver)
+
+    database = str(tmp_path / "nested.sqlite")
+    config = {"configurable": {"thread_id": "profile"}}
+    with SqliteSaver.from_conn_string(database) as saver:
+        interrupted = build(saver).invoke({"cycle": 1}, config, durability="sync")
+        assert interrupted["__interrupt__"][0].value == "resume migration"
+
+    with SqliteSaver.from_conn_string(database) as saver:
+        completed = build(saver).invoke(Command(resume=True), config, durability="sync")
+        assert completed == {"cycle": 2, "migration_result": 1}
+
+
+def test_profile_topology_exposes_compiled_migration_phases() -> None:
+    from refinery_ai.workflows.profile import build_profile_graph
+
+    graph = build_profile_graph(None).get_graph(xray=True)
+    assert "migrate:execute_recipe" in graph.nodes
+    assert any(
+        edge.source == "migrate:repair" and edge.target == "migrate:verify_candidate"
+        for edge in graph.edges
+    )

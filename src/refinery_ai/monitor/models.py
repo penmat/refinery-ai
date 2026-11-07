@@ -25,6 +25,11 @@ class GraphTopology(BaseModel):
     historical: bool = True
 
 
+class PlannedMigration(BaseModel):
+    recipe: str
+    name: str
+
+
 class MonitorEvent(BaseModel):
     schema_version: Literal[1] = 1
     run_id: str
@@ -45,6 +50,9 @@ class MonitorEvent(BaseModel):
     plan_id: str | None = None
     step: int | None = None
     recipe: str | None = None
+    migration_name: str | None = None
+    total_steps: int | None = None
+    migrations: list[PlannedMigration] | None = None
     repair_stage: str | None = None
     repair_attempt: int | None = None
     java: int | None = None
@@ -62,6 +70,9 @@ class RunSummary(BaseModel):
     last_seen: str | None = None
     event_count: int = 0
     verified_recipes: int = 0
+    migration_name: str | None = None
+    step: int | None = None
+    total_steps: int | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
     diagnostics: list[str] = Field(default_factory=list)

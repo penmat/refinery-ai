@@ -18,7 +18,14 @@ import {
   GitBranch,
   HelpCircle,
 } from "lucide-react";
-import { label, nodeStatus, type State, type Topology } from "./state";
+import {
+  label,
+  nodeStatus,
+  nodeMigrationContext,
+  type State,
+  type Topology,
+  type Run,
+} from "./state";
 import "@xyflow/react/dist/style.css";
 function WorkflowNode({ data }: NodeProps) {
   const status = String(data.status);
@@ -62,6 +69,17 @@ function WorkflowNode({ data }: NodeProps) {
           </span>
         )}
       </div>
+      {data.caption || data.migrationName ? (
+        <div
+          className="node-migration-context"
+          title={String(data.migrationName ?? data.caption)}
+        >
+          <span>{String(data.caption ?? "")}</span>
+          {data.migrationName ? (
+            <strong>{String(data.migrationName)}</strong>
+          ) : null}
+        </div>
+      ) : null}
       <Handle type="source" position={Position.Bottom} />
     </div>
   );
@@ -73,12 +91,14 @@ export function WorkflowGraph({
   selected,
   onSelect,
   childrenByNode,
+  migrationRuns = [],
 }: {
   topology: Topology;
   state: State;
   selected: string | null;
   onSelect: (id: string) => void;
   childrenByNode: Record<string, number>;
+  migrationRuns?: Run[];
 }) {
   const positions = useMemo(() => {
     const graph = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
@@ -90,14 +110,14 @@ export function WorkflowGraph({
       marginy: 20,
     });
     topology.nodes.forEach((n) =>
-      graph.setNode(n.id, { width: 220, height: 76 }),
+      graph.setNode(n.id, { width: 260, height: 120 }),
     );
     topology.edges.forEach((e) => graph.setEdge(e.source, e.target));
     dagre.layout(graph);
     return Object.fromEntries(
       topology.nodes.map((n) => {
         const p = graph.node(n.id);
-        return [n.id, { x: p.x - 110, y: p.y - 38 }];
+        return [n.id, { x: p.x - 130, y: p.y - 60 }];
       }),
     );
   }, [topology]);
@@ -118,6 +138,8 @@ export function WorkflowGraph({
       ).length,
       selected: n.id === selected,
       childCount: childrenByNode[n.id] ?? 0,
+      caption: nodeMigrationContext(state, n.id, migrationRuns).caption,
+      migrationName: nodeMigrationContext(state, n.id, migrationRuns).name,
     },
   }));
   const edges = topology.edges.map((e, i) => {
