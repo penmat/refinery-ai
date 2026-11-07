@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   ArrowLeft,
@@ -23,6 +23,7 @@ import {
   applyEvents,
   emptyState,
   summarize,
+  latestMigrationChild,
   label,
   duration,
   shortId,
@@ -141,9 +142,7 @@ export default function App() {
   const visits = Object.values(state.visits)
     .filter((v) => v.phase === selectedNode)
     .sort((a, b) => b.sequence - a.sequence);
-  const selectedChildren = children.filter((child) =>
-    visits.some((v) => v.execution_id === child.parent_execution_id),
-  );
+  const currentChild = latestMigrationChild(visits[0], children);
   const showTime = (value: string | null | undefined) =>
     value
       ? new Date(value).toLocaleTimeString([], {
@@ -156,10 +155,13 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <a className="brand" href="/">
-          <span className="brand-mark">
-            <Layers3 size={21} />
-          </span>
-          refinery<span className="brand-ai">AI</span>
+          <img
+            className="brand-logo"
+            src={new URL("./refinery-logo.png", import.meta.url).href}
+            alt="Refinery"
+            width={76}
+            height={76}
+          />
         </a>
         <div className="workspace-label">
           WORKSPACE <span>LOCAL</span>
@@ -444,113 +446,118 @@ export default function App() {
                     <div className="detail-content">
                       <span className="eyebrow">WORKFLOW NODE</span>
                       <h2>{label(selectedNode)}</h2>
-                      <p className="subtle">
-                        {visits.length} recorded{" "}
-                        {visits.length === 1 ? "visit" : "visits"}
-                      </p>
-                      {!visits.length && (
-                        <p className="detail-note">
-                          This node has no recorded execution.
-                        </p>
-                      )}
-                      {selectedChildren.map((child) => (
-                        <button
-                          key={child.run_id}
-                          className="child-link"
-                          onClick={() => setSelectedRun(child.run_id)}
-                        >
-                          <GitBranch size={15} />
-                          <span>
-                            Open migration<small>{shortId(child.run_id)}</small>
-                          </span>
-                          <ArrowUpRight size={15} />
-                        </button>
-                      ))}
-                      {visits.map((visit, i) => (
-                        <div className="visit" key={visit.execution_id}>
-                          <div className="visit-title">
-                            <strong>Visit {visits.length - i}</strong>
-                            <span>
-                              {visit.lifecycle === "started"
-                                ? "Unconfirmed"
-                                : label(visit.lifecycle)}
-                            </span>
-                          </div>
-                          {visit.lifecycle === "started" && (
+                      {selectedNode === "analyze" ? (
+                        <AnalysisDetails visit={visits[0]} />
+                      ) : selectedNode === "migrate" ? (
+                        <MigrationDetails
+                          child={currentChild}
+                          onOpen={setSelectedRun}
+                        />
+                      ) : (
+                        <>
+                          <p className="subtle">
+                            {visits.length} recorded{" "}
+                            {visits.length === 1 ? "visit" : "visits"}
+                          </p>
+                          {!visits.length && (
                             <p className="detail-note">
-                              A start was recorded. Worker liveness is unknown.
+                              This node has no recorded execution.
                             </p>
                           )}
-                          {visit.migrations != null && (
-                            <div className="plan-migrations">
-                              <h4>
-                                {visit.migrations.length} migrations planned
-                              </h4>
-                              <ol>
-                                {visit.migrations.map((migration, index) => (
-                                  <li key={`${index}-${migration.recipe}`}>
-                                    <strong>{migration.name}</strong>
-                                    <code>{migration.recipe}</code>
-                                  </li>
-                                ))}
-                              </ol>
-                            </div>
-                          )}
-                          {visit.migration_name && (
-                            <p className="migration-progress">
-                              {visit.step != null && (
+                          {visits.map((visit, i) => (
+                            <div className="visit" key={visit.execution_id}>
+                              <div className="visit-title">
+                                <strong>Visit {visits.length - i}</strong>
                                 <span>
-                                  Migration {visit.step}
-                                  {visit.total_steps != null
-                                    ? `/${visit.total_steps}`
-                                    : ""}{" "}
-                                  ·{" "}
+                                  {visit.lifecycle === "started"
+                                    ? "Unconfirmed"
+                                    : label(visit.lifecycle)}
                                 </span>
+                              </div>
+                              {visit.lifecycle === "started" && (
+                                <p className="detail-note">
+                                  A start was recorded. Worker liveness is
+                                  unknown.
+                                </p>
                               )}
-                              {visit.migration_name}
-                            </p>
-                          )}
-                          <dl>
-                            <dt>Duration</dt>
-                            <dd>{duration(visit.duration_seconds)}</dd>
-                            <dt>Outcome</dt>
-                            <dd>
-                              {visit.outcome
-                                ? label(visit.outcome)
-                                : "Not recorded"}
-                            </dd>
-                            <dt>Generation</dt>
-                            <dd>{visit.generation}</dd>
-                            {visit.step != null && (
-                              <>
-                                <dt>Recipe step</dt>
-                                <dd>{visit.step}</dd>
-                              </>
-                            )}
-                            {visit.repair_attempt != null && (
-                              <>
-                                <dt>Repair attempt</dt>
-                                <dd>{visit.repair_attempt}</dd>
-                              </>
-                            )}
-                            {visit.java && (
-                              <>
-                                <dt>JDK</dt>
-                                <dd>{visit.java}</dd>
-                              </>
-                            )}
-                          </dl>
-                          {visit.recipe && (
-                            <code className="recipe-name">{visit.recipe}</code>
-                          )}
-                          {visit.checkpoint && (
-                            <p className="checkpoint">
-                              Checkpoint{" "}
-                              <code>{visit.checkpoint.slice(0, 12)}</code>
-                            </p>
-                          )}
-                        </div>
-                      ))}
+                              {visit.migrations != null && (
+                                <div className="plan-migrations">
+                                  <h4>
+                                    {visit.migrations.length} migrations planned
+                                  </h4>
+                                  <ol>
+                                    {visit.migrations.map(
+                                      (migration, index) => (
+                                        <li
+                                          key={`${index}-${migration.recipe}`}
+                                        >
+                                          <strong>{migration.name}</strong>
+                                          <code>{migration.recipe}</code>
+                                        </li>
+                                      ),
+                                    )}
+                                  </ol>
+                                </div>
+                              )}
+                              {visit.migration_name && (
+                                <p className="migration-progress">
+                                  {visit.step != null && (
+                                    <span>
+                                      Migration {visit.step}
+                                      {visit.total_steps != null
+                                        ? `/${visit.total_steps}`
+                                        : ""}{" "}
+                                      ·{" "}
+                                    </span>
+                                  )}
+                                  {visit.migration_name}
+                                </p>
+                              )}
+                              <dl>
+                                <dt>Duration</dt>
+                                <dd>{duration(visit.duration_seconds)}</dd>
+                                <dt>Outcome</dt>
+                                <dd>
+                                  {visit.outcome
+                                    ? label(visit.outcome)
+                                    : "Not recorded"}
+                                </dd>
+                                <dt>Generation</dt>
+                                <dd>{visit.generation}</dd>
+                                {visit.step != null && (
+                                  <>
+                                    <dt>Recipe step</dt>
+                                    <dd>{visit.step}</dd>
+                                  </>
+                                )}
+                                {visit.repair_attempt != null && (
+                                  <>
+                                    <dt>Repair attempt</dt>
+                                    <dd>{visit.repair_attempt}</dd>
+                                  </>
+                                )}
+                                {visit.java && (
+                                  <>
+                                    <dt>JDK</dt>
+                                    <dd>{visit.java}</dd>
+                                  </>
+                                )}
+                              </dl>
+                              {visit.recipe && (
+                                <code className="recipe-name">
+                                  {visit.recipe}
+                                </code>
+                              )}
+                              {visit.checkpoint && (
+                                <p className="checkpoint">
+                                  Checkpoint{" "}
+                                  <code>{visit.checkpoint.slice(0, 12)}</code>
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </>
+                      )}
                     </div>
                   </aside>
                 )}
@@ -665,6 +672,96 @@ function Metric({
         {value}
       </div>
       <div className="metric-note">{note}</div>
+    </div>
+  );
+}
+
+function AnalysisDetails({ visit }: { visit?: MonitorEvent }) {
+  const analysis = visit?.analysis;
+  const facts = analysis
+    ? [
+        ["Project Java", analysis.java_version],
+        ["Spring Boot", analysis.spring_boot_version],
+        [
+          "Build system",
+          analysis.build_system === "maven"
+            ? "Maven"
+            : analysis.build_system === "gradle"
+              ? "Gradle"
+              : analysis.build_system,
+        ],
+        ["Frameworks", analysis.frameworks.join(", ")],
+      ].filter(([, value]) => value)
+    : [];
+  return (
+    <div className="visit">
+      {facts.length ? (
+        <dl>
+          {facts.map(([name, value]) => (
+            <Fragment key={name}>
+              <dt>{name}</dt>
+              <dd>{value}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      ) : (
+        <p className="detail-note">
+          {!visit
+            ? "No analysis visit recorded."
+            : visit.lifecycle === "started"
+              ? "Analysis started. No summary recorded yet."
+              : "No discovery summary was recorded for this visit."}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function MigrationDetails({
+  child,
+  onOpen,
+}: {
+  child?: Run;
+  onOpen: (id: string) => void;
+}) {
+  return (
+    <div className="visit">
+      {child?.migration_name ? (
+        <>
+          <div className="visit-title">
+            <strong>
+              {child.step != null
+                ? `Migration ${child.step}${child.total_steps != null ? `/${child.total_steps}` : ""}`
+                : "Migration"}
+            </strong>
+            {child.step_status && (
+              <span>
+                {child.step_status === "started"
+                  ? "Started · unconfirmed"
+                  : label(child.step_status)}
+              </span>
+            )}
+          </div>
+          <h3>{child.migration_name}</h3>
+          {child.recipe && <code className="recipe-name">{child.recipe}</code>}
+          {child.failure_reason && (
+            <p className="detail-note">{child.failure_reason}</p>
+          )}
+        </>
+      ) : (
+        <p className="detail-note">
+          No recipe has been recorded for this visit yet.
+        </p>
+      )}
+      {child && (
+        <button className="child-link" onClick={() => onOpen(child.run_id)}>
+          <GitBranch size={15} />
+          <span>
+            Open migration run<small>{shortId(child.run_id)}</small>
+          </span>
+          <ArrowUpRight size={15} />
+        </button>
+      )}
     </div>
   );
 }

@@ -214,18 +214,51 @@ class JournalCatalog:
             status = last.lifecycle
         inputs = [e.input_tokens for e in events if e.input_tokens is not None]
         outputs = [e.output_tokens for e in events if e.output_tokens is not None]
+        parent = next(
+            (e for e in reversed(events) if e.parent_run_id and e.parent_execution_id),
+            first,
+        )
         current_step = next(
             (
                 e
                 for e in reversed(events)
-                if e.migration_name
+                if e.recipe
+                and last is not None
+                and e.generation == last.generation
                 and e.step is not None
-                and e.phase not in ("prepare_run", "recover_run", "verify_baseline")
+                and e.lifecycle != "usage"
+                and e.phase
+                in (
+                    "prepare_step",
+                    "execute_recipe",
+                    "verify_candidate",
+                    "select_repair",
+                    "repair",
+                    "evaluate_repair",
+                    "checkpoint_step",
+                    "record_step_failure",
+                )
             ),
             None,
         )
+        step_status: str | None = None
+        if current_step:
+            step_status = current_step.lifecycle
+            if current_step.failure_reason or current_step.phase == "record_step_failure":
+                step_status = "failed"
+            elif current_step.lifecycle == "completed":
+                step_status = current_step.outcome or f"{current_step.phase} completed"
+                if current_step.phase == "checkpoint_step":
+                    step_status = "verified"
         summary = RunSummary(
-            migration_name=current_step.migration_name if current_step else None,
+            recipe=current_step.recipe if current_step else None,
+            step_status=step_status,
+            failure_reason=current_step.failure_reason if current_step else None,
+            migration_name=(
+                current_step.migration_name or (current_step.recipe or "").rsplit(".", 1)[-1]
+            )
+            if current_step
+            else None,
             step=current_step.step if current_step else None,
             total_steps=next(
                 (e.total_steps for e in reversed(events) if e.total_steps is not None), None
@@ -235,8 +268,8 @@ class JournalCatalog:
             run_id=run_id,
             kind=kind,
             profile=first.profile if first else None,
-            parent_run_id=first.parent_run_id if first else None,
-            parent_execution_id=first.parent_execution_id if first else None,
+            parent_run_id=parent.parent_run_id if parent else None,
+            parent_execution_id=parent.parent_execution_id if parent else None,
             first_seen=first.timestamp if first else None,
             last_seen=last.timestamp if last else None,
             event_count=len(events),

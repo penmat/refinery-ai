@@ -14,7 +14,7 @@ from typing import Literal
 from uuid import uuid4
 
 from refinery_ai.migrations.run_store import safe_owned_path
-from refinery_ai.monitor.models import MonitorEvent, PlannedMigration
+from refinery_ai.monitor.models import AnalysisSummary, MonitorEvent, PlannedMigration
 
 
 @dataclass(frozen=True)
@@ -93,6 +93,7 @@ class ProfileReporter:
         execution_id: str,
         *,
         outcome: str | None = None,
+        analysis: AnalysisSummary | None = None,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
         duration_seconds: float | None = None,
@@ -113,6 +114,8 @@ class ProfileReporter:
             generation=self.generation,
             profile=self.profile,
             outcome=outcome,
+            analysis=analysis,
+            child_run_id=child_run_id,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             duration_seconds=duration_seconds,

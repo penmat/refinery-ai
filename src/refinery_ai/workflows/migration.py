@@ -137,6 +137,7 @@ def build_migration_graph(
                         duration=time.monotonic() - started,
                         outcome=value.outcome
                         or (result.status.value if isinstance(result, MigrationRun) else None),
+                        failure_reason=value.failure_reason or value.failure_message or None,
                         checkpoint=value.current_revision,
                         stage=stage,
                     )
@@ -454,7 +455,7 @@ class NestedMigration:
         opened = self.scope.run(open_invocation)
         self.saved = None
         if isinstance(opened, MigrationRun):
-            self.close_node({})
+            self.close_node({"migration_result": opened})
             return {"migration_result": opened}
         self.context, initial, _ = opened
         record_migration_topology(self.context, initial)
@@ -463,16 +464,23 @@ class NestedMigration:
     def close_node(self, state: MigrationGraphState) -> MigrationGraphState:
         self.scope.run(self.resources.close)
         self.context = None
-        self.report_completion("completed")
+        result = state.get("migration_result")
+        self.report_completion("completed", child_run_id=result.run_id if result else None)
         return {}
 
-    def report_completion(self, lifecycle: Literal["completed", "failed", "cancelled"]) -> None:
+    def report_completion(
+        self,
+        lifecycle: Literal["completed", "failed", "cancelled"],
+        *,
+        child_run_id: str | None = None,
+    ) -> None:
         if self.parent and self.reporter:
             parent, self.parent = self.parent, None
             self.reporter.emit(
                 "migrate",
                 lifecycle,
                 parent.execution_id,
+                child_run_id=child_run_id,
                 duration_seconds=time.monotonic() - self.started,
             )
 

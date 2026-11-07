@@ -154,3 +154,35 @@ def test_profile_persists_tokens_without_telemetry_export(tmp_path, monkeypatch)
         (13, 5)
     ]
     assert (run.input_tokens, run.output_tokens) == (13, 5)
+
+
+def test_analyze_summary_is_available_in_replay(tmp_path):
+    from refinery_ai.monitor.journals import JournalCatalog
+    from refinery_ai.monitor.models import AnalysisSummary
+    from refinery_ai.profile_run import ProfileAnalysis
+
+    ProfileRunner(
+        tmp_path,
+        load_profile("spring-boot-3.2-java-17"),
+        analyze=lambda _: ProfileAnalysis(
+            False,
+            AnalysisSummary(
+                java_version="11",
+                spring_boot_version="2.7.18",
+                build_system="maven",
+                frameworks=["Spring MVC"],
+            ),
+        ),
+        plan=lambda: report(tmp_path, "plan", []),
+        migrate=lambda *_: MigrationRun(plan_id="plan", status=RunStatus.COMPLETED),
+    ).run()
+    catalog = JournalCatalog(tmp_path, Path(".refinery"))
+    events = catalog.snapshot(catalog.list_runs()[0].run_id).events
+    event = next(e for e in events if e.phase == "analyze" and e.lifecycle == "completed")
+    assert event.analysis is not None
+    assert event.analysis.model_dump() == {
+        "java_version": "11",
+        "spring_boot_version": "2.7.18",
+        "build_system": "maven",
+        "frameworks": ["Spring MVC"],
+    }

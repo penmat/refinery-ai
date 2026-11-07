@@ -1,3 +1,10 @@
+export interface AnalysisSummary {
+  java_version?: string | null;
+  spring_boot_version?: string | null;
+  build_system?: string | null;
+  frameworks: string[];
+}
+
 export interface PlannedMigration {
   recipe: string;
   name: string;
@@ -15,6 +22,8 @@ export interface MonitorEvent {
     "started" | "completed" | "failed" | "cancelled" | "interrupted" | "usage";
   generation: number;
   outcome?: string | null;
+  analysis?: AnalysisSummary | null;
+  child_run_id?: string | null;
   input_tokens?: number | null;
   output_tokens?: number | null;
   duration_seconds?: number | null;
@@ -50,6 +59,9 @@ export interface Run {
   event_count: number;
   verified_recipes?: number;
   migration_name?: string | null;
+  recipe?: string | null;
+  step_status?: string | null;
+  failure_reason?: string | null;
   step?: number | null;
   total_steps?: number | null;
   input_tokens?: number | null;
@@ -226,15 +238,7 @@ export function nodeMigrationContext(
     };
   }
   const child =
-    phase === "migrate"
-      ? children
-          .filter(
-            (run) => visit && run.parent_execution_id === visit.execution_id,
-          )
-          .sort((a, b) =>
-            (b.last_seen ?? "").localeCompare(a.last_seen ?? ""),
-          )[0]
-      : undefined;
+    phase === "migrate" ? latestMigrationChild(visit, children) : undefined;
   const progress = child?.migration_name ? child : visit;
   if (progress?.migration_name) {
     return {
@@ -253,4 +257,16 @@ export function nodeMigrationContext(
     };
   }
   return { caption: null, name: null };
+}
+
+export function latestMigrationChild<T extends Partial<Run>>(
+  visit: MonitorEvent | undefined,
+  children: T[],
+): T | undefined {
+  if (!visit) return undefined;
+  if (visit.child_run_id)
+    return children.find((run) => run.run_id === visit.child_run_id);
+  return children
+    .filter((run) => run.parent_execution_id === visit.execution_id)
+    .sort((a, b) => (b.last_seen ?? "").localeCompare(a.last_seen ?? ""))[0];
 }

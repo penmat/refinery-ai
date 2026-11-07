@@ -48,8 +48,9 @@ from refinery_ai.models import (
     RunStatus,
 )
 from refinery_ai.monitor.cli import monitor
+from refinery_ai.monitor.models import AnalysisSummary
 from refinery_ai.planning_artifacts import MigrationPlanStore
-from refinery_ai.profile_run import ProfileRunner, VerifiedCheckpoint
+from refinery_ai.profile_run import ProfileAnalysis, ProfileRunner, VerifiedCheckpoint
 from refinery_ai.profiles import load_profile
 from refinery_ai.summary import ProjectSummaryService, SummaryError
 from refinery_ai.summary.reporting import summary_markdown
@@ -1019,7 +1020,7 @@ def run(
         )
         configure_logging(logging.DEBUG, console_level=logging.WARNING, log_file=profile_log)
 
-        def analyze_cycle(run_sonar: bool) -> bool:
+        def analyze_cycle(run_sonar: bool) -> ProfileAnalysis:
             snapshot = HarnessRepositoryEnvironment(root).discover(root)
             environment = jdk_resolver.environment(project_runtime_java(snapshot.java_version))
             with selected_jdk(environment):
@@ -1040,10 +1041,20 @@ def run(
                     generate_summary=False,
                 )
             sonar = assessment.analyzers.get("sonarqube")
-            return sonar is not None and sonar.status in {
-                AnalyzerStatus.COMPLETED,
-                AnalyzerStatus.PARTIAL,
-            }
+            return ProfileAnalysis(
+                sonar_available=sonar is not None
+                and sonar.status
+                in {
+                    AnalyzerStatus.COMPLETED,
+                    AnalyzerStatus.PARTIAL,
+                },
+                summary=AnalysisSummary(
+                    java_version=snapshot.java_version,
+                    spring_boot_version=snapshot.spring_boot_version,
+                    build_system=snapshot.build_system.value,
+                    frameworks=snapshot.frameworks,
+                ),
+            )
 
         def plan_cycle() -> RunReport:
             nonlocal refresh_catalog_pending

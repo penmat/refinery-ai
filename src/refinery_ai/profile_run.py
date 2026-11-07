@@ -16,6 +16,7 @@ from refinery_ai.profiles import ModernizationProfile
 if TYPE_CHECKING:
     from refinery_ai.migrations.execution_state import MigrationRequest
     from refinery_ai.migrations.runner import MigrationRunner
+    from refinery_ai.monitor.models import AnalysisSummary
 
 
 class ProfileRunState(BaseModel):
@@ -30,6 +31,12 @@ class ProfileRunResult(BaseModel):
     status: RunStatus
     cycles: int
     message: str
+
+
+@dataclass(frozen=True)
+class ProfileAnalysis:
+    sonar_available: bool
+    summary: AnalysisSummary
 
 
 @dataclass(frozen=True)
@@ -100,7 +107,7 @@ class ProfileRunner:
         repository: Path,
         profile: ModernizationProfile,
         *,
-        analyze: Callable[[bool], bool],
+        analyze: Callable[[bool], bool | ProfileAnalysis],
         plan: Callable[[], RunReport],
         migrate: Callable[[str, VerifiedCheckpoint | None], MigrationRun],
         migration_runner: Callable[[MigrationRequest], MigrationRunner] | None = None,

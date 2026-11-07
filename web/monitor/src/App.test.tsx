@@ -141,7 +141,7 @@ it("lists the ordered migrations when the plan visit is opened", async () => {
   );
   render(<App />);
   fireEvent.click(
-    await screen.findByRole("button", { name: /plan completed/ }),
+    await screen.findByRole("button", { name: /plan.*completed/ }),
   );
   expect(screen.getByText("2 migrations planned")).toBeTruthy();
   const items = screen.getAllByRole("listitem");
@@ -149,4 +149,107 @@ it("lists the ordered migrations when the plan visit is opened", async () => {
     "Spring Fox → Spring Docorg.example.SpringFoxToSpringDoc",
     "Upgrade to Java 17org.example.UpgradeToJava17",
   ]);
+});
+
+it("shows discovery facts and only the recipe from the latest migrate visit", async () => {
+  const root: Run = {
+    run_id: "a".repeat(32),
+    kind: "profile",
+    profile: "Profile",
+    parent_run_id: null,
+    parent_execution_id: null,
+    status: "unknown",
+    first_seen: null,
+    last_seen: null,
+    event_count: 3,
+    diagnostics: [],
+  };
+  const old = {
+    ...root,
+    run_id: "b".repeat(32),
+    kind: "migration" as const,
+    parent_run_id: root.run_id,
+    parent_execution_id: "old",
+    migration_name: "Old recipe",
+  };
+  const child = {
+    ...old,
+    run_id: "c".repeat(32),
+    parent_execution_id: "current",
+    migration_name: "Spring Fox → Spring Doc",
+    recipe: "example.SpringFoxToSpringDoc",
+    step: 1,
+    total_steps: 4,
+    step_status: "failed",
+    failure_reason: "Migration command failed",
+  };
+  const event = (sequence: number, phase: string, execution_id: string) => ({
+    schema_version: 1 as const,
+    run_id: root.run_id,
+    sequence,
+    timestamp: "2026-11-06T11:00:00Z",
+    event_id: execution_id,
+    execution_id,
+    phase,
+    lifecycle: "completed" as const,
+    generation: 0,
+  });
+  const snapshot = {
+    run: root,
+    cursor: 3,
+    diagnostics: [],
+    topology: {
+      kind: "profile",
+      version: "1",
+      historical: true,
+      nodes: [],
+      edges: [],
+    },
+    events: [
+      {
+        ...event(1, "analyze", "analysis"),
+        analysis: {
+          java_version: "11",
+          spring_boot_version: "2.7.18",
+          build_system: "maven",
+          frameworks: ["Spring MVC"],
+        },
+      },
+      event(2, "migrate", "old"),
+      {
+        ...event(3, "migrate", "current"),
+        migrations: [
+          { name: "Another planned recipe", recipe: "example.Other" },
+        ],
+      },
+    ],
+  };
+  vi.stubGlobal("EventSource", Stream);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((path: string) =>
+      Promise.resolve({
+        ok: true,
+        json: async () =>
+          path === "/api/runs"
+            ? { runs: [root, old, child], diagnostics: [] }
+            : snapshot,
+      }),
+    ),
+  );
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /analyze.*completed/ }),
+  );
+  expect(screen.getByText("11")).toBeTruthy();
+  expect(screen.getByText("2.7.18")).toBeTruthy();
+  expect(screen.getByText("Spring MVC")).toBeTruthy();
+  fireEvent.click(
+    screen.getAllByRole("button", { name: /migrate.*completed/ })[0],
+  );
+  expect(screen.getByText("Spring Fox → Spring Doc")).toBeTruthy();
+  expect(screen.getByText("example.SpringFoxToSpringDoc")).toBeTruthy();
+  expect(screen.getByText("Migration command failed")).toBeTruthy();
+  expect(screen.queryByText("Old recipe")).toBeNull();
+  expect(screen.queryByText("Another planned recipe")).toBeNull();
 });

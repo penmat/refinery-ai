@@ -56,29 +56,15 @@ a {
   padding: 28px 18px 20px;
 }
 .brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 25px;
-  font-weight: 650;
-  letter-spacing: -1px;
-  margin: 0 8px 45px;
+  display: block;
+  width: fit-content;
+  margin: 0 8px 28px;
 }
-.brand-mark {
-  background: #2e513e;
-  color: #eef5e9;
-  width: 34px;
-  height: 37px;
+.brand-logo {
+  display: block;
+  width: 76px;
+  height: auto;
   border-radius: 9px;
-  display: grid;
-  place-items: center;
-}
-.brand-ai {
-  font-size: 10px;
-  letter-spacing: 1px;
-  align-self: flex-start;
-  margin-top: 8px;
-  color: #6d806d;
 }
 .workspace-label,
 .sidebar-heading {
@@ -867,11 +853,10 @@ dd {
     width: 170px;
   }
   .brand {
-    font-size: 21px;
     margin-left: 0;
   }
-  .brand-mark {
-    width: 29px;
+  .brand-logo {
+    width: 60px;
   }
   main {
     margin-left: 170px;

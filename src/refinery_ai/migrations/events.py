@@ -41,6 +41,7 @@ class MigrationEvent(BaseModel):
     java: int | None = None
     duration_seconds: float | None = None
     outcome: str | None = None
+    failure_reason: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
     checkpoint: str | None = None
@@ -110,6 +111,7 @@ class MigrationReporter:
         *,
         duration: float | None = None,
         outcome: str | None = None,
+        failure_reason: str | None = None,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
         checkpoint: str | None = None,
@@ -141,7 +143,22 @@ class MigrationReporter:
             generation=state.generation,
             step=state.index if recipe is not None else None,
             recipe=recipe,
-            migration_name=migration_display_name(recipe) if recipe else None,
+            migration_name=(
+                migration_display_name(recipe)
+                if recipe
+                and phase
+                in (
+                    "prepare_step",
+                    "execute_recipe",
+                    "verify_candidate",
+                    "select_repair",
+                    "repair",
+                    "evaluate_repair",
+                    "checkpoint_step",
+                    "record_step_failure",
+                )
+                else None
+            ),
             total_steps=len(state.plan.steps),
             migrations=(
                 describe_migrations(step.recipe for step in state.plan.steps)
@@ -153,6 +170,7 @@ class MigrationReporter:
             java=state.current_java,
             duration_seconds=duration,
             outcome=outcome,
+            failure_reason=failure_reason,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             checkpoint=checkpoint,

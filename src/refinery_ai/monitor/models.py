@@ -30,6 +30,13 @@ class PlannedMigration(BaseModel):
     name: str
 
 
+class AnalysisSummary(BaseModel):
+    java_version: str | None = None
+    spring_boot_version: str | None = None
+    build_system: str | None = None
+    frameworks: list[str] = Field(default_factory=list)
+
+
 class MonitorEvent(BaseModel):
     schema_version: Literal[1] = 1
     run_id: str
@@ -41,9 +48,12 @@ class MonitorEvent(BaseModel):
     lifecycle: Literal["started", "completed", "failed", "cancelled", "interrupted", "usage"]
     generation: int = 0
     outcome: str | None = None
+    analysis: AnalysisSummary | None = None
+    failure_reason: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
     duration_seconds: float | None = None
+    child_run_id: str | None = None
     parent_run_id: str | None = None
     parent_execution_id: str | None = None
     profile: str | None = None
@@ -70,6 +80,9 @@ class RunSummary(BaseModel):
     last_seen: str | None = None
     event_count: int = 0
     verified_recipes: int = 0
+    recipe: str | None = None
+    step_status: str | None = None
+    failure_reason: str | None = None
     migration_name: str | None = None
     step: int | None = None
     total_steps: int | None = None

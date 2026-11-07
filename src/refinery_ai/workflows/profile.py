@@ -20,6 +20,7 @@ from langgraph.types import StateSnapshot
 from refinery_ai.migrations.execution_state import MigrationExecutionState, MigrationRequest
 from refinery_ai.models import MigrationRun, RecipePlan, RunReport, RunStatus
 from refinery_ai.monitor.migration_details import describe_migrations
+from refinery_ai.monitor.models import AnalysisSummary
 from refinery_ai.monitor.recording import (
     InvocationContext,
     ProfileReporter,
@@ -28,6 +29,7 @@ from refinery_ai.monitor.recording import (
 )
 from refinery_ai.monitor.topology import graph_topology, save_topology
 from refinery_ai.profile_run import (
+    ProfileAnalysis,
     ProfileRunResult,
     ProfileRunState,
     VerifiedCheckpoint,
@@ -42,6 +44,7 @@ if TYPE_CHECKING:
 
 class ProfileGraphState(TypedDict):
     monitor_run_id: NotRequired[str]
+    analysis_summary: NotRequired[AnalysisSummary | None]
     schema_version: int
     stored_state: ProfileRunState
     cycle: int
@@ -86,17 +89,25 @@ def build_profile_graph(
             else "reusing SonarQube evidence"
         )
         runner.progress(f"Cycle {cycle}: analyzing ({sonar_note}) ...")
-        sonar_available = runner.analyze(run_sonar)
+        result = runner.analyze(run_sonar)
+        sonar_available = result.sonar_available if isinstance(result, ProfileAnalysis) else result
         if sonar_enabled and not run_sonar and not sonar_available:
             runner.progress("Retained SonarQube evidence is unavailable; running a fresh scan ...")
             run_sonar = True
-            sonar_available = runner.analyze(True)
+            result = runner.analyze(True)
+            sonar_available = (
+                result.sonar_available if isinstance(result, ProfileAnalysis) else result
+            )
         if run_sonar and sonar_available:
             stored_state.sonar_dependency_fingerprint = dependency_fingerprint
         stored_state.cycles += 1
         stored_state.completed = False
         runner.store.save(stored_state)
-        return {"stored_state": stored_state, "cycle": cycle}
+        return {
+            "stored_state": stored_state,
+            "cycle": cycle,
+            "analysis_summary": result.summary if isinstance(result, ProfileAnalysis) else None,
+        }
 
     def plan(state: ProfileGraphState) -> dict[str, object]:
         assert runner is not None
@@ -230,12 +241,14 @@ def build_profile_graph(
                     and isinstance(report.plan, RecipePlan)
                     else None
                 )
+                analysis = update.get("analysis_summary")
                 reporter.emit(
                     name,
                     "completed",
                     execution_id,
                     duration_seconds=time.monotonic() - started,
                     migrations=migrations,
+                    analysis=analysis if isinstance(analysis, AnalysisSummary) else None,
                 )
                 return update
             except BaseException as error:
