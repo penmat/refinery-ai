@@ -1,8 +1,11 @@
 """Versioned, safe monitor API models."""
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+from refinery_ai.assessment.models import Assessment, Category, Deduction
 
 
 class TopologyNode(BaseModel):
@@ -30,7 +33,30 @@ class PlannedMigration(BaseModel):
     name: str
 
 
+class AssessmentScore(BaseModel):
+    assessment_id: str
+    created_at: datetime
+    profile_fingerprint: str
+    completeness: float
+    overall: float | None
+    categories: dict[Category, float | None]
+    deductions: list[Deduction]
+
+    @classmethod
+    def from_assessment(cls, assessment: Assessment) -> "AssessmentScore":
+        return cls(
+            assessment_id=assessment.assessment_id,
+            created_at=assessment.created_at,
+            profile_fingerprint=assessment.profile.fingerprint,
+            completeness=assessment.completeness,
+            overall=assessment.score.overall,
+            categories=assessment.score.categories,
+            deductions=sorted(assessment.score.deductions, key=lambda item: -item.points)[:3],
+        )
+
+
 class AnalysisSummary(BaseModel):
+    assessment_score: AssessmentScore | None = None
     java_version: str | None = None
     spring_boot_version: str | None = None
     build_system: str | None = None

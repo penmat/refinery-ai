@@ -48,7 +48,7 @@ from refinery_ai.models import (
     RunStatus,
 )
 from refinery_ai.monitor.cli import monitor
-from refinery_ai.monitor.models import AnalysisSummary
+from refinery_ai.monitor.models import AnalysisSummary, AssessmentScore
 from refinery_ai.planning_artifacts import MigrationPlanStore
 from refinery_ai.profile_run import ProfileAnalysis, ProfileRunner, VerifiedCheckpoint
 from refinery_ai.profiles import load_profile
@@ -1049,6 +1049,7 @@ def run(
                     AnalyzerStatus.PARTIAL,
                 },
                 summary=AnalysisSummary(
+                    assessment_score=AssessmentScore.from_assessment(assessment),
                     java_version=snapshot.java_version,
                     spring_boot_version=snapshot.spring_boot_version,
                     build_system=snapshot.build_system.value,

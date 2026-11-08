@@ -4,6 +4,10 @@ This repository is part of the refinery-ai project.
 
 ## Development workflow
 
+Implement each new Refinery feature in its own Git worktree. Use the managed
+worktree tool when available. Keep the original checkout and any running
+Refinery processes undisturbed.
+
 Use the Superpowers skills for all development work in this repository, including features, bug fixes, refactoring, and tests.
 
 Before starting development, load and follow `superpowers:using-superpowers`. Use the available skill discovery mechanism to locate the installed skills and read their current instructions rather than relying on memory.

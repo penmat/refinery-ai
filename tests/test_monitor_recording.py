@@ -157,9 +157,12 @@ def test_profile_persists_tokens_without_telemetry_export(tmp_path, monkeypatch)
 
 
 def test_analyze_summary_is_available_in_replay(tmp_path):
+    from refinery_ai.assessment.engine import AssessmentEngine
     from refinery_ai.monitor.journals import JournalCatalog
-    from refinery_ai.monitor.models import AnalysisSummary
+    from refinery_ai.monitor.models import AnalysisSummary, AssessmentScore
     from refinery_ai.profile_run import ProfileAnalysis
+
+    assessment = AssessmentEngine().assess(tmp_path)
 
     ProfileRunner(
         tmp_path,
@@ -167,6 +170,7 @@ def test_analyze_summary_is_available_in_replay(tmp_path):
         analyze=lambda _: ProfileAnalysis(
             False,
             AnalysisSummary(
+                assessment_score=AssessmentScore.from_assessment(assessment),
                 java_version="11",
                 spring_boot_version="2.7.18",
                 build_system="maven",
@@ -180,9 +184,16 @@ def test_analyze_summary_is_available_in_replay(tmp_path):
     events = catalog.snapshot(catalog.list_runs()[0].run_id).events
     event = next(e for e in events if e.phase == "analyze" and e.lifecycle == "completed")
     assert event.analysis is not None
-    assert event.analysis.model_dump() == {
+    assert event.analysis.model_dump(exclude={"assessment_score"}) == {
         "java_version": "11",
         "spring_boot_version": "2.7.18",
         "build_system": "maven",
         "frameworks": ["Spring MVC"],
     }
+    recorded = event.analysis.assessment_score
+    assert recorded is not None
+    assert recorded.assessment_id == assessment.assessment_id
+    assert recorded.profile_fingerprint == assessment.profile.fingerprint
+    assert recorded.overall == assessment.score.overall
+    assert recorded.categories == assessment.score.categories
+    assert recorded.completeness == assessment.completeness

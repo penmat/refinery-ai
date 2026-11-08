@@ -1,3 +1,4 @@
+import { Scorecard } from "./Scorecard";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   Activity,
@@ -333,6 +334,18 @@ export default function App() {
                     : label(summary.status)}
                 </span>
               </div>
+              {current?.kind === "profile" && (
+                <Scorecard
+                  key={current.run_id}
+                  assessments={state.events.flatMap((event) =>
+                    event.phase === "analyze" &&
+                    event.lifecycle === "completed" &&
+                    event.analysis?.assessment_score
+                      ? [event.analysis.assessment_score]
+                      : [],
+                  )}
+                />
+              )}
               <div className="metrics">
                 <Metric
                   icon={<Clock3 size={16} />}

@@ -1,4 +1,15 @@
+export interface AssessmentScore {
+  assessment_id: string;
+  created_at: string;
+  profile_fingerprint: string;
+  completeness: number;
+  overall: number | null;
+  categories: Record<string, number | null>;
+  deductions: { category: string; points: number; reason: string }[];
+}
+
 export interface AnalysisSummary {
+  assessment_score?: AssessmentScore | null;
   java_version?: string | null;
   spring_boot_version?: string | null;
   build_system?: string | null;

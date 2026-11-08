@@ -1055,3 +1055,120 @@ dd {
   color: #65814f;
   line-height: 1.6;
 }
+
+.scorecard {
+  margin-bottom: 16px;
+  border: 1px solid #dde4d7;
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+.scorecard-empty {
+  padding: 16px 20px;
+}
+.scorecard-empty h3,
+.scorecard-empty p {
+  margin: 0;
+}
+.scorecard-empty p {
+  margin-top: 5px;
+  color: #667461;
+  font-size: 12px;
+}
+.scorecard-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: 22px;
+  width: 100%;
+  padding: 16px 20px;
+  text-align: left;
+}
+.scorecard-toggle:hover {
+  background: #f5f8f1;
+}
+.scorecard-toggle:focus-visible {
+  outline: 2px solid #4d7543;
+  outline-offset: -3px;
+}
+.scorecard-title,
+.scorecard-reading {
+  display: grid;
+  gap: 4px;
+}
+.scorecard-title small,
+.scorecard-reading small {
+  font-size: 11px;
+  color: #61705c;
+}
+.scorecard-reading strong {
+  font-size: 19px;
+  font-variant-numeric: tabular-nums;
+}
+.scorecard-change {
+  font-size: 12px;
+  border-radius: 8px;
+  padding: 5px 9px;
+  background: #edf0ea;
+  color: #4e5c49;
+}
+.scorecard-change.gain {
+  background: #e5f1dd;
+  color: #305e29;
+}
+.scorecard-change.loss {
+  background: #fbeae4;
+  color: #963c24;
+}
+.scorecard-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+.scorecard-details {
+  padding: 0 20px 16px;
+}
+.scorecard-details table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+.scorecard-details caption {
+  text-align: left;
+  font-weight: 600;
+  padding: 12px 0;
+}
+.scorecard-details th,
+.scorecard-details td {
+  border-top: 1px solid #e4e9e0;
+  padding: 8px 5px;
+}
+.scorecard-deductions {
+  font-size: 12px;
+}
+.scorecard-deductions h4 {
+  margin-bottom: 6px;
+}
+.scorecard-deductions ul {
+  padding-left: 20px;
+  margin: 0;
+}
+.scorecard-deductions li {
+  margin-top: 5px;
+}
+@media (max-width: 950px) {
+  .scorecard-toggle {
+    grid-template-columns: 1fr 1fr auto;
+    gap: 10px;
+  }
+  .scorecard-title {
+    grid-column: 1 / -1;
+  }
+  .scorecard-change {
+    grid-column: 1 / 3;
+    justify-self: start;
+  }
+  .scorecard-toggle svg {
+    grid-column: 3;
+    grid-row: 2 / 4;
+  }
+}
