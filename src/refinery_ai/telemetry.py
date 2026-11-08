@@ -177,7 +177,7 @@ def observe_llm(
         _observation.reset(token)
 
 
-def record_llm_usage(usage: Any, *, model: str | None = None) -> None:
+def record_llm_usage(usage: Any, *, model: str | None = None, price_usage: bool = True) -> None:
     """Record token and request usage using the active Refinery workflow dimensions."""
 
     if usage is None:
@@ -207,6 +207,8 @@ def record_llm_usage(usage: Any, *, model: str | None = None) -> None:
         journal_usage(
             reported("input_tokens", "prompt_tokens"),
             reported("output_tokens", "completion_tokens"),
+            model=model,
+            price_usage=price_usage,
         )
     if _token_counter is None or _request_counter is None:
         return

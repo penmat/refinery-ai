@@ -37,18 +37,23 @@ def parent_invocation(value: InvocationContext) -> Iterator[None]:
         current_invocation.reset(token)
 
 
-_usage_sink: ContextVar[Callable[[int | None, int | None], object] | None] = ContextVar(
-    "monitor_usage_sink", default=None
-)
+UsageSink = Callable[[int | None, int | None, str | None, float | None], object]
+
+_usage_sink: ContextVar[UsageSink | None] = ContextVar("monitor_usage_sink", default=None)
 
 
 @contextmanager
-def capture_usage(sink: Callable[[int | None, int | None], object]) -> Iterator[None]:
+def capture_usage(sink: UsageSink) -> Iterator[None]:
     lock = Lock()
 
-    def write(input_tokens: int | None, output_tokens: int | None) -> None:
+    def write(
+        input_tokens: int | None,
+        output_tokens: int | None,
+        model: str | None,
+        estimated_cost_usd: float | None,
+    ) -> None:
         with lock:
-            sink(input_tokens, output_tokens)
+            sink(input_tokens, output_tokens, model, estimated_cost_usd)
 
     token = _usage_sink.set(write)
     try:
@@ -57,10 +62,19 @@ def capture_usage(sink: Callable[[int | None, int | None], object]) -> Iterator[
         _usage_sink.reset(token)
 
 
-def journal_usage(input_tokens: int | None, output_tokens: int | None) -> None:
+def journal_usage(
+    input_tokens: int | None,
+    output_tokens: int | None,
+    *,
+    model: str | None = None,
+    price_usage: bool = True,
+) -> None:
     sink = _usage_sink.get()
     if sink is not None and (input_tokens is not None or output_tokens is not None):
-        sink(input_tokens, output_tokens)
+        from refinery_ai.monitor.pricing import estimate_cost
+
+        cost = estimate_cost(model, input_tokens, output_tokens) if price_usage else None
+        sink(input_tokens, output_tokens, model, cost)
 
 
 class ProfileReporter:
@@ -94,6 +108,8 @@ class ProfileReporter:
         *,
         outcome: str | None = None,
         analysis: AnalysisSummary | None = None,
+        model: str | None = None,
+        estimated_cost_usd: float | None = None,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
         duration_seconds: float | None = None,
@@ -116,6 +132,8 @@ class ProfileReporter:
             outcome=outcome,
             analysis=analysis,
             child_run_id=child_run_id,
+            model=model,
+            estimated_cost_usd=estimated_cost_usd,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             duration_seconds=duration_seconds,

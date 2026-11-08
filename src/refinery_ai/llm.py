@@ -171,6 +171,8 @@ def run_tool_loop(
         record_llm_usage(
             _message_value(last_response, "usage"),
             model=_message_value(last_response, "model", model),
+            price_usage=not config.ollama_base_url
+            and not model.startswith(("ollama/", "ollama_chat/")),
         )
         response_message = last_response.choices[0].message
         content = _message_value(response_message, "content")

@@ -42,6 +42,8 @@ class MigrationEvent(BaseModel):
     duration_seconds: float | None = None
     outcome: str | None = None
     failure_reason: str | None = None
+    model: str | None = None
+    estimated_cost_usd: float | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
     checkpoint: str | None = None
@@ -112,6 +114,8 @@ class MigrationReporter:
         duration: float | None = None,
         outcome: str | None = None,
         failure_reason: str | None = None,
+        model: str | None = None,
+        estimated_cost_usd: float | None = None,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
         checkpoint: str | None = None,
@@ -171,6 +175,8 @@ class MigrationReporter:
             duration_seconds=duration,
             outcome=outcome,
             failure_reason=failure_reason,
+            model=model,
+            estimated_cost_usd=estimated_cost_usd,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             checkpoint=checkpoint,

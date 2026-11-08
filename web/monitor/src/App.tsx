@@ -382,8 +382,22 @@ export default function App() {
                 <Metric
                   icon={<Coins size={16} />}
                   label="Estimated cost"
-                  value="Unavailable"
-                  note="Pricing data is not recorded"
+                  value={
+                    summary.cost == null
+                      ? "Unavailable"
+                      : summary.cost.toLocaleString(undefined, {
+                          style: "currency",
+                          currency: "USD",
+                          maximumFractionDigits: 6,
+                        })
+                  }
+                  note={
+                    summary.cost == null
+                      ? "No priced usage recorded"
+                      : summary.costPartial
+                        ? "Partial estimate · some usage unpriced"
+                        : "Standard text-token rates · recorded usage"
+                  }
                 />
                 <Metric
                   icon={<AlertCircle size={16} />}

@@ -136,7 +136,11 @@ def test_profile_persists_tokens_without_telemetry_export(tmp_path, monkeypatch)
     monkeypatch.setattr("refinery_ai.telemetry._request_counter", None)
 
     def plan():
-        record_llm_usage({"prompt_tokens": 13, "completion_tokens": 5})
+        record_llm_usage(
+            {"prompt_tokens": 13, "completion_tokens": 5},
+            model="openai:gpt-5.6-luna",
+        )
+        record_llm_usage({"input_tokens": 7, "output_tokens": 2}, model="ollama:local")
         record_llm_usage({"input_tokens": 0, "output_tokens": 0, "requests": 0})
         return report(tmp_path, "plan", [])
 
@@ -151,9 +155,14 @@ def test_profile_persists_tokens_without_telemetry_export(tmp_path, monkeypatch)
     run = catalog.list_runs()[0]
     events = catalog.snapshot(run.run_id).events
     assert [(e.input_tokens, e.output_tokens) for e in events if e.lifecycle == "usage"] == [
-        (13, 5)
+        (13, 5),
+        (7, 2),
     ]
-    assert (run.input_tokens, run.output_tokens) == (13, 5)
+    assert (run.input_tokens, run.output_tokens) == (20, 7)
+    priced = next(e for e in events if e.model == "openai:gpt-5.6-luna")
+    assert priced.estimated_cost_usd is not None
+    assert run.estimated_cost_usd == priced.estimated_cost_usd
+    assert run.unpriced_usage == 1
 
 
 def test_analyze_summary_is_available_in_replay(tmp_path):

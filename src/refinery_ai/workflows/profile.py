@@ -223,12 +223,14 @@ def build_profile_graph(
                 with (
                     parent_invocation(InvocationContext(reporter.run_id, execution_id)),
                     capture_usage(
-                        lambda input_tokens, output_tokens: reporter.emit(
+                        lambda input_tokens, output_tokens, model, cost: reporter.emit(
                             name,
                             "usage",
                             execution_id,
                             input_tokens=input_tokens,
                             output_tokens=output_tokens,
+                            model=model,
+                            estimated_cost_usd=cost,
                         )
                     ),
                 ):

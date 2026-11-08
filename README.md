@@ -781,7 +781,11 @@ The timing card shows the span covered by recorded events until the run finishes
 Input and output token counts appear as supported model calls report usage, including
 usage recorded by child migrations. No telemetry collector is required. Older
 journals and backends that do not report usage show **Unavailable**. Estimated cost
-is not recorded.
+sums journaled USD estimates at standard input and output text-token rates. The
+monitor labels the estimate partial when any recorded usage lacks pricing. Rates
+come from LiteLLM's model cost map, with a documented GPT-5.6 Luna fallback.
+Estimates exclude caching discounts, context and service-tier adjustments, and
+external tool fees. Earlier journals are not repriced.
 History lives with the repository and is removed if its state directory is deleted.
 
 Frontend development: `cd web/monitor`, `npm ci`, `npm test -- --run`,

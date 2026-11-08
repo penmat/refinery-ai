@@ -76,6 +76,8 @@ class MonitorEvent(BaseModel):
     outcome: str | None = None
     analysis: AnalysisSummary | None = None
     failure_reason: str | None = None
+    model: str | None = None
+    estimated_cost_usd: float | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
     duration_seconds: float | None = None
@@ -112,6 +114,8 @@ class RunSummary(BaseModel):
     migration_name: str | None = None
     step: int | None = None
     total_steps: int | None = None
+    estimated_cost_usd: float | None = None
+    unpriced_usage: int = 0
     input_tokens: int | None = None
     output_tokens: int | None = None
     diagnostics: list[str] = Field(default_factory=list)

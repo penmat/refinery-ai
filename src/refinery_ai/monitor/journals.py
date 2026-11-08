@@ -250,7 +250,11 @@ class JournalCatalog:
                 step_status = current_step.outcome or f"{current_step.phase} completed"
                 if current_step.phase == "checkpoint_step":
                     step_status = "verified"
+        usage = [e for e in events if e.lifecycle == "usage"]
+        costs = [e.estimated_cost_usd for e in usage if e.estimated_cost_usd is not None]
         summary = RunSummary(
+            estimated_cost_usd=sum(costs) if costs else None,
+            unpriced_usage=len(usage) - len(costs),
             recipe=current_step.recipe if current_step else None,
             step_status=step_status,
             failure_reason=current_step.failure_reason if current_step else None,

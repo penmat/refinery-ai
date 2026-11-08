@@ -114,7 +114,7 @@ def build_migration_graph(
                     return operation(ctx, value)
                 else:
                     with capture_usage(
-                        lambda input_tokens, output_tokens: reporter.emit(
+                        lambda input_tokens, output_tokens, model, cost: reporter.emit(
                             name,
                             "usage",
                             before,
@@ -122,6 +122,8 @@ def build_migration_graph(
                             stage=stage,
                             input_tokens=input_tokens,
                             output_tokens=output_tokens,
+                            model=model,
+                            estimated_cost_usd=cost,
                         )
                     ):
                         return operation(ctx, value)

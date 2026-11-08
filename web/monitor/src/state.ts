@@ -35,6 +35,7 @@ export interface MonitorEvent {
   outcome?: string | null;
   analysis?: AnalysisSummary | null;
   child_run_id?: string | null;
+  estimated_cost_usd?: number | null;
   input_tokens?: number | null;
   output_tokens?: number | null;
   duration_seconds?: number | null;
@@ -75,6 +76,8 @@ export interface Run {
   failure_reason?: string | null;
   step?: number | null;
   total_steps?: number | null;
+  estimated_cost_usd?: number | null;
+  unpriced_usage?: number;
   input_tokens?: number | null;
   output_tokens?: number | null;
   diagnostics: string[];
@@ -152,7 +155,12 @@ export function summarize(
   state: State,
   children: Pick<
     Run,
-    "run_id" | "verified_recipes" | "input_tokens" | "output_tokens"
+    | "run_id"
+    | "verified_recipes"
+    | "input_tokens"
+    | "output_tokens"
+    | "estimated_cost_usd"
+    | "unpriced_usage"
   >[] = [],
 ) {
   const terminal = [...state.events]
@@ -188,6 +196,20 @@ export function summarize(
       .filter((count) => count != null);
     return counts.length ? counts.reduce((sum, count) => sum + count, 0) : null;
   };
+  const localUsage = state.events.filter(
+    (event) => event.lifecycle === "usage",
+  );
+  const costs = [...localUsage, ...uniqueChildren]
+    .map((item) => item.estimated_cost_usd)
+    .filter((cost) => cost != null);
+  const costPartial =
+    localUsage.some((event) => event.estimated_cost_usd == null) ||
+    uniqueChildren.some(
+      (child) =>
+        (child.unpriced_usage ?? 0) > 0 ||
+        (child.estimated_cost_usd == null &&
+          (child.input_tokens != null || child.output_tokens != null)),
+    );
   const inputTokens = total("input_tokens");
   const outputTokens = total("output_tokens");
   return {
@@ -197,7 +219,8 @@ export function summarize(
       inputTokens === null && outputTokens === null
         ? null
         : (inputTokens ?? 0) + (outputTokens ?? 0),
-    cost: null,
+    cost: costs.length ? costs.reduce((sum, cost) => sum + cost, 0) : null,
+    costPartial,
     elapsed,
     recordedSpan,
     recipes: children.length

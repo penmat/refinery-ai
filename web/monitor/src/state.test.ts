@@ -205,3 +205,23 @@ it("omits execution status for the graph boundaries only", () => {
   expect(nodeStatus(state, "__end__")).toBeNull();
   expect(nodeStatus(state, "plan")).toBe("not visited");
 });
+
+it("totals recorded cost and flags unpriced usage, including child runs", () => {
+  const priced = event(1, {
+    lifecycle: "usage",
+    input_tokens: 20,
+    estimated_cost_usd: 0.003,
+  });
+  const unpriced = event(2, { lifecycle: "usage", input_tokens: 20 });
+  const child = {
+    run_id: "child",
+    estimated_cost_usd: 0.005,
+    unpriced_usage: 0,
+  };
+  const state = applyEvents(emptyState(), [priced, unpriced, priced]);
+  expect(summarize(state, [child, child])).toMatchObject({
+    cost: 0.008,
+    costPartial: true,
+  });
+  expect(summarize(applyEvents(emptyState(), [unpriced])).cost).toBeNull();
+});
