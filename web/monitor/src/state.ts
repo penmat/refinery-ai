@@ -137,7 +137,8 @@ export function applyEvents(state: State, events: MonitorEvent[]): State {
   }
   return next;
 }
-export function nodeStatus(state: State, phase: string): string {
+export function nodeStatus(state: State, phase: string): string | null {
+  if (phase === "__start__" || phase === "__end__") return null;
   const event = Object.values(state.visits)
     .filter((v) => v.phase === phase)
     .sort((a, b) => b.sequence - a.sequence)[0];

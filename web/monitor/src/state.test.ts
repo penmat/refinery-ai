@@ -198,3 +198,10 @@ it("shows recipe names on execution nodes and tolerates legacy records", () => {
     name: null,
   });
 });
+
+it("omits execution status for the graph boundaries only", () => {
+  const state = emptyState();
+  expect(nodeStatus(state, "__start__")).toBeNull();
+  expect(nodeStatus(state, "__end__")).toBeNull();
+  expect(nodeStatus(state, "plan")).toBe("not visited");
+});

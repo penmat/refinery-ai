@@ -28,13 +28,13 @@ import {
 } from "./state";
 import "@xyflow/react/dist/style.css";
 function WorkflowNode({ data }: NodeProps) {
-  const status = String(data.status);
+  const status = typeof data.status === "string" ? data.status : null;
   const Icon =
     status === "completed"
       ? Check
       : status === "unconfirmed"
         ? HelpCircle
-        : status === "not visited"
+        : status === null || status === "not visited"
           ? Circle
           : AlertCircle;
   return (
@@ -48,7 +48,7 @@ function WorkflowNode({ data }: NodeProps) {
           event.currentTarget.click();
         }
       }}
-      className={`workflow-node status-${status.replaceAll(" ", "-")} ${data.selected ? "is-selected" : ""}`}
+      className={`workflow-node ${status ? `status-${status.replaceAll(" ", "-")}` : ""} ${data.selected ? "is-selected" : ""}`}
     >
       <Handle type="target" position={Position.Top} />
       <div className="node-heading">
@@ -58,17 +58,19 @@ function WorkflowNode({ data }: NodeProps) {
         <strong>{String(data.label)}</strong>
         {data.childCount ? <ArrowUpRight size={14} /> : null}
       </div>
-      <div className="node-meta">
-        <span>
-          {status === "unconfirmed" ? "Started · status unconfirmed" : status}
-        </span>
-        {Number(data.visits) > 0 && (
+      {status !== null && (
+        <div className="node-meta">
           <span>
-            {String(data.visits)}{" "}
-            {Number(data.visits) === 1 ? "visit" : "visits"}
+            {status === "unconfirmed" ? "Started · status unconfirmed" : status}
           </span>
-        )}
-      </div>
+          {Number(data.visits) > 0 && (
+            <span>
+              {String(data.visits)}{" "}
+              {Number(data.visits) === 1 ? "visit" : "visits"}
+            </span>
+          )}
+        </div>
+      )}
       {data.caption || data.migrationName ? (
         <div
           className="node-migration-context"
