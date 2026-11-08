@@ -78,29 +78,43 @@ class MigrationLease:
         self.token = _active.set(self)
         return self
 
+    def _retire_finished_group(self, record: Path) -> int | None:
+        safe_owned_path(self.root, str(record.relative_to(self.root)))
+        group = json.loads(record.read_text())["group"]
+        if not isinstance(group, int) or group <= 1:
+            raise RuntimeError(f"Invalid owned process record: {record}")
+        try:
+            os.killpg(group, 0)
+        except ProcessLookupError:
+            record.unlink()
+            return None
+        except PermissionError:
+            pass
+        return group
+
     def assert_children_stopped(self) -> None:
         # Check all prior runs in this checkout, not just the run being resumed.
         for record in (self.root / "processes").glob("*/*.json"):
-            safe_owned_path(self.root, str(record.relative_to(self.root)))
-            group = json.loads(record.read_text())["group"]
-            if not isinstance(group, int) or group <= 1:
-                raise RuntimeError(f"Invalid owned process record: {record}")
-            try:
-                os.killpg(group, 0)
-            except ProcessLookupError:
-                continue
-            except PermissionError:
-                pass
-            raise RuntimeError(
-                f"Owned process group {group} may still be active; refusing recovery"
-            )
+            group = self._retire_finished_group(record)
+            if group is not None:
+                raise RuntimeError(
+                    f"Owned process group {group} may still be active; refusing recovery"
+                )
 
     def __exit__(self, *arguments: Any) -> None:
-        if self.token is not None:
-            _active.reset(self.token)
-        if self.descriptor is not None:
-            os.close(self.descriptor)
-            self.descriptor = None
+        try:
+            if self.token is not None:
+                _active.reset(self.token)
+                self.token = None
+            if self.descriptor is not None:
+                for record in self.records.glob("*.json"):
+                    # Cleanup is best effort. Recovery validates any records left behind.
+                    with contextlib.suppress(OSError, ValueError, KeyError, RuntimeError):
+                        self._retire_finished_group(record)
+        finally:
+            if self.descriptor is not None:
+                os.close(self.descriptor)
+                self.descriptor = None
 
 
 def spawn_owned(

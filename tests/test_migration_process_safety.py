@@ -89,3 +89,12 @@ def test_git_commands_register_owned_processes(tmp_path: Path) -> None:
     with MigrationLease(tmp_path, Path(".refinery"), "git") as lease:
         GitWorktreeManager._git(tmp_path, "init", "-q")
         assert list(lease.records.glob("*.json"))
+
+
+def test_released_lease_retires_finished_process_records(tmp_path: Path) -> None:
+    with MigrationLease(tmp_path, Path(".refinery"), "first") as lease:
+        child = spawn_owned([sys.executable, "-c", "print('ok')"], cwd=tmp_path)
+        assert child.communicate(timeout=5)[0].strip() == b"ok"
+        assert list(lease.records.glob("*.json"))
+
+    assert not list(lease.records.glob("*.json"))
