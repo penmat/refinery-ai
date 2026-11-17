@@ -74,6 +74,7 @@ class MonitorEvent(BaseModel):
     lifecycle: Literal["started", "completed", "failed", "cancelled", "interrupted", "usage"]
     generation: int = 0
     outcome: str | None = None
+    apply: bool | None = None
     analysis: AnalysisSummary | None = None
     failure_reason: str | None = None
     model: str | None = None
@@ -97,6 +98,29 @@ class MonitorEvent(BaseModel):
     checkpoint: str | None = None
 
 
+class NodeExecutionEntry(BaseModel):
+    id: str
+    node: str = "migrate"
+    run_id: str
+    parent_execution_id: str | None = None
+    generation: int
+    step: int
+    recipe: str
+    label: str
+    attempt: int
+    status: Literal[
+        "active",
+        "applied",
+        "verified",
+        "failed",
+        "skipped",
+        "cancelled",
+        "interrupted",
+        "previewed",
+        "completed",
+    ] = "active"
+
+
 class RunSummary(BaseModel):
     run_id: str
     kind: Literal["profile", "migration"]
@@ -108,6 +132,7 @@ class RunSummary(BaseModel):
     last_seen: str | None = None
     event_count: int = 0
     verified_recipes: int = 0
+    execution_history: list[NodeExecutionEntry] = Field(default_factory=list)
     recipe: str | None = None
     step_status: str | None = None
     failure_reason: str | None = None

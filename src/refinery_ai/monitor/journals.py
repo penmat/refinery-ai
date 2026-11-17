@@ -10,6 +10,7 @@ from typing import Literal
 from pydantic import ValidationError
 
 from refinery_ai.migrations.run_store import safe_owned_path, safe_state_root
+from refinery_ai.monitor.history import migration_history
 from refinery_ai.monitor.models import GraphTopology, MonitorEvent, RunSnapshot, RunSummary
 from refinery_ai.monitor.topology import current_topology
 
@@ -253,6 +254,7 @@ class JournalCatalog:
         usage = [e for e in events if e.lifecycle == "usage"]
         costs = [e.estimated_cost_usd for e in usage if e.estimated_cost_usd is not None]
         summary = RunSummary(
+            execution_history=migration_history(events) if kind == "migration" else [],
             estimated_cost_usd=sum(costs) if costs else None,
             unpriced_usage=len(usage) - len(costs),
             recipe=current_step.recipe if current_step else None,
