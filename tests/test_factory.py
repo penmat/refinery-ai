@@ -148,13 +148,9 @@ def test_planner_rules_capture_spring_boot_java_17_ordering() -> None:
 
 
 def test_planner_uses_the_configured_ollama_api_base() -> None:
-    planner = create_planner(
-        "ollama:gemma4:latest", ollama_base_url="http://ollama.test:11434/"
-    )
+    planner = create_planner("ollama:gemma4:latest", ollama_base_url="http://ollama.test:11434/")
 
-    assert str(cast(ChatOpenAI, planner.model).openai_api_base) == (
-        "http://ollama.test:11434/v1"
-    )
+    assert str(cast(ChatOpenAI, planner.model).openai_api_base) == ("http://ollama.test:11434/v1")
 
 
 def test_openai_planner_uses_the_responses_api_for_reasoning_tools() -> None:
@@ -887,8 +883,6 @@ def test_plan_command_runs_ai_planner_and_prints_its_output(
             "Upgrade Java",
             "--repository",
             str(tmp_path),
-            "--target-java",
-            "21",
             "--refresh-recipe-catalog",
         ],
     )
@@ -898,7 +892,7 @@ def test_plan_command_runs_ai_planner_and_prints_its_output(
         "recommendations": [recommendation.model_dump(mode="json")]
     }
     assert calls == [
-        (tmp_path, ModernizationGoal(description="Upgrade Java", target_java=21), True)
+        (tmp_path, ModernizationGoal(description="Upgrade Java", target_java=None), True)
     ]
 
 

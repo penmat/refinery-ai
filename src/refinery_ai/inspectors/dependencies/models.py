@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 
 class DependencyAnalysisError(RuntimeError):
@@ -22,6 +23,8 @@ class ResolvedDependency:
     packaging: str | None = None
     classifier: str | None = None
     direct: bool = False
+    module: str = "."
+    dependency_path: tuple[str, ...] = ()
 
     @property
     def coordinate(self) -> str:
@@ -34,3 +37,8 @@ class Vulnerability:
     modified: str | None
     summary: str | None
     severity: str
+    aliases: list[str] = field(default_factory=list)
+    affected: list[dict[str, Any]] = field(default_factory=list)
+    references: list[dict[str, Any]] = field(default_factory=list)
+    withdrawn: str | None = None
+    retrieved_at: str | None = None

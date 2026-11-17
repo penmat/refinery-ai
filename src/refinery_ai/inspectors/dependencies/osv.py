@@ -6,6 +6,7 @@ import json
 import math
 import ssl
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -42,9 +43,15 @@ class OsvClient:
             if not isinstance(results, list) or len(results) != len(batch):
                 raise DependencyAnalysisError("OSV returned an unexpected batch response")
             for purl, result in zip(batch, results, strict=True):
-                if not isinstance(result, dict):
-                    continue
-                for item in result.get("vulns", []):
+                if not isinstance(result, dict) or "error" in result:
+                    raise DependencyAnalysisError("OSV returned an unexpected query result")
+                entries = result.get("vulns", [])
+                if not isinstance(entries, list) or any(
+                    not isinstance(v, dict) or not isinstance(v.get("id"), str) or not v["id"]
+                    for v in entries
+                ):
+                    raise DependencyAnalysisError("OSV returned unexpected vulnerability entries")
+                for item in entries:
                     if isinstance(item, dict) and isinstance(item.get("id"), str):
                         vulnerability_id = item["id"]
                         ids_by_purl[purl].add(vulnerability_id)
@@ -75,6 +82,11 @@ class OsvClient:
             modified=payload.get("modified") if isinstance(payload.get("modified"), str) else None,
             summary=payload.get("summary") if isinstance(payload.get("summary"), str) else None,
             severity=_severity(payload),
+            aliases=[v for v in payload.get("aliases", []) if isinstance(v, str)],
+            affected=[v for v in payload.get("affected", []) if isinstance(v, dict)],
+            references=[v for v in payload.get("references", []) if isinstance(v, dict)],
+            withdrawn=payload.get("withdrawn"),
+            retrieved_at=datetime.now(UTC).isoformat(),
         )
 
     def _request_json(

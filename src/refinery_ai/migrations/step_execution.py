@@ -218,6 +218,8 @@ def publish_result(ctx: MigrationExecutionContext, state: MigrationExecutionStat
 
 def finish_run(ctx: MigrationExecutionContext, state: MigrationExecutionState) -> MigrationRun:
     result = MigrationRun(
+        modernization_plan_id=state.plan.modernization_plan_id,
+        modernization_plan_digest=state.plan.modernization_plan_digest,
         plan_id=state.plan.plan_id,
         status=RunStatus(state.status),
         run_id=state.run_id,

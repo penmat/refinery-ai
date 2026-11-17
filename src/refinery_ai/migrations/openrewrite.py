@@ -25,6 +25,7 @@ class OpenRewriteMigrationRunner:
             timeout=timeout,
             recipe_artifact=step.recipe_artifact or _infer_recipe_artifact(step.recipe),
             environment=environment,
+            **({"options": step.options} if step.options else {}),
         )
 
 

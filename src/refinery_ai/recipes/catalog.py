@@ -55,6 +55,7 @@ class RecipeCatalogSession:
         self._sources = tuple(sources)
         self._by_name = {source.recipe: source for source in sources}
         self.allowed_recipes: set[str] = set()
+        self.inspected_recipes: set[str] = set()
         self.recipe_artifacts: dict[str, str] = {}
 
     @property
@@ -82,9 +83,7 @@ class RecipeCatalogSession:
             RecipeIndexEntry(
                 recipe=source.recipe,
                 display_name=source.display_name,
-                description=" ".join(source.description.split())[
-                    :MAX_INDEX_DESCRIPTION_CHARACTERS
-                ],
+                description=" ".join(source.description.split())[:MAX_INDEX_DESCRIPTION_CHARACTERS],
                 repository=source.repository,
                 category=_category(source),
             )
@@ -124,6 +123,7 @@ class RecipeCatalogSession:
         if source is None:
             return None
         self._allow([source])
+        self.inspected_recipes.add(recipe)
         return RecipeDetail(
             **self._summary(source).model_dump(),
             file_path=source.file_path,

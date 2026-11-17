@@ -14,9 +14,7 @@ def load_planner_rules() -> str:
 
     root = Path(__file__).with_name("refinery-context")
     documents = sorted(
-        path
-        for path in root.rglob("*.md")
-        if path.name not in {"index.md", "log.md"}
+        path for path in root.rglob("*.md") if path.name not in {"index.md", "log.md"}
     )
     if not documents:
         raise RuntimeError(f"No planner rule concepts found in OKF bundle {root}")
@@ -116,6 +114,8 @@ class MigrationPlanStore:
             return None
         artifact = PersistedMigrationPlan(
             plan_id=report.run_id,
+            modernization_plan_id=report.modernization_plan_id,
+            modernization_plan_digest=report.modernization_plan_digest,
             profile=report.profile,
             snapshot=report.snapshot,
             steps=report.plan.recommendations,

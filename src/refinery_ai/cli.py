@@ -689,9 +689,12 @@ def mcp(
 
 @app.command()
 def plan(
-    subject: Annotated[str, typer.Argument(help="Java repository path, or a modernization goal")],
+    subject: Annotated[
+        str, typer.Argument(help="Java repository path, or a modernization goal")
+    ] = ".",
     repository: Annotated[Path, typer.Option("--repository", "-r")] = Path("."),
     target_java: Annotated[int | None, typer.Option("--target-java")] = None,
+    mode: Annotated[str | None, typer.Option("--mode")] = None,
     goal: Annotated[
         str | None,
         typer.Option("--goal", help="Modernization goal when the repository is positional"),
@@ -717,12 +720,38 @@ def plan(
 ) -> None:
     """Recommend applicable OpenRewrite recipes without executing them."""
 
+    if mode is not None and profile_name is not None:
+        raise typer.BadParameter("--mode conflicts with --profile")
+    if mode is not None and target_java is None:
+        raise typer.BadParameter("--mode requires --target-java")
     positional_repository = Path(subject).expanduser()
     if repository == Path(".") and positional_repository.is_dir():
         repository = positional_repository
         goal_description = goal or "Recommend applicable Java migration recipes"
     else:
         goal_description = goal or subject
+    if target_java is not None and profile_name is None:
+        from refinery_ai.modernization.resolver import resolve_intent
+        from refinery_ai.modernization.store import render_intent_summary
+
+        try:
+            mode_settings = Settings()
+            if catalog_verify_ssl is not None:
+                mode_settings.recipe_catalog_verify_ssl = catalog_verify_ssl
+            intent = resolve_intent(
+                repository,
+                target_java,
+                mode or "recommended",
+                mode_settings,
+                refresh_recipe_catalog=refresh_recipe_catalog,
+                goal=goal or (subject if not positional_repository.is_dir() else None),
+            )
+        except ValueError as error:
+            raise typer.BadParameter(str(error)) from error
+        typer.echo(render_intent_summary(intent))
+        if intent.blocked_reasons:
+            raise typer.Exit(code=1)
+        return
     settings = Settings()
     settings.recipe_catalog_verify_ssl = (
         settings.recipe_catalog_verify_ssl if catalog_verify_ssl is None else catalog_verify_ssl
@@ -926,6 +955,8 @@ def run(
     goal: Annotated[str | None, typer.Argument(help="Modernization goal")] = None,
     repository: Annotated[Path, typer.Option("--repository", "-r")] = Path("."),
     target_java: Annotated[int | None, typer.Option("--target-java")] = None,
+    mode: Annotated[str | None, typer.Option("--mode")] = None,
+    modernization_plan: Annotated[str | None, typer.Option("--modernization-plan")] = None,
     apply: Annotated[bool, typer.Option(help="Run approved commands and dry runs")] = False,
     profile_name: Annotated[
         str | None,
@@ -1000,6 +1031,48 @@ def run(
         codex_executable,
         claude_executable,
     )
+
+    if mode is not None and profile_name is not None:
+        raise typer.BadParameter("--mode conflicts with --profile")
+    if modernization_plan is not None and (profile_name is not None or goal is not None):
+        raise typer.BadParameter("--modernization-plan conflicts with --profile or a new goal")
+    if mode is not None and target_java is None and modernization_plan is None:
+        raise typer.BadParameter("--mode requires --target-java")
+    if modernization_plan is not None or (target_java is not None and profile_name is None):
+        if not apply:
+            raise typer.BadParameter("Mode runs change source code; pass --apply")
+        from refinery_ai.modernization.resolver import resolve_intent
+        from refinery_ai.modernization.runner import ModernizationRunner
+        from refinery_ai.modernization.store import IntentPlanStore
+
+        try:
+            if modernization_plan:
+                intent = IntentPlanStore(repository, settings.state_directory).load(
+                    modernization_plan
+                )
+                if (target_java is not None and target_java != intent.requested_jdk) or (
+                    mode is not None and mode != intent.mode
+                ):
+                    raise ValueError("Flags conflict with the saved modernization plan")
+            else:
+                assert target_java is not None
+                intent = resolve_intent(
+                    repository,
+                    target_java,
+                    mode or "recommended",
+                    settings,
+                    refresh_recipe_catalog=refresh_recipe_catalog,
+                    goal=goal,
+                )
+            mode_result = ModernizationRunner(repository, settings).run(
+                intent.plan_id, apply=apply, max_cycles=max_cycles
+            )
+        except (ValueError, FileNotFoundError) as error:
+            raise typer.BadParameter(str(error)) from error
+        typer.echo(mode_result.model_dump_json(indent=2))
+        if mode_result.status != "completed":
+            raise typer.Exit(code=1)
+        return
 
     if profile_name is not None:
         if not apply:

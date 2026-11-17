@@ -326,6 +326,20 @@ def migration_invocation(
     else:
         plan = runner.store.load(request.plan_id)
         store = None
+    if plan.modernization_plan_id is not None:
+        from refinery_ai.models import RecipePlan
+        from refinery_ai.modernization.store import IntentPlanStore, intent_digest
+        from refinery_ai.modernization.validation import validate_batch
+
+        destination = IntentPlanStore(runner.store.repository, runner.store.state_directory).load(
+            plan.modernization_plan_id
+        )
+        if (
+            destination.blocked_reasons
+            or intent_digest(destination) != plan.modernization_plan_digest
+        ):
+            raise ValueError("Modernization parent plan is blocked or changed")
+        validate_batch(RecipePlan(recommendations=plan.steps), destination)
     if request.expected_profile is not None and plan.profile != request.expected_profile:
         raise ValueError(
             f"Migration plan uses {plan.profile or 'no profile'}; "

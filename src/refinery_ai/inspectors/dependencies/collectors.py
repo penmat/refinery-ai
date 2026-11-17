@@ -117,13 +117,23 @@ class ResolvedDependencyCollector:
         return _unique(dependencies)
 
     def _walk_maven(
-        self, node: object, dependencies: list[ResolvedDependency], *, depth: int
+        self,
+        node: object,
+        dependencies: list[ResolvedDependency],
+        *,
+        depth: int,
+        module: str = ".",
+        dependency_path: tuple[str, ...] = (),
     ) -> None:
         if not isinstance(node, dict):
             return
         group = node.get("groupId")
         artifact = node.get("artifactId")
         version = node.get("version")
+        if depth == 0:
+            module = f"{group}:{artifact}"
+        elif all(isinstance(v, str) for v in (group, artifact, version)):
+            dependency_path = (*dependency_path, f"{group}:{artifact}:{version}")
         if (
             depth
             and isinstance(group, str)
@@ -142,12 +152,20 @@ class ResolvedDependencyCollector:
                     packaging=_string(node.get("type")),
                     classifier=_string(node.get("classifier")),
                     direct=depth == 1,
+                    module=module,
+                    dependency_path=dependency_path,
                 )
             )
         children = node.get("children", [])
         if isinstance(children, list):
             for child in children:
-                self._walk_maven(child, dependencies, depth=depth + 1)
+                self._walk_maven(
+                    child,
+                    dependencies,
+                    depth=depth + 1,
+                    module=module,
+                    dependency_path=dependency_path,
+                )
 
     def _gradle(self, repository: Path) -> list[ResolvedDependency]:
         executable = str(repository / "gradlew") if (repository / "gradlew").is_file() else "gradle"
@@ -231,9 +249,15 @@ def _string(value: Any) -> str | None:
 
 
 def _unique(dependencies: list[ResolvedDependency]) -> list[ResolvedDependency]:
-    by_coordinate: dict[tuple[str, str, str], ResolvedDependency] = {}
+    by_coordinate: dict[tuple[str, str, str, str, tuple[str, ...]], ResolvedDependency] = {}
     for dependency in dependencies:
-        key = dependency.group, dependency.artifact, dependency.version
+        key = (
+            dependency.group,
+            dependency.artifact,
+            dependency.version,
+            dependency.module,
+            dependency.dependency_path,
+        )
         previous = by_coordinate.get(key)
         if previous is None or dependency.direct:
             by_coordinate[key] = dependency

@@ -70,6 +70,63 @@ The factory owns migration control flow, verification, acceptance, and retry lim
   OSV by default for dependency-health evidence.
 - Stops at a review gate before applying OpenRewrite or AI-generated source changes.
 
+## Modernization modes
+
+For Maven projects, supply a target JDK to resolve a saved destination. Recommended
+is the default. Named profiles and goal-only planning continue to work as before.
+
+```bash
+refinery plan /path/to/project --target-java 21
+refinery plan /path/to/project --target-java 21 --mode minimal
+refinery plan /path/to/project --target-java 21 --mode full
+refinery run --repository /path/to/project --target-java 21 --apply
+refinery run --repository /path/to/project --modernization-plan PLAN_ID --apply
+```
+
+| Mode | Scope | Analysis |
+| --- | --- | --- |
+| Minimal | Requested JDK and necessary framework compatibility | Build declarations |
+| Recommended | Compatibility, security remediation, maintenance patches, selective source improvements | Resolved dependencies and OSV |
+| Full | Recommended scope plus opportunities grounded in broader analysis | Dependencies, OSV, SonarQube and CodeGraph |
+
+Planning saves immutable JSON and a readable Markdown summary under
+`.refinery/modernization-plans/`. These record concrete targets, rationale,
+evidence, analyzer coverage, ordered objectives, and completion criteria.
+Execution saves progress separately and resumes the same destination with
+`--modernization-plan`; it does not choose new targets on each cycle. Manual
+editing and interactive review are not supported yet. External source changes
+or changed execution settings require a newly generated plan.
+
+Security candidates come from Maven repository metadata and are checked against
+OSV, including fixes on newer major lines. Declared BOM/direct dependency owners
+can be upgraded when their candidate POM establishes a fixed transitive version;
+unknown inheritance or dependency mediation remains an explicit advisory.
+After migration, the resolved graph and advisories are checked again. Newly
+observed vulnerabilities are reported for a subsequent plan, without silently
+expanding the saved scope. Maintenance upgrades stay within the existing minor
+line. Version availability does not prove compatibility: isolated build/tests
+must pass before changes are published.
+
+The initial framework compatibility table is sourced and dated, with exact
+Spring Boot 2.7.18 and 3.5.16 destinations. It does not claim these are the latest
+releases. Framework migration pins the Maven parent/BOM and applies bounded
+Jakarta namespace changes atomically; additional API changes may require the
+existing repair backend. Broad recipes with floating dependency selectors are
+excluded. Source execution currently supports inspected `UseTextBlocks` and
+`UseListOf` recipes; unsupported recommendations remain advisory.
+
+A blocked required target prevents execution. Missing optional analyzers produce
+a plan with reduced coverage; losing an analyzer needed to prove an executable
+objective leaves the run incomplete. Completion requires every executable
+objective and the final build/tests to pass. Advisory items and coverage gaps
+remain visible even on completion. No analysis services are installed implicitly.
+
+New Gradle mode execution is blocked until its recipe artifact pinning and
+per-module JDK discovery are supported; existing Gradle/profile behavior is
+unchanged. Version metadata currently defaults to Maven Central; unavailable
+private-repository metadata is not guessed. Full mode does not automatically
+replace libraries or rewrite architecture.
+
 ## Choosing a repair backend
 
 Deterministic repairs run first. Model repair is disabled by default for `migrate`

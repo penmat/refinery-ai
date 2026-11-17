@@ -5,8 +5,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 from refinery_ai.context_graph.models import ContextGraphInfo
 
@@ -129,12 +136,23 @@ class RecipeRecommendation(BaseModel):
     execution_type: ExecutionType = ExecutionType.OPENREWRITE
     recipe: str
     recipe_artifact: str | None = None
+    objective_id: str | None = None
+    options: dict[str, str | int | bool] = Field(default_factory=dict)
     reason: str
     evidence: list[str] = Field(min_length=1)
     expected_benefit: str
     priority: RecipePriority
     depends_on: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0, le=1)
+
+    @model_serializer(mode="wrap")
+    def legacy_serialization(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        result: dict[str, Any] = handler(self)
+        if self.objective_id is None:
+            result.pop("objective_id", None)
+        if not self.options:
+            result.pop("options", None)
+        return result
 
 
 class RecipePlan(BaseModel):
@@ -145,7 +163,20 @@ class RecipePlan(BaseModel):
     recommendations: list[RecipeRecommendation] = Field(default_factory=list, max_length=13)
 
 
-class PersistedMigrationPlan(BaseModel):
+class ModernizationLink(BaseModel):
+    modernization_plan_id: str | None = None
+    modernization_plan_digest: str | None = None
+
+    @model_serializer(mode="wrap")
+    def legacy_serialization(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        result: dict[str, Any] = handler(self)
+        for name in ("modernization_plan_id", "modernization_plan_digest"):
+            if getattr(self, name) is None:
+                result.pop(name, None)
+        return result
+
+
+class PersistedMigrationPlan(ModernizationLink):
     """Planner-to-migration-agent handoff stored in the target repository."""
 
     plan_id: str
@@ -192,7 +223,7 @@ class StepResult(BaseModel):
     failure_artifacts: Path | None = None
 
 
-class MigrationRun(BaseModel):
+class MigrationRun(ModernizationLink):
     """Results from dispatching the steps in one persisted migration plan."""
 
     plan_id: str
@@ -207,7 +238,7 @@ class MigrationRun(BaseModel):
     steps: list[StepResult] = Field(default_factory=list)
 
 
-class RunReport(BaseModel):
+class RunReport(ModernizationLink):
     run_id: str
     profile: str | None = None
     status: RunStatus

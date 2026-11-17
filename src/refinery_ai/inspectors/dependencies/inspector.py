@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -82,6 +82,10 @@ class DependencyAnalyzer:
             return self._failure(AnalyzerStatus.TIMED_OUT, started, error, metadata)
         except DependencyAnalysisError as error:
             return self._failure(AnalyzerStatus.UNAVAILABLE, started, error, metadata)
+        metadata["resolvedDependencies"] = [asdict(item) for item in dependencies]
+        metadata["vulnerabilityEvidence"] = {
+            purl: [asdict(item) for item in items] for purl, items in vulnerabilities.items()
+        }
         findings = []
         by_purl = dict(zip(purls, dependencies, strict=True))
         latest_revision: str | None = None
@@ -89,6 +93,8 @@ class DependencyAnalyzer:
         for purl, items in vulnerabilities.items():
             dependency = by_purl[purl]
             for vulnerability in items:
+                if vulnerability.withdrawn:
+                    continue
                 vulnerable_purls.add(purl)
                 latest_revision = (
                     max(latest_revision or "", vulnerability.modified or "") or latest_revision

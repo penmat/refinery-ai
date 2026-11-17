@@ -1,0 +1,4 @@
+[
+  {"version":"2.7.18","java_min":8,"java_max":21,"recipe":"org.openrewrite.java.spring.boot2.UpgradeSpringBoot_2_7","source":"https://docs.spring.io/spring-boot/docs/2.7.18/reference/html/getting-started.html","verified":"2026-11-13"},
+  {"version":"3.5.16","java_min":17,"java_max":25,"recipe":"org.openrewrite.java.spring.boot3.UpgradeSpringBoot_3_5","source":"https://docs.spring.io/spring-boot/3.5/system-requirements.html","verified":"2026-11-13"}
+]

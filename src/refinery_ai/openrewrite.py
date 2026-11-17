@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
+
+import yaml  # type: ignore[import-untyped]
 
 from refinery_ai.build_tools import build_directory, maven_command_prefix
 from refinery_ai.models import BuildSystem, DiscoverySnapshot, VerificationResult
@@ -52,11 +55,40 @@ class OpenRewriteAdapter:
         timeout: int = 900,
         recipe_artifact: str | None = None,
         environment: dict[str, str] | None = None,
+        options: dict[str, str | int | bool] | None = None,
     ) -> VerificationResult:
         """Run a recipe in preview mode unless applying was explicitly requested."""
 
         if recipe not in self.allowed_recipes:
             raise ValueError(f"Recipe is not allowlisted: {recipe}")
+        if options:
+            from refinery_ai.modernization.transformations import recipe_entries, validate_options
+
+            validate_options(recipe, options)
+            with tempfile.TemporaryDirectory(prefix="refinery-recipe-") as directory:
+                config = Path(directory) / "rewrite.yml"
+                wrapper = "refinery.generated.DependencyUpgrade"
+                config.write_text(
+                    yaml.safe_dump(
+                        {
+                            "type": "specs.openrewrite.org/v1beta/recipe",
+                            "name": wrapper,
+                            "displayName": "Pinned dependency upgrade",
+                            "description": "Apply one saved dependency target.",
+                            "recipeList": recipe_entries(recipe, options),
+                        }
+                    )
+                )
+                command = self._command(
+                    snapshot, wrapper, apply=apply, recipe_artifact=recipe_artifact
+                )
+                command.append(f"-Drewrite.configLocation={config}")
+                return verify(
+                    self._working_directory(snapshot),
+                    command,
+                    timeout=timeout,
+                    environment=environment,
+                )
         command = self._command(snapshot, recipe, apply=apply, recipe_artifact=recipe_artifact)
         return verify(
             self._working_directory(snapshot),
