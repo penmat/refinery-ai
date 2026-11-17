@@ -168,7 +168,6 @@ def collect_evidence(repository: Path, policy: ModePolicy, settings: Settings) -
                         "Configured SonarQube image is unavailable; no image installed"
                     )
             assessment = AssessmentEngine(
-                inspectors=(),
                 settings=settings,
                 dependency_analysis_enabled=analyzer == "dependencies",
                 sonarqube_enabled=analyzer == "sonarqube",

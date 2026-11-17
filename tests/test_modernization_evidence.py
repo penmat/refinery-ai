@@ -1,3 +1,7 @@
+import subprocess
+
+import pytest
+
 from refinery_ai.config import Settings
 from refinery_ai.modernization.compatibility import CompatibilityProvider
 from refinery_ai.modernization.evidence import collect_evidence
@@ -112,3 +116,76 @@ def test_full_codegraph_honors_runtime_limits_and_state_path(tmp_path, monkeypat
     )
     assert next(a for a in observed.analysis if a.analyzer == "codegraph").status == "completed"
     assert (tmp_path / "state/context/context-graph.json").is_file()
+
+
+@pytest.mark.parametrize("mode", ["recommended", "full"])
+@pytest.mark.parametrize("status", ["completed", "partial"])
+def test_collection_retains_analyzer_evidence_through_real_assessment(
+    tmp_path, monkeypatch, stub_codegraph, mode, status
+):
+    from refinery_ai.assessment.models import AnalyzerResult, Diagnostic, ToolIdentity
+    from refinery_ai.inspectors.dependencies import DependencyInspector
+    from refinery_ai.inspectors.sonarqube import SonarQubeInspector
+
+    pom = "<project><properties><java.version>17</java.version></properties></project>"
+    (tmp_path / "pom.xml").write_text(pom)
+
+    # Replace external Maven/OSV and Docker analysis, keeping assessment and scoring real.
+    def analyze(analyzer, repository, snapshot):
+        return AnalyzerResult(
+            analyzer=analyzer.name,
+            status=status,
+            completeness=1 if status == "completed" else 0.5,
+            duration_seconds=0,
+            tool=ToolIdentity(
+                name=analyzer.name,
+                version="test",
+                configuration_hash="test",
+                metadata={
+                    "resolvedDependencies": [
+                        {"group_id": "example", "artifact_id": "library", "version": "1.0"}
+                    ],
+                    "vulnerabilityEvidence": {"example:library": [{"id": "TEST-1"}]},
+                }
+                if analyzer.name == "dependencies"
+                else {},
+            ),
+            diagnostics=[Diagnostic(message="Incomplete analysis")] if status == "partial" else [],
+        )
+
+    monkeypatch.setattr(DependencyInspector, "analyze", analyze)
+    monkeypatch.setattr(SonarQubeInspector, "analyze", analyze)
+    run = subprocess.run
+
+    def commands(command, **kwargs):
+        if command[:3] == ["docker", "image", "inspect"]:
+            return subprocess.CompletedProcess(command, 0)
+        return run(command, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", commands)
+    observed = collect_evidence(tmp_path, mode_policy(mode), Settings())
+
+    availability = {a.analyzer: a.status for a in observed.analysis}
+    assert availability == {
+        "dependencies": status,
+        "sonarqube": status if mode == "full" else "off",
+        "codegraph": "completed" if mode == "full" else "off",
+    }
+    assert observed.inventory == [
+        {"group_id": "example", "artifact_id": "library", "version": "1.0"}
+    ]
+    assert observed.vulnerabilities == {"example:library": [{"id": "TEST-1"}]}
+    assert {ref.id for ref in observed.references} == (
+        {"discovery", "dependencies", "sonarqube", "codegraph"}
+        if mode == "full"
+        else {"discovery", "dependencies"}
+    )
+    assert observed.limitations == (
+        [
+            f"{name}: Incomplete analysis"
+            for name in (["dependencies", "sonarqube"] if mode == "full" else ["dependencies"])
+        ]
+        if status == "partial"
+        else []
+    )
+    assert (tmp_path / "pom.xml").read_text() == pom
