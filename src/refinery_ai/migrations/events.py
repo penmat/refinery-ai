@@ -31,6 +31,7 @@ class MigrationEvent(BaseModel):
     phase: str
     lifecycle: Literal["started", "completed", "failed", "cancelled", "interrupted", "usage"]
     generation: int
+    apply: bool | None = None
     step: int | None = None
     recipe: str | None = None
     migration_name: str | None = None
@@ -145,6 +146,7 @@ class MigrationReporter:
             phase=phase,
             lifecycle=lifecycle,
             generation=state.generation,
+            apply=state.apply,
             step=state.index if recipe is not None else None,
             recipe=recipe,
             migration_name=(

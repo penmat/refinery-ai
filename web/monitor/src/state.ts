@@ -59,6 +59,27 @@ export interface Topology {
   nodes: { id: string; label: string }[];
   edges: { source: string; target: string; conditional: boolean }[];
 }
+export interface ExecutionHistoryEntry {
+  id: string;
+  node: string;
+  run_id: string;
+  parent_execution_id: string | null;
+  generation: number;
+  step: number;
+  recipe: string;
+  label: string;
+  attempt: number;
+  status:
+    | "active"
+    | "applied"
+    | "verified"
+    | "failed"
+    | "skipped"
+    | "cancelled"
+    | "interrupted"
+    | "previewed"
+    | "completed";
+}
 export interface Run {
   run_id: string;
   kind: "profile" | "migration";
@@ -70,6 +91,7 @@ export interface Run {
   last_seen: string | null;
   event_count: number;
   verified_recipes?: number;
+  execution_history?: ExecutionHistoryEntry[];
   migration_name?: string | null;
   recipe?: string | null;
   step_status?: string | null;

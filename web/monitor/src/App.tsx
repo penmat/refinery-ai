@@ -438,7 +438,14 @@ export default function App() {
                       selected={selectedNode}
                       onSelect={setSelectedNode}
                       childrenByNode={childrenByNode}
-                      migrationRuns={children}
+                      migrationRuns={
+                        current?.kind === "migration"
+                          ? [
+                              runs.find((run) => run.run_id === selectedRun) ??
+                                current,
+                            ]
+                          : children
+                      }
                     />
                   </div>
                   <div className="graph-footer">

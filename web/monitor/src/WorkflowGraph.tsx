@@ -1,4 +1,9 @@
 import { useMemo } from "react";
+import { NodeHistory } from "./NodeHistory";
+import {
+  nodeExecutionHistory,
+  type DisplayHistoryEntry,
+} from "./executionHistory";
 import {
   ReactFlow,
   Background,
@@ -15,7 +20,6 @@ import {
   Circle,
   AlertCircle,
   ArrowUpRight,
-  GitBranch,
   HelpCircle,
 } from "lucide-react";
 import {
@@ -39,19 +43,21 @@ function WorkflowNode({ data }: NodeProps) {
           : AlertCircle;
   return (
     <div
-      role="button"
-      tabIndex={0}
-      aria-label={`Inspect ${String(data.label)}`}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          event.currentTarget.click();
-        }
-      }}
-      className={`workflow-node ${status ? `status-${status.replaceAll(" ", "-")}` : ""} ${data.selected ? "is-selected" : ""}`}
+      className={`workflow-node ${data.showHistory ? "has-history" : ""} ${status ? `status-${status.replaceAll(" ", "-")}` : ""} ${data.selected ? "is-selected" : ""}`}
     >
       <Handle type="target" position={Position.Top} />
-      <div className="node-heading">
+      <div
+        className="node-heading"
+        role="button"
+        tabIndex={0}
+        aria-label={`Inspect ${String(data.label)}`}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            event.currentTarget.click();
+          }
+        }}
+      >
         <span className="node-icon">
           <Icon size={15} />
         </span>
@@ -71,7 +77,7 @@ function WorkflowNode({ data }: NodeProps) {
           )}
         </div>
       )}
-      {data.caption || data.migrationName ? (
+      {!data.showHistory && (data.caption || data.migrationName) ? (
         <div
           className="node-migration-context"
           title={String(data.migrationName ?? data.caption)}
@@ -81,6 +87,12 @@ function WorkflowNode({ data }: NodeProps) {
             <strong>{String(data.migrationName)}</strong>
           ) : null}
         </div>
+      ) : null}
+      {data.showHistory ? (
+        <NodeHistory
+          key={String(data.runId)}
+          entries={data.history as DisplayHistoryEntry[]}
+        />
       ) : null}
       <Handle type="source" position={Position.Bottom} />
     </div>
@@ -102,6 +114,8 @@ export function WorkflowGraph({
   childrenByNode: Record<string, number>;
   migrationRuns?: Run[];
 }) {
+  const showsHistory = (id: string) =>
+    topology.kind === "profile" ? id === "migrate" : id === "execute_recipe";
   const positions = useMemo(() => {
     const graph = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
     graph.setGraph({
@@ -112,14 +126,20 @@ export function WorkflowGraph({
       marginy: 20,
     });
     topology.nodes.forEach((n) =>
-      graph.setNode(n.id, { width: 260, height: 120 }),
+      graph.setNode(n.id, {
+        width: 260,
+        height: showsHistory(n.id) ? 360 : 120,
+      }),
     );
     topology.edges.forEach((e) => graph.setEdge(e.source, e.target));
     dagre.layout(graph);
     return Object.fromEntries(
       topology.nodes.map((n) => {
         const p = graph.node(n.id);
-        return [n.id, { x: p.x - 130, y: p.y - 60 }];
+        return [
+          n.id,
+          { x: p.x - 130, y: p.y - (showsHistory(n.id) ? 180 : 60) },
+        ];
       }),
     );
   }, [topology]);
@@ -128,6 +148,9 @@ export function WorkflowGraph({
     type: "workflow",
     position: positions[n.id],
     data: {
+      runId: state.runId,
+      showHistory: showsHistory(n.id),
+      history: nodeExecutionHistory(state, n.id, migrationRuns),
       label:
         n.id === "__start__"
           ? "Start"
